@@ -16,10 +16,6 @@ const WINDOW_HEIGHT: f32 = 640.0;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-// Signal colors for pass/fail indicators.
-const COLOR_OK: egui::Color32 = egui::Color32::from_rgb(80, 200, 120);
-const COLOR_FAIL: egui::Color32 = egui::Color32::from_rgb(220, 80, 80);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OperationMode {
     Read,
@@ -272,13 +268,36 @@ impl eframe::App for App {
             prompt_recovery_wrong_firmware(&mut self.state);
         }
 
+        // ── Top toolbar panel ──
+        let top_frame =
+            egui::Frame::central_panel(ctx.style().as_ref()).inner_margin(egui::Margin::same(6));
+        egui::TopBottomPanel::top("toolbar")
+            .frame(top_frame)
+            .show(ctx, |ui| {
+                ui.add_enabled_ui(!self.state.show_exit_confirmation, |ui| {
+                    show_toolbar(ui, &mut self.state);
+                });
+            });
+
+        // ── Bottom status bar panel ──
+        let bottom_frame = egui::Frame::central_panel(ctx.style().as_ref())
+            .inner_margin(egui::Margin::symmetric(6, 4));
+        egui::TopBottomPanel::bottom("status_bar")
+            .frame(bottom_frame)
+            .show(ctx, |ui| {
+                ui.add_enabled_ui(!self.state.show_exit_confirmation, |ui| {
+                    show_status_bar(ui, &self.state);
+                });
+            });
+
+        // ── Central content panel ──
         let panel_frame =
-            egui::Frame::central_panel(&ctx.style()).inner_margin(egui::Margin::same(6));
+            egui::Frame::central_panel(ctx.style().as_ref()).inner_margin(egui::Margin::same(6));
         egui::CentralPanel::default()
             .frame(panel_frame)
             .show(ctx, |ui| {
                 ui.add_enabled_ui(!self.state.show_exit_confirmation, |ui| {
-                    show_main_ui(ui, ctx, frame, &mut self.state, &self.worker_tx);
+                    show_main_content(ui, ctx, frame, &mut self.state, &self.worker_tx);
                 });
             });
 
@@ -302,7 +321,7 @@ impl eframe::App for App {
                                 L10nKey::LabelExitWarningMsg,
                                 self.state.resolved_lang,
                             ))
-                            .color(COLOR_FAIL)
+                            .color(ui.visuals().error_fg_color)
                             .strong(),
                         );
                         ui.add_space(8.0);
@@ -523,14 +542,7 @@ fn spawn_streaming_command(tx: &Sender<WorkerMsg>, cmd: Command, initial_status:
 
 // ── UI rendering ────────────────────────────────────────────────────
 
-fn show_main_ui(
-    ui: &mut egui::Ui,
-    ctx: &egui::Context,
-    frame: &mut eframe::Frame,
-    state: &mut AppState,
-    worker_tx: &Sender<WorkerMsg>,
-) {
-    // ── Toolbar ──
+fn show_toolbar(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         let refresh_text = t(L10nKey::TooltipRefresh, state.resolved_lang);
         let refresh_hint = if cfg!(target_os = "macos") {
@@ -551,7 +563,11 @@ fn show_main_ui(
         } else {
             format!("{settings_text} (Ctrl+,)")
         };
-        if ui.button("⚙").on_hover_text(settings_hint).clicked() {
+        if ui
+            .button("⚙")
+            .on_hover_text(settings_hint)
+            .clicked()
+        {
             state.show_settings = true;
         }
         if ui
@@ -568,6 +584,49 @@ fn show_main_ui(
             egui::widgets::global_theme_preference_buttons(ui);
         });
     });
+}
+
+fn show_status_bar(ui: &mut egui::Ui, state: &AppState) {
+    ui.horizontal(|ui| {
+        // Progress indicator
+        if state.busy {
+            let status = format!("{}…", state.status_message.trim_end_matches('…'));
+            if state.progress_indeterminate && state.progress <= 0.0 {
+                ui.add(
+                    egui::ProgressBar::new(0.0)
+                        .animate(true)
+                        .text(status),
+                );
+            } else {
+                ui.add(
+                    egui::ProgressBar::new(state.progress / 100.0)
+                        .show_percentage()
+                        .text(status),
+                );
+            }
+        } else {
+            ui.add(egui::ProgressBar::new(0.0).text("READY"));
+        }
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let drive_count = state.drives.len();
+            let status_text = if drive_count == 0 {
+                "No drives found".to_string()
+            } else {
+                format!("{drive_count} drive(s) found")
+            };
+            ui.small(&status_text);
+        });
+    });
+}
+
+fn show_main_content(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    frame: &mut eframe::Frame,
+    state: &mut AppState,
+    worker_tx: &Sender<WorkerMsg>,
+) {
 
     // ── Drive Properties ──
     section_heading(ui, t(L10nKey::TitleDriveProperties, state.resolved_lang));
@@ -609,8 +668,6 @@ fn show_main_ui(
 
     // ── Operation Options ──
     section_heading(ui, t(L10nKey::SectionOperation, state.resolved_lang));
-    ui.add_space(2.0);
-    ui.label(t(L10nKey::SectionOperation, state.resolved_lang));
     let prev = state.operation_mode;
     let mode_label = match state.operation_mode {
         OperationMode::Read => t(L10nKey::TabRead, state.resolved_lang),
@@ -634,7 +691,8 @@ fn show_main_ui(
             ui.selectable_value(
                 &mut state.operation_mode,
                 OperationMode::Recover,
-                egui::RichText::new(t(L10nKey::TabRecover, state.resolved_lang)).color(COLOR_FAIL),
+                egui::RichText::new(t(L10nKey::TabRecover, state.resolved_lang))
+                    .color(ui.visuals().error_fg_color),
             );
         });
 
@@ -654,7 +712,10 @@ fn show_main_ui(
             t(L10nKey::OptionEncrypted, state.resolved_lang),
         );
         if state.encrypted_write && state.include_boot_loader {
-            ui.colored_label(COLOR_FAIL, "⚠ Cannot combine encrypted + boot-loader");
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                "⚠ Cannot combine encrypted + boot-loader",
+            );
         }
     }
 
@@ -668,46 +729,11 @@ fn show_main_ui(
 
     ui.add_space(6.0);
 
-    // ── Status ──
-    section_heading(ui, "Status");
-    ui.add_space(2.0);
-    if state.busy {
-        let status = format!("{}…", state.status_message.trim_end_matches('…'));
-        if state.progress_indeterminate && state.progress <= 0.0 {
-            ui.add(egui::ProgressBar::new(0.0).animate(true).text(status));
-        } else {
-            ui.add(
-                egui::ProgressBar::new(state.progress / 100.0)
-                    .show_percentage()
-                    .text(status),
-            );
-        }
-    } else {
-        // Idle: draw an inset bar with no fill, matching egui ProgressBar height
-        let desired_size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
-        let (rect, _response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
-        let rounding = egui::CornerRadius::same(2);
-        ui.painter()
-            .rect_filled(rect, rounding, ui.visuals().extreme_bg_color);
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "READY",
-            egui::FontId::proportional(13.0),
-            ui.visuals().text_color(),
-        );
-    }
-
     // ── Action buttons ──
-    ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let btn_size = egui::vec2(90.0, 28.0);
             if ui
-                .add_sized(
-                    btn_size,
-                    egui::Button::new(t(L10nKey::BtnClose, state.resolved_lang)),
-                )
+                .button(t(L10nKey::BtnClose, state.resolved_lang))
                 .clicked()
             {
                 if state.busy {
@@ -732,10 +758,7 @@ fn show_main_ui(
 
             ui.add_enabled_ui(start_enabled, |ui| {
                 if ui
-                    .add_sized(
-                        btn_size,
-                        egui::Button::new(t(L10nKey::BtnStart, state.resolved_lang)),
-                    )
+                    .button(t(L10nKey::BtnStart, state.resolved_lang))
                     .on_disabled_hover_text(hover)
                     .clicked()
                 {
@@ -747,39 +770,25 @@ fn show_main_ui(
 
     // ── Log (fills remaining space) ──
     ui.add_space(2.0);
-    // Reserve space for the status bar at the very bottom
-    let log_height = ui.available_height() - 20.0;
-    let log_height = log_height.max(40.0);
-
     egui::ScrollArea::vertical()
         .stick_to_bottom(true)
-        .max_height(log_height)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             if state.log_text.is_empty() {
-                ui.label(egui::RichText::new("Ready.").weak().monospace().size(11.0));
+                ui.weak("Ready.");
             } else {
                 ui.label(egui::RichText::new(&state.log_text).monospace().size(11.0));
             }
         });
-
-    // ── Status bar (drive count) ──
-    let drive_count = state.drives.len();
-    let status_text = if drive_count == 0 {
-        "No drives found".to_string()
-    } else {
-        format!("{drive_count} drive(s) found")
-    };
-    ui.label(egui::RichText::new(status_text).small().weak());
 }
 
 fn status_indicator(ui: &mut egui::Ui, probed: bool, ok: bool) {
     if !probed {
-        ui.label(egui::RichText::new("…").weak());
+        ui.weak("…");
     } else if ok {
-        ui.colored_label(COLOR_OK, "✓");
+        ui.colored_label(ui.visuals().hyperlink_color, "✓");
     } else {
-        ui.colored_label(COLOR_FAIL, "✗");
+        ui.colored_label(ui.visuals().error_fg_color, "✗");
     }
 }
 
@@ -837,13 +846,10 @@ fn show_firmware_selector(ui: &mut egui::Ui, state: &mut AppState) {
     });
     if !state.firmware_path.is_empty() && state.firmware_data.is_none() {
         ui.add_space(2.0);
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("⚠ Failed to load or invalid firmware file")
-                    .color(egui::Color32::from_rgb(220, 50, 50))
-                    .small(),
-            );
-        });
+        ui.colored_label(
+            ui.visuals().error_fg_color,
+            "⚠ Failed to load or invalid firmware file",
+        );
     }
 }
 
@@ -931,9 +937,9 @@ fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState) {
             if let Some(report) = &state.flash_report {
                 ui.separator();
                 let color = if report.would_execute {
-                    COLOR_OK
+                    ui.visuals().hyperlink_color
                 } else {
-                    COLOR_FAIL
+                    ui.visuals().error_fg_color
                 };
                 ui.colored_label(color, &report.summary);
                 egui::Grid::new("checks")
@@ -959,7 +965,7 @@ fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState) {
                         .desired_width(available_width),
                 );
                 let token_color = if state.recovery_token.len() == 16 {
-                    COLOR_OK
+                    ui.visuals().hyperlink_color
                 } else {
                     ui.visuals().weak_text_color()
                 };
@@ -1020,12 +1026,11 @@ fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState) {
 }
 
 fn check_row(ui: &mut egui::Ui, label: &str, pass: bool) {
-    let (icon, color) = if pass {
-        ("✓", COLOR_OK)
+    if pass {
+        ui.colored_label(ui.visuals().hyperlink_color, "✓");
     } else {
-        ("✗", COLOR_FAIL)
-    };
-    ui.colored_label(color, icon);
+        ui.colored_label(ui.visuals().error_fg_color, "✗");
+    }
     ui.label(label);
     ui.end_row();
 }
@@ -1049,45 +1054,32 @@ fn show_about_window(ctx: &egui::Context, state: &mut AppState) {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.heading("SDF Flash GUI");
-                    ui.add_space(8.0);
+                    ui.add_space(4.0);
                     ui.label(t(L10nKey::AboutDescription, state.resolved_lang));
                     ui.label(t(L10nKey::AboutBuiltWith, state.resolved_lang));
                 });
-                ui.add_space(8.0);
                 ui.separator();
-                ui.add_space(8.0);
-                ui.vertical_centered(|ui| {
-                    ui.label(
-                        egui::RichText::new(t(
+                ui.group(|ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.strong(t(
                             L10nKey::AboutAcknowledgementsTitle,
                             state.resolved_lang,
-                        ))
-                        .strong(),
-                    );
-                    ui.label(
-                        egui::RichText::new(format!(
+                        ));
+                        ui.small(format!(
                             "MakeMKV {}",
                             t(L10nKey::AboutBackendAckText, state.resolved_lang)
-                        ))
-                        .small(),
-                    );
-                    ui.label(
-                        egui::RichText::new(format!(
+                        ));
+                        ui.small(format!(
                             "MartyMcNuts {}",
                             t(L10nKey::AboutCreatorAckText, state.resolved_lang)
-                        ))
-                        .small(),
-                    );
-                    ui.add_space(8.0);
-                    ui.hyperlink_to(
-                        egui::RichText::new("GitHub Repository").small(),
-                        "https://github.com/thedavidweng/sdf-flash-gui",
-                    );
-                    ui.label(
-                        egui::RichText::new(format!("Version {}", APP_VERSION))
-                            .small()
-                            .weak(),
-                    );
+                        ));
+                        ui.add_space(4.0);
+                        ui.hyperlink_to(
+                            "GitHub Repository",
+                            "https://github.com/thedavidweng/sdf-flash-gui",
+                        );
+                        ui.weak(format!("Version {}", APP_VERSION));
+                    });
                 });
             });
         },
@@ -1214,16 +1206,14 @@ fn show_settings_window(ctx: &egui::Context, state: &mut AppState, worker_tx: &S
                             // Tool path validation status
                             ui.label("");
                             if let Err(e) = validate_tool_path(&state.tool_path, state.backend) {
-                                ui.label(
-                                    egui::RichText::new(format!("⚠ {e}"))
-                                        .color(egui::Color32::from_rgb(220, 50, 50))
-                                        .small(),
+                                ui.colored_label(
+                                    ui.visuals().error_fg_color,
+                                    format!("⚠ {e}"),
                                 );
                             } else {
-                                ui.label(
-                                    egui::RichText::new("✓ Path is valid")
-                                        .color(egui::Color32::from_rgb(50, 180, 50))
-                                        .small(),
+                                ui.colored_label(
+                                    ui.visuals().hyperlink_color,
+                                    "✓ Path is valid",
                                 );
                             }
                             ui.end_row();
@@ -1255,19 +1245,17 @@ fn show_settings_window(ctx: &egui::Context, state: &mut AppState, worker_tx: &S
                             // sdf.bin validation status
                             ui.label("");
                             if let Err(e) = validate_sdf_path(&state.sdf_path) {
-                                ui.label(
-                                    egui::RichText::new(format!("⚠ {e}"))
-                                        .color(egui::Color32::from_rgb(220, 50, 50))
-                                        .small(),
+                                ui.colored_label(
+                                    ui.visuals().error_fg_color,
+                                    format!("⚠ {e}"),
                                 );
                             } else if !state.sdf_path.is_empty() {
-                                ui.label(
-                                    egui::RichText::new("✓ Path is valid")
-                                        .color(egui::Color32::from_rgb(50, 180, 50))
-                                        .small(),
+                                ui.colored_label(
+                                    ui.visuals().hyperlink_color,
+                                    "✓ Path is valid",
                                 );
                             } else {
-                                ui.label(egui::RichText::new("Optional").small().weak());
+                                ui.weak("Optional");
                             }
                             ui.end_row();
                         });
@@ -1841,20 +1829,10 @@ fn find_sdf_bin() -> String {
 }
 
 fn section_heading(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(text).strong().size(15.0));
-        ui.add_space(4.0);
-        let available_width = ui.available_width();
-        if available_width > 0.0 {
-            let (rect, _) =
-                ui.allocate_exact_size(egui::vec2(available_width, 1.0), egui::Sense::hover());
-            let line_color = ui.visuals().widgets.noninteractive.bg_stroke.color;
-            ui.painter()
-                .hline(rect.x_range(), rect.center().y, (1.0, line_color));
-        }
-    });
     ui.add_space(4.0);
+    ui.heading(text);
+    ui.separator();
+    ui.add_space(2.0);
 }
 
 impl From<&Drive> for manifest::DriveMatch {
