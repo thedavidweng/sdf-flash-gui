@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-package:
+  build-and-release:
     strategy:
       fail-fast: false
       matrix:
@@ -23,13 +23,15 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             binary_name: sdf-flash-gui
-            upx: false # UPX often breaks Apple Silicon code signing/execution
+            upx: false
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary_name: sdf-flash-gui.exe
             upx: true
 
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -66,48 +68,20 @@ jobs:
         run: upx --best --lzma target/${{ matrix.target }}/release/${{ matrix.binary_name }}
 
       - name: Package Application
-        # We pass the target explicitly so packager knows where to find the binary
         run: cargo packager --release --target ${{ matrix.target }}
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: packaged-${{ matrix.os }}
-          path: |
+          files: |
             dist/*.dmg
             dist/*.appimage
             dist/*.deb
             dist/*.msi
             dist/*.nsis
-          if-no-files-found: ignore
-
-  release:
-    needs: build-and-package
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: List release assets
-        run: find artifacts -type f | sort
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: artifacts/*
 
   update-homebrew-tap:
-    needs: release
+    needs: build-and-release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
 
@@ -120,18 +94,19 @@ jobs:
           path: homebrew-tap
 
       - name: Download release assets
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-          merge-multiple: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo thedavidweng/sdf-flash-gui \
+            --dir release-assets \
+            --pattern "*.dmg"
 
       - name: Compute DMG checksums and update cask
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
 
-          # Find DMG files
           INTEL_DMG=$(find release-assets -name "*x86_64*dmg" -o -name "*intel*dmg" -o -name "*x86*dmg" | head -1)
           ARM_DMG=$(find release-assets -name "*aarch64*dmg" -o -name "*arm*dmg" -o -name "*apple-silicon*dmg" | head -1)
 
@@ -151,8 +126,6 @@ jobs:
           echo "Intel DMG: $INTEL_FILENAME (sha256: $INTEL_SHA256)"
           echo "ARM DMG: $ARM_FILENAME (sha256: $ARM_SHA256)"
 
-          # Determine URL pattern from actual filenames
-          # The release tag is the base URL
           RELEASE_URL="https://github.com/thedavidweng/sdf-flash-gui/releases/download/${GITHUB_REF_NAME}"
 
           cat > homebrew-tap/Casks/sdf-flash-gui.rb <<RUBY
