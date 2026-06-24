@@ -2,12 +2,12 @@
   <img src="assets/icon.png" width="128" alt="SDF Flash GUI icon">
 </p>
 
-# SDF Flash GUI
+<h1 align="center">SDF Flash GUI</h1>
 
-[![CI](https://github.com/thedavidweng/sdf-flash-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/thedavidweng/sdf-flash-gui/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/thedavidweng/sdf-flash-gui/branch/main/graph/badge.svg)](https://codecov.io/gh/thedavidweng/sdf-flash-gui)
-
----
+<p align="center">
+  <a href="https://github.com/thedavidweng/sdf-flash-gui/actions/workflows/ci.yml"><img src="https://github.com/thedavidweng/sdf-flash-gui/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/thedavidweng/sdf-flash-gui"><img src="https://codecov.io/gh/thedavidweng/sdf-flash-gui/branch/main/graph/badge.svg" alt="codecov"></a>
+</p>
 
 Cross-platform GUI for optical drive firmware dump/flash. Inspired by the Windows-only `SDFtool Flasher.exe`
 
