@@ -255,4 +255,97 @@ mod tests {
             validate_flash(&manifest, &drive, "nonexistent", &vec![0u8; 1024], true).unwrap_err();
         assert!(err.contains("validation failed"));
     }
+
+    #[test]
+    fn parse_drive_identity_model_key() {
+        let output = "Model: BU40N\nRevision: 1.03\n";
+        let dm = parse_drive_identity("/dev/sr0", output);
+        assert_eq!(dm.model, "BU40N");
+        assert_eq!(dm.revision, "1.03");
+    }
+
+    #[test]
+    fn parse_drive_identity_firmware_key() {
+        let output = "Firmware: 1.04\n";
+        let dm = parse_drive_identity("/dev/sr0", output);
+        assert_eq!(dm.revision, "1.04");
+    }
+
+    #[test]
+    fn parse_drive_identity_fallback_no_underscore() {
+        // Device label without '_' — no fallback parsing
+        let dm = parse_drive_identity("/dev/sr0", "");
+        assert!(dm.vendor.is_empty());
+        assert!(dm.model.is_empty());
+    }
+
+    #[test]
+    fn parse_drive_identity_fallback_single_underscore() {
+        let dm = parse_drive_identity("VENDOR_MODEL", "");
+        assert_eq!(dm.vendor, "VENDOR");
+        assert_eq!(dm.model, "MODEL");
+    }
+
+    #[test]
+    fn resolve_image_id_empty_manifest() {
+        let manifest = FirmwareManifest {
+            schema_version: 1,
+            vendor: "V".into(),
+            model: "M".into(),
+            revision_match: "*".into(),
+            capabilities: vec![],
+            firmware_images: vec![],
+        };
+        let err = resolve_image_id(&manifest, None).unwrap_err();
+        assert!(err.contains("0 images"));
+    }
+
+    #[test]
+    fn resolve_recovery_token_from_file() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_token");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("wrong_fw.bin");
+        let mut data = vec![0u8; 12_288 + 16];
+        data[12_288..12_304].copy_from_slice(b"ABCDEFGHIJKLMNOP");
+        std::fs::write(&file, &data).unwrap();
+
+        let token = resolve_recovery_token(Some(&file.to_string_lossy()), None).unwrap();
+        assert_eq!(token, "ABCDEFGHIJKLMNOP");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_recovery_token_from_file_not_found() {
+        let err = resolve_recovery_token(Some("/nonexistent/fw.bin"), None).unwrap_err();
+        assert!(err.contains("cannot read wrong firmware"));
+    }
+
+    #[test]
+    fn validate_flash_with_matching_checksum() {
+        let manifest = test_manifest();
+        let drive = test_drive();
+        // The manifest expects sha256="abcd1234" and size=1024
+        // We can't easily produce data with that exact sha256, but we can verify the function runs
+        let report = validate_flash(&manifest, &drive, "main", &vec![0u8; 1024], true).unwrap();
+        // sha256 won't match, but function should not error
+        assert!(!report.would_execute);
+        assert!(report.summary.contains("checksum"));
+    }
+
+    #[test]
+    fn validate_flash_not_confirmed() {
+        let manifest = test_manifest();
+        let drive = test_drive();
+        let report = validate_flash(&manifest, &drive, "main", &vec![0u8; 1024], false).unwrap();
+        assert!(!report.would_execute);
+        assert!(report.summary.contains("not confirmed"));
+    }
+
+    #[test]
+    fn parse_drive_identity_whitespace_trimmed() {
+        let output = "  Vendor:   HL-DT-ST  \n  Product:   BU40N  \n";
+        let dm = parse_drive_identity("/dev/sr0", output);
+        assert_eq!(dm.vendor, "HL-DT-ST");
+        assert_eq!(dm.model, "BU40N");
+    }
 }

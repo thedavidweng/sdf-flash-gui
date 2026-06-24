@@ -132,4 +132,106 @@ mod tests {
         let manifest = parse_manifest(json.as_bytes()).unwrap();
         assert_eq!(manifest.capabilities, vec!["enc", "boot"]);
     }
+
+    #[test]
+    fn glob_match_empty_pattern() {
+        assert!(glob_match("", ""));
+        assert!(!glob_match("", "a"));
+    }
+
+    #[test]
+    fn glob_match_prefix_no_match() {
+        assert!(!glob_match("BU*", "LG40N"));
+    }
+
+    #[test]
+    fn glob_match_suffix_no_match() {
+        assert!(!glob_match("*N", "BU40X"));
+    }
+
+    #[test]
+    fn glob_match_single_char_prefix() {
+        assert!(glob_match("1*", "1.03"));
+        assert!(!glob_match("1*", "2.03"));
+    }
+
+    #[test]
+    fn glob_match_case_sensitive_prefix() {
+        // Prefix matching is case-sensitive
+        assert!(glob_match("BU*", "BU40N"));
+        assert!(!glob_match("bu*", "BU40N"));
+    }
+
+    #[test]
+    fn glob_match_case_sensitive_suffix() {
+        // Suffix matching is case-sensitive
+        assert!(glob_match("*N", "BU40N"));
+        assert!(!glob_match("*n", "BU40N"));
+    }
+
+    #[test]
+    fn parse_manifest_signature_present() {
+        let json = r#"{
+            "schema_version": 1,
+            "vendor": "HL-DT-ST",
+            "model": "BU40N",
+            "revision_match": "*",
+            "firmware_images": [{
+                "image_id": "main",
+                "filename": "fw.bin",
+                "target_version": "1.04",
+                "size": 1024,
+                "sha256": "abcd",
+                "signature_present": true
+            }]
+        }"#;
+        let manifest = parse_manifest(json.as_bytes()).unwrap();
+        assert!(manifest.firmware_images[0].signature_present);
+    }
+
+    #[test]
+    fn parse_manifest_empty_images() {
+        let json = r#"{
+            "schema_version": 1,
+            "vendor": "V",
+            "model": "M",
+            "revision_match": "*",
+            "firmware_images": []
+        }"#;
+        let manifest = parse_manifest(json.as_bytes()).unwrap();
+        assert!(manifest.firmware_images.is_empty());
+    }
+
+    #[test]
+    fn parse_manifest_multiple_images() {
+        let json = r#"{
+            "schema_version": 1,
+            "vendor": "V",
+            "model": "M",
+            "revision_match": "*",
+            "firmware_images": [
+                {"image_id": "a", "filename": "a.bin", "target_version": "1.0", "size": 100, "sha256": "aa"},
+                {"image_id": "b", "filename": "b.bin", "target_version": "2.0", "size": 200, "sha256": "bb"}
+            ]
+        }"#;
+        let manifest = parse_manifest(json.as_bytes()).unwrap();
+        assert_eq!(manifest.firmware_images.len(), 2);
+        assert_eq!(manifest.firmware_images[0].image_id, "a");
+        assert_eq!(manifest.firmware_images[1].image_id, "b");
+    }
+
+    #[test]
+    fn drive_match_from_drive() {
+        use crate::drive::Drive;
+        let drive = Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        };
+        let dm: DriveMatch = (&drive).into();
+        assert_eq!(dm.vendor, "HL-DT-ST");
+        assert_eq!(dm.model, "BU40N");
+        assert_eq!(dm.revision, "1.03");
+    }
 }

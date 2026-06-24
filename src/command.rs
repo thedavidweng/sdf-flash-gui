@@ -542,4 +542,144 @@ mod tests {
         assert!(!safety.encrypted_firmware); // mode M means not encrypted
         assert_eq!(safety.mtk_mode, Some('M'));
     }
+
+    #[test]
+    fn classify_encrypted_by_date_prefix() {
+        let output = "Drive platform: MT1959\ninternal: mtk:19:59: H\n";
+        let safety = classify_drive_safety("BU40N_21200507", output);
+        assert!(safety.mt1959);
+        assert!(safety.encrypted_firmware);
+        assert_eq!(safety.firmware_date_prefix, Some(2120));
+        assert_eq!(safety.mtk_mode, Some('H'));
+    }
+
+    #[test]
+    fn classify_not_encrypted_old_date() {
+        let output = "Drive platform: MT1959\ninternal: mtk:19:59: H\n";
+        let safety = classify_drive_safety("BU40N_20100101", output);
+        assert!(safety.mt1959);
+        assert!(!safety.encrypted_firmware); // prefix < 2120
+        assert_eq!(safety.firmware_date_prefix, Some(2010));
+    }
+
+    #[test]
+    fn classify_date_prefix_from_info_output() {
+        let output = "Drive platform: MT1959\nsome line 21210101\ninternal: mtk:19:59: H\n";
+        let safety = classify_drive_safety("BU40N", output);
+        assert_eq!(safety.firmware_date_prefix, Some(2121));
+        assert!(safety.encrypted_firmware);
+    }
+
+    #[test]
+    fn extract_mtk_mode_various() {
+        assert_eq!(extract_mtk_mode("mtk:19:59: H"), Some('H'));
+        assert_eq!(extract_mtk_mode("mtk:19:59: M"), Some('M'));
+        assert_eq!(extract_mtk_mode("mtk:19:59: "), None);
+        assert_eq!(extract_mtk_mode("no colon here"), None);
+    }
+
+    #[test]
+    fn required_flash_confirmation_trims() {
+        assert_eq!(required_flash_confirmation("  H:  "), "FLASH H:");
+    }
+
+    #[test]
+    fn plan_command_trims_whitespace() {
+        let req = PlanRequest {
+            backend: Backend::SdfTool,
+            tool_path: "  sdftool64.exe  ".into(),
+            drive: "  H:  ".into(),
+            drive_is_mt1959: true,
+            confirmation: "FLASH H:".into(),
+            operation: Operation::Read {
+                output_dir: "  /tmp/out  ".into(),
+            },
+        };
+        let plan = plan_command(req).unwrap();
+        assert_eq!(plan.command.program, "sdftool64.exe");
+        assert_eq!(plan.command.args[1], "H:");
+        assert_eq!(plan.command.args[5], "/tmp/out");
+    }
+
+    #[test]
+    fn extract_recovery_boot_token_invalid_utf8() {
+        let mut firmware = vec![0u8; 12_288 + 16];
+        // Fill with invalid UTF-8
+        firmware[12_288..12_304].copy_from_slice(&[0xFF; 16]);
+        assert!(matches!(
+            extract_recovery_boot_token(&firmware),
+            Err(PlanError::InvalidRecoveryBootToken)
+        ));
+    }
+
+    #[test]
+    fn extract_recovery_boot_token_non_printable() {
+        let mut firmware = vec![0u8; 12_288 + 16];
+        // 16 bytes but includes space (not ascii_graphic)
+        firmware[12_288..12_304].copy_from_slice(b"ABCDEFGH IJKLMNO");
+        assert!(matches!(
+            extract_recovery_boot_token(&firmware),
+            Err(PlanError::InvalidRecoveryBootToken)
+        ));
+    }
+
+    #[test]
+    fn plan_drive_info_makemkvcon() {
+        let cmd = plan_drive_info(Backend::MakeMkvCon, "makemkvcon", "/dev/sr0");
+        assert_eq!(cmd.program, "makemkvcon");
+        assert_eq!(cmd.args, ["f", "-d", "/dev/sr0", "--info"]);
+    }
+
+    #[test]
+    fn plan_recover_empty_firmware() {
+        let result = plan_command(base_request(Operation::Recover {
+            firmware_path: String::new(),
+            recovery_boot_token: "ABCDEFGHIJKLMNOP".into(),
+        }));
+        assert_eq!(result, Err(PlanError::MissingFirmware));
+    }
+
+    #[test]
+    fn plan_recover_empty_token() {
+        let result = plan_command(base_request(Operation::Recover {
+            firmware_path: "fw.bin".into(),
+            recovery_boot_token: String::new(),
+        }));
+        assert_eq!(result, Err(PlanError::MissingRecoveryBootToken));
+    }
+
+    #[test]
+    fn extract_recovery_boot_token_non_ascii_digit() {
+        let mut firmware = vec![0u8; 12_288 + 16];
+        // All ASCII graphic but includes digit — valid
+        firmware[12_288..12_304].copy_from_slice(b"ABCDEFGH12345678");
+        let token = extract_recovery_boot_token(&firmware).unwrap();
+        assert_eq!(token, "ABCDEFGH12345678");
+    }
+
+    #[test]
+    fn classify_mtk_mode_whitespace() {
+        let output = "Drive platform: MT1959\ninternal: mtk:19:59:   X\n";
+        let safety = classify_drive_safety("BU40N", output);
+        assert_eq!(safety.mtk_mode, Some('X'));
+    }
+
+    #[test]
+    fn classify_no_mtk_line() {
+        let output = "Drive platform: MT1959\nno mtk line here\n";
+        let safety = classify_drive_safety("BU40N", output);
+        assert!(safety.mt1959);
+        assert!(safety.mtk_mode.is_none());
+        assert!(!safety.encrypted_firmware); // no mtk_mode, so can't be encrypted
+    }
+
+    #[test]
+    fn extract_firmware_date_prefix_no_digits() {
+        assert_eq!(extract_firmware_date_prefix("BU40N_no_date"), None);
+    }
+
+    #[test]
+    fn extract_firmware_date_prefix_short_segment() {
+        assert_eq!(extract_firmware_date_prefix("BU40N_12"), None);
+    }
 }

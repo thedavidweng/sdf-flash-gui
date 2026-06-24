@@ -281,3 +281,73 @@ fn parse_drive_list(output: &str) -> Vec<Drive> {
     }
     drives
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_drive_list_linux_format() {
+        let output = "0:/dev/sr0 HL-DT-ST BD-RE BU40N 1.03\n";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/dev/sr0");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BD-RE");
+        assert_eq!(drives[0].revision, "BU40N");
+    }
+
+    #[test]
+    fn parse_drive_list_windows_format() {
+        // Windows format with leading digit index
+        let output = "0:D: HL-DT-ST BD-RE BU40N 1.03\n";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "D:");
+    }
+
+    #[test]
+    fn parse_drive_list_empty() {
+        let drives = parse_drive_list("");
+        assert!(drives.is_empty());
+    }
+
+    #[test]
+    fn parse_drive_list_no_drives() {
+        let output = "No drives found\n";
+        let drives = parse_drive_list(output);
+        assert!(drives.is_empty());
+    }
+
+    #[test]
+    fn parse_drive_list_multiple() {
+        let output = "0:/dev/sr0 VENDOR1 PRODUCT1 REV1\n1:/dev/sr1 VENDOR2 PRODUCT2 REV2\n";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 2);
+        assert_eq!(drives[0].device, "/dev/sr0");
+        assert_eq!(drives[1].device, "/dev/sr1");
+    }
+
+    #[test]
+    fn parse_drive_list_with_colon_prefix() {
+        let output = ":/dev/sr0 VENDOR PRODUCT REV\n";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+    }
+
+    #[test]
+    fn parse_drive_list_whitespace_only() {
+        let output = "   \n  \n  ";
+        let drives = parse_drive_list(output);
+        assert!(drives.is_empty());
+    }
+
+    #[test]
+    fn parse_drive_list_partial_info() {
+        let output = "0:/dev/sr0\n";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/dev/sr0");
+        assert!(drives[0].vendor.is_empty());
+    }
+}
