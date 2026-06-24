@@ -1035,10 +1035,7 @@ fn show_about_window(ctx: &egui::Context, state: &mut AppState) {
                 ui.separator();
                 ui.group(|ui| {
                     ui.vertical_centered(|ui| {
-                        ui.strong(t(
-                            L10nKey::AboutAcknowledgementsTitle,
-                            state.resolved_lang,
-                        ));
+                        ui.strong(t(L10nKey::AboutAcknowledgementsTitle, state.resolved_lang));
                         ui.small(format!(
                             "MakeMKV {}",
                             t(L10nKey::AboutBackendAckText, state.resolved_lang)
@@ -1180,15 +1177,9 @@ fn show_settings_window(ctx: &egui::Context, state: &mut AppState, worker_tx: &S
                             // Tool path validation status
                             ui.label("");
                             if let Err(e) = validate_tool_path(&state.tool_path, state.backend) {
-                                ui.colored_label(
-                                    ui.visuals().error_fg_color,
-                                    format!("⚠ {e}"),
-                                );
+                                ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {e}"));
                             } else {
-                                ui.colored_label(
-                                    ui.visuals().hyperlink_color,
-                                    "✓ Path is valid",
-                                );
+                                ui.colored_label(ui.visuals().hyperlink_color, "✓ Path is valid");
                             }
                             ui.end_row();
 
@@ -1219,15 +1210,9 @@ fn show_settings_window(ctx: &egui::Context, state: &mut AppState, worker_tx: &S
                             // sdf.bin validation status
                             ui.label("");
                             if let Err(e) = validate_sdf_path(&state.sdf_path) {
-                                ui.colored_label(
-                                    ui.visuals().error_fg_color,
-                                    format!("⚠ {e}"),
-                                );
+                                ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {e}"));
                             } else if !state.sdf_path.is_empty() {
-                                ui.colored_label(
-                                    ui.visuals().hyperlink_color,
-                                    "✓ Path is valid",
-                                );
+                                ui.colored_label(ui.visuals().hyperlink_color, "✓ Path is valid");
                             } else {
                                 ui.weak("Optional");
                             }
