@@ -287,14 +287,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_drive_list_linux_format() {
+    fn parse_drive_list_four_fields() {
+        // 4-field format: device vendor product revision
+        let output = "0:/dev/sr0 HL-DT-ST BU40N 1.03\n";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/dev/sr0");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BU40N");
+        assert_eq!(drives[0].revision, "1.03");
+    }
+
+    #[test]
+    fn parse_drive_list_five_fields_drops_last() {
+        // 5-field input: device vendor product model revision
+        // NOTE: parse_drive_list only reads parts[0..3], so the 5th field
+        // (firmware revision "1.03") is silently dropped and parts[3] (model
+        // "BU40N") ends up in Drive::revision. This is a known limitation.
         let output = "0:/dev/sr0 HL-DT-ST BD-RE BU40N 1.03\n";
         let drives = parse_drive_list(output);
         assert_eq!(drives.len(), 1);
         assert_eq!(drives[0].device, "/dev/sr0");
         assert_eq!(drives[0].vendor, "HL-DT-ST");
         assert_eq!(drives[0].product, "BD-RE");
-        assert_eq!(drives[0].revision, "BU40N");
+        assert_eq!(drives[0].revision, "BU40N"); // model, not firmware revision
     }
 
     #[test]

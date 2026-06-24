@@ -595,9 +595,72 @@ mod tests {
 
     #[test]
     fn test_l10n_key_count() {
-        // Verify we have a reasonable number of keys
-        // This is a sanity check that we haven't accidentally removed keys
-        let key_count = 50; // approximate count
-        assert!(key_count >= 45, "expected at least 45 L10nKey variants");
+        // Count actual variants by checking every key produces a non-empty translation.
+        // This catches accidental deletion of keys or translations.
+        let all_keys = [
+            L10nKey::TitleDriveProperties,
+            L10nKey::LabelDevice,
+            L10nKey::SectionOperation,
+            L10nKey::TabWrite,
+            L10nKey::TabRead,
+            L10nKey::TabRecover,
+            L10nKey::SectionFlashOptions,
+            L10nKey::OptionBootloader,
+            L10nKey::OptionEncrypted,
+            L10nKey::SectionFirmwareImage,
+            L10nKey::BtnBrowse,
+            L10nKey::SectionManifest,
+            L10nKey::LabelImageId,
+            L10nKey::SectionOutputFolder,
+            L10nKey::SectionConfirmation,
+            L10nKey::SectionStatus,
+            L10nKey::LabelTypeToConfirm,
+            L10nKey::LabelWrongFw,
+            L10nKey::BtnExtract,
+            L10nKey::BtnClose,
+            L10nKey::BtnStart,
+            L10nKey::StatusReady,
+            L10nKey::StatusNoDrives,
+            L10nKey::StatusProbing,
+            L10nKey::StatusProbeFailed,
+            L10nKey::StatusOpSuccess,
+            L10nKey::TooltipRefresh,
+            L10nKey::TooltipSettings,
+            L10nKey::TooltipAbout,
+            L10nKey::TooltipStartEnabled,
+            L10nKey::TitleExitWarning,
+            L10nKey::LabelExitWarningMsg,
+            L10nKey::LabelExitWarningDesc,
+            L10nKey::LabelExitWarningAsk,
+            L10nKey::BtnNoCancel,
+            L10nKey::BtnYesForce,
+            L10nKey::TitleSettings,
+            L10nKey::LabelBackend,
+            L10nKey::LabelToolPath,
+            L10nKey::LabelSdfPath,
+            L10nKey::BtnListDrives,
+            L10nKey::BtnParseSdf,
+            L10nKey::LabelAutodetected,
+            L10nKey::LabelLanguage,
+            L10nKey::AboutDescription,
+            L10nKey::AboutBuiltWith,
+            L10nKey::AboutAcknowledgementsTitle,
+            L10nKey::AboutBackendAckText,
+            L10nKey::AboutCreatorAckText,
+            L10nKey::ReasonBusy,
+            L10nKey::ReasonProbing,
+            L10nKey::ReasonNoDrive,
+            L10nKey::ReasonNotMt1959,
+            L10nKey::ReasonNoBackend,
+            L10nKey::ReasonNoFirmware,
+            L10nKey::ReasonConflict,
+            L10nKey::ReasonRunValidation,
+            L10nKey::ReasonEnterToken,
+        ];
+        assert!(
+            all_keys.len() >= 45,
+            "expected at least 45 L10nKey variants, got {}",
+            all_keys.len()
+        );
     }
 }

@@ -649,9 +649,9 @@ mod tests {
     }
 
     #[test]
-    fn extract_recovery_boot_token_non_ascii_digit() {
+    fn extract_recovery_boot_token_with_ascii_digits() {
         let mut firmware = vec![0u8; 12_288 + 16];
-        // All ASCII graphic but includes digit — valid
+        // All ASCII graphic including digits — valid
         firmware[12_288..12_304].copy_from_slice(b"ABCDEFGH12345678");
         let token = extract_recovery_boot_token(&firmware).unwrap();
         assert_eq!(token, "ABCDEFGH12345678");

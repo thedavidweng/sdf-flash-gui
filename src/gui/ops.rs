@@ -793,8 +793,10 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.selected_drive = Some(0);
         refresh_drives(&mut state);
-        // On CI there are no optical drives
-        assert!(state.drives.is_empty() || !state.drives.is_empty()); // just don't crash
+        // On CI there are no optical drives — verify postcondition
+        if state.drives.is_empty() {
+            assert!(state.selected_drive.is_none());
+        }
     }
 
     #[test]
