@@ -10,7 +10,6 @@ mod orchestration;
 mod process;
 mod sdf;
 
-
 fn main() {
     env_logger::init();
 
@@ -288,11 +287,10 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
     // Probe drive and determine safety
     let (backend, path) = find_backend();
     let info_cmd = command::plan_drive_info(backend, &path, device);
-    let info_out =
-        process::run_command(&info_cmd.program, &info_cmd.args).unwrap_or_else(|e| {
-            eprintln!("ERROR: cannot probe drive: {e}");
-            std::process::exit(1);
-        });
+    let info_out = process::run_command(&info_cmd.program, &info_cmd.args).unwrap_or_else(|e| {
+        eprintln!("ERROR: cannot probe drive: {e}");
+        std::process::exit(1);
+    });
 
     let safety = command::classify_drive_safety(device, &info_out.combined());
     if !safety.mt1959 {
@@ -321,13 +319,14 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
         };
 
         // Resolve image ID
-        let image_id = match orchestration::resolve_image_id(&manifest, args.image_id.map(String::as_str)) {
-            Ok(id) => id,
-            Err(e) => {
-                eprintln!("ERROR: {e}");
-                std::process::exit(1);
-            }
-        };
+        let image_id =
+            match orchestration::resolve_image_id(&manifest, args.image_id.map(String::as_str)) {
+                Ok(id) => id,
+                Err(e) => {
+                    eprintln!("ERROR: {e}");
+                    std::process::exit(1);
+                }
+            };
 
         match orchestration::validate_flash(
             &manifest,

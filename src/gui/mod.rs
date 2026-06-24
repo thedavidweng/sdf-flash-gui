@@ -480,11 +480,7 @@ fn show_firmware_selector(ui: &mut egui::Ui, state: &mut AppState) {
                         .width(ui.available_width())
                         .show_ui(ui, |ui| {
                             for (name, path) in &state.firmware_picker_items {
-                                ui.selectable_value(
-                                    &mut state.firmware_path,
-                                    path.clone(),
-                                    name,
-                                );
+                                ui.selectable_value(&mut state.firmware_path, path.clone(), name);
                             }
                         });
                     if state.firmware_path != path_before {

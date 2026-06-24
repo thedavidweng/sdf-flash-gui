@@ -221,8 +221,7 @@ mod tests {
 
     #[test]
     fn resolve_recovery_token_explicit() {
-        let token =
-            resolve_recovery_token(None, Some("ABCDEFGHIJKLMNOP")).unwrap();
+        let token = resolve_recovery_token(None, Some("ABCDEFGHIJKLMNOP")).unwrap();
         assert_eq!(token, "ABCDEFGHIJKLMNOP");
     }
 
@@ -236,14 +235,7 @@ mod tests {
     fn validate_flash_success() {
         let manifest = test_manifest();
         let drive = test_drive();
-        let report = validate_flash(
-            &manifest,
-            &drive,
-            "main",
-            &vec![0u8; 1024],
-            true,
-        )
-        .unwrap();
+        let report = validate_flash(&manifest, &drive, "main", &vec![0u8; 1024], true).unwrap();
         // sha256 won't match, so would_execute is false — but it should not error
         assert!(!report.would_execute); // checksum mismatch
     }
@@ -252,14 +244,8 @@ mod tests {
     fn validate_flash_image_not_found() {
         let manifest = test_manifest();
         let drive = test_drive();
-        let err = validate_flash(
-            &manifest,
-            &drive,
-            "nonexistent",
-            &vec![0u8; 1024],
-            true,
-        )
-        .unwrap_err();
+        let err =
+            validate_flash(&manifest, &drive, "nonexistent", &vec![0u8; 1024], true).unwrap_err();
         assert!(err.contains("validation failed"));
     }
 }

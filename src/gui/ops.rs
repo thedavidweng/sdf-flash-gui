@@ -125,8 +125,7 @@ pub fn validate_flash(state: &mut AppState) {
     };
 
     let drive_match: manifest::DriveMatch = drive.into();
-    let user_confirmed =
-        state.confirmation == command::required_flash_confirmation(&drive.device);
+    let user_confirmed = state.confirmation == command::required_flash_confirmation(&drive.device);
 
     match orchestration::validate_flash(
         manifest,
@@ -140,7 +139,7 @@ pub fn validate_flash(state: &mut AppState) {
             state.flash_report = Some(report);
         }
         Err(e) => {
-            state.log(&format!("{e}"));
+            state.log(&e);
             state.flash_report = None;
         }
     }
