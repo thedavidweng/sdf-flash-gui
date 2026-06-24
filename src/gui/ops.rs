@@ -977,13 +977,14 @@ mod tests {
 
     #[test]
     fn can_start_read_invalid_sdf_path() {
-        let mut state = AppState::new_no_backend();
+        let (mut state, temp_dir) = state_with_valid_paths("invaliddf");
         state.drives.push(test_drive());
         state.selected_drive = Some(0);
         state.drive_mt1959 = true;
         state.operation_mode = OperationMode::Read;
         state.sdf_path = "/nonexistent/file.txt".into();
         assert!(!can_start(&state));
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[test]
