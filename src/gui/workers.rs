@@ -105,6 +105,7 @@ pub fn poll_worker(
                     state.selected_drive = Some(0);
                 }
                 state.busy = false;
+                state.progress_indeterminate = false;
                 state.set_status("Ready", 0.0);
                 state.log(&format!("Found {count} drive(s)."));
             }
