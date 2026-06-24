@@ -115,92 +115,64 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p release-assets
-          # --clobber allows overwriting partial downloads from concurrent runs
           gh release download "${GITHUB_REF_NAME}" \
             --repo thedavidweng/sdf-flash-gui \
             --dir release-assets \
-            --pattern "*.dmg" \
-            --clobber
+            --pattern "*.dmg"
 
       - name: Update cask
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           RELEASE_URL="https://github.com/thedavidweng/sdf-flash-gui/releases/download/${GITHUB_REF_NAME}"
 
-          # Find DMGs (may be one or both)
-          ARM_DMG=$(find release-assets -name "*aarch64*dmg" -o -name "*arm*dmg" -o -name "*apple-silicon*dmg" 2>/dev/null | head -1)
-          INTEL_DMG=$(find release-assets -name "*x86_64*dmg" -o -name "*intel*dmg" -o -name "*x86*dmg" 2>/dev/null | head -1)
+          INTEL_DMG=$(find release-assets -name "*x86_64*dmg" -o -name "*intel*dmg" -o -name "*x86*dmg" | head -1)
+          ARM_DMG=$(find release-assets -name "*aarch64*dmg" -o -name "*arm*dmg" -o -name "*apple-silicon*dmg" | head -1)
 
-          if [ -z "$ARM_DMG" ] && [ -z "$INTEL_DMG" ]; then
-            echo "::error::No DMG files found in release"
+          if [ -z "$INTEL_DMG" ] || [ -z "$ARM_DMG" ]; then
+            echo "::error::Could not find both DMG files. Found:"
+            find release-assets -name "*.dmg"
             exit 1
           fi
 
-          # Pull latest cask (may have been updated by the other macOS build)
-          cd homebrew-tap
-          git pull --rebase origin main || true
+          INTEL_SHA256=$(shasum -a 256 "$INTEL_DMG" | awk '{print $1}')
+          ARM_SHA256=$(shasum -a 256 "$ARM_DMG" | awk '{print $1}')
+          INTEL_FILENAME=$(basename "$INTEL_DMG")
+          ARM_FILENAME=$(basename "$ARM_DMG")
 
-          # Build cask content
-          CASK=$(cat <<'RUBY_HEADER'
+          cat > homebrew-tap/Casks/sdf-flash-gui.rb <<RUBY
           cask "sdf-flash-gui" do
-            version "__VERSION__"
-          RUBY_HEADER
-          )
+            version "${VERSION}"
 
-          if [ -n "$ARM_DMG" ]; then
-            ARM_SHA256=$(shasum -a 256 "$ARM_DMG" | awk '{print $1}')
-            ARM_FILENAME=$(basename "$ARM_DMG")
-            CASK+=$'\n'"    on_arm do"
-            CASK+=$'\n'"      sha256 \"${ARM_SHA256}\""
-            CASK+=$'\n'"      url \"${RELEASE_URL}/${ARM_FILENAME}\""
-            CASK+=$'\n'"    end"
-          fi
+            on_arm do
+              sha256 "${ARM_SHA256}"
+              url "${RELEASE_URL}/${ARM_FILENAME}"
+            end
+            on_intel do
+              sha256 "${INTEL_SHA256}"
+              url "${RELEASE_URL}/${INTEL_FILENAME}"
+            end
 
-          if [ -n "$INTEL_DMG" ]; then
-            INTEL_SHA256=$(shasum -a 256 "$INTEL_DMG" | awk '{print $1}')
-            INTEL_FILENAME=$(basename "$INTEL_DMG")
-            CASK+=$'\n'"    on_intel do"
-            CASK+=$'\n'"      sha256 \"${INTEL_SHA256}\""
-            CASK+=$'\n'"      url \"${RELEASE_URL}/${INTEL_FILENAME}\""
-            CASK+=$'\n'"    end"
-          fi
+            name "SDFFlashGUI"
+            desc "Cross-platform GUI for flashing optical drives"
+            homepage "https://github.com/thedavidweng/sdf-flash-gui"
 
-          CASK+=$'\n'
-          CASK+=$'\n'"    name \"SDFFlashGUI\""
-          CASK+=$'\n'"    desc \"Cross-platform GUI for flashing optical drives\""
-          CASK+=$'\n'"    homepage \"https://github.com/thedavidweng/sdf-flash-gui\""
-          CASK+=$'\n'
-          CASK+=$'\n'"    livecheck do"
-          CASK+=$'\n'"      url :url"
-          CASK+=$'\n'"      strategy :github_latest"
-          CASK+=$'\n'"    end"
-          CASK+=$'\n'
-          CASK+=$'\n'"    app \"SDFFlashGUI.app\""
-          CASK+=$'\n'
-          CASK+=$'\n'"    postflight do"
-          CASK+=$'\n'"      system_command \"/usr/bin/xattr\","
-          CASK+=$'\n'"                     args: [\"-rd\", \"com.apple.quarantine\", \"#{appdir}/SDFFlashGUI.app\"]"
-          CASK+=$'\n'"    end"
-          CASK+=$'\n'"  end"
+            livecheck do
+              url :url
+              strategy :github_latest
+            end
 
-          echo "$CASK" | sed "s/__VERSION__/${VERSION}/" > Casks/sdf-flash-gui.rb
+            app "SDFFlashGUI.app"
 
-          echo "--- Generated cask ---"
-          cat Casks/sdf-flash-gui.rb
-          echo "----------------------"
+            postflight do
+              system_command "/usr/bin/xattr",
+                             args: ["-rd", "com.apple.quarantine", "#{appdir}/SDFFlashGUI.app"]
+            end
+          end
+          RUBY
 
+          cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/sdf-flash-gui.rb
-          git diff --cached --quiet && echo "No changes" && exit 0
-          git commit -m "Update sdf-flash-gui to ${VERSION}"
-
-          # Retry on concurrent push conflict
-          for i in 1 2 3; do
-            git push && break
-            echo "Push failed (attempt $i), pulling and retrying..."
-            git pull --rebase origin main
-            sleep 2
-          done
+          git commit -m "Update sdf-flash-gui to ${VERSION}" || echo "No changes to commit"
+          git push
