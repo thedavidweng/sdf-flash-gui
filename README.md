@@ -26,6 +26,18 @@ Cross-platform GUI for optical drive firmware dump/flash. Inspired by the Window
 - **SDF0 container parsing** — reads `sdf.bin` metadata (vendor, model, firmware version, encryption, compression)
 - **Dual backend support** — works with both `sdftool` (standalone) and `makemkvcon` (MakeMKV); auto-detected via PATH or common install locations
 
+## Install
+
+**macOS (Homebrew)**
+
+```bash
+brew install --cask thedavidweng/tap/sdf-flash-gui
+```
+
+**Linux / Windows**
+
+Download the latest installer from [Releases](https://github.com/thedavidweng/sdf-flash-gui/releases) — `.deb` / `.AppImage` for Linux, `.msi` for Windows.
+
 ## Requirements
 
 - [MakeMKV](https://www.makemkv.com/) installed on the system
