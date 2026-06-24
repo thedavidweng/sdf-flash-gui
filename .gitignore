@@ -1,0 +1,8 @@
+/target
+*.swp
+*.swo
+*~
+.DS_Store
+.env
+/test.png
+/align_svg.py
