@@ -268,36 +268,13 @@ impl eframe::App for App {
             prompt_recovery_wrong_firmware(&mut self.state);
         }
 
-        // ── Top toolbar panel ──
-        let top_frame =
-            egui::Frame::central_panel(ctx.style().as_ref()).inner_margin(egui::Margin::same(6));
-        egui::TopBottomPanel::top("toolbar")
-            .frame(top_frame)
-            .show(ctx, |ui| {
-                ui.add_enabled_ui(!self.state.show_exit_confirmation, |ui| {
-                    show_toolbar(ui, &mut self.state);
-                });
-            });
-
-        // ── Bottom status bar panel ──
-        let bottom_frame = egui::Frame::central_panel(ctx.style().as_ref())
-            .inner_margin(egui::Margin::symmetric(6, 4));
-        egui::TopBottomPanel::bottom("status_bar")
-            .frame(bottom_frame)
-            .show(ctx, |ui| {
-                ui.add_enabled_ui(!self.state.show_exit_confirmation, |ui| {
-                    show_status_bar(ui, &self.state);
-                });
-            });
-
-        // ── Central content panel ──
         let panel_frame =
-            egui::Frame::central_panel(ctx.style().as_ref()).inner_margin(egui::Margin::same(6));
+            egui::Frame::central_panel(&ctx.style()).inner_margin(egui::Margin::same(6));
         egui::CentralPanel::default()
             .frame(panel_frame)
             .show(ctx, |ui| {
                 ui.add_enabled_ui(!self.state.show_exit_confirmation, |ui| {
-                    show_main_content(ui, ctx, frame, &mut self.state, &self.worker_tx);
+                    show_main_ui(ui, ctx, frame, &mut self.state, &self.worker_tx);
                 });
             });
 
@@ -542,7 +519,14 @@ fn spawn_streaming_command(tx: &Sender<WorkerMsg>, cmd: Command, initial_status:
 
 // ── UI rendering ────────────────────────────────────────────────────
 
-fn show_toolbar(ui: &mut egui::Ui, state: &mut AppState) {
+fn show_main_ui(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    frame: &mut eframe::Frame,
+    state: &mut AppState,
+    worker_tx: &Sender<WorkerMsg>,
+) {
+    // ── Toolbar ──
     ui.horizontal(|ui| {
         let refresh_text = t(L10nKey::TooltipRefresh, state.resolved_lang);
         let refresh_hint = if cfg!(target_os = "macos") {
@@ -563,11 +547,7 @@ fn show_toolbar(ui: &mut egui::Ui, state: &mut AppState) {
         } else {
             format!("{settings_text} (Ctrl+,)")
         };
-        if ui
-            .button("⚙")
-            .on_hover_text(settings_hint)
-            .clicked()
-        {
+        if ui.button("⚙").on_hover_text(settings_hint).clicked() {
             state.show_settings = true;
         }
         if ui
@@ -584,49 +564,6 @@ fn show_toolbar(ui: &mut egui::Ui, state: &mut AppState) {
             egui::widgets::global_theme_preference_buttons(ui);
         });
     });
-}
-
-fn show_status_bar(ui: &mut egui::Ui, state: &AppState) {
-    ui.horizontal(|ui| {
-        // Progress indicator
-        if state.busy {
-            let status = format!("{}…", state.status_message.trim_end_matches('…'));
-            if state.progress_indeterminate && state.progress <= 0.0 {
-                ui.add(
-                    egui::ProgressBar::new(0.0)
-                        .animate(true)
-                        .text(status),
-                );
-            } else {
-                ui.add(
-                    egui::ProgressBar::new(state.progress / 100.0)
-                        .show_percentage()
-                        .text(status),
-                );
-            }
-        } else {
-            ui.add(egui::ProgressBar::new(0.0).text("READY"));
-        }
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let drive_count = state.drives.len();
-            let status_text = if drive_count == 0 {
-                "No drives found".to_string()
-            } else {
-                format!("{drive_count} drive(s) found")
-            };
-            ui.small(&status_text);
-        });
-    });
-}
-
-fn show_main_content(
-    ui: &mut egui::Ui,
-    ctx: &egui::Context,
-    frame: &mut eframe::Frame,
-    state: &mut AppState,
-    worker_tx: &Sender<WorkerMsg>,
-) {
 
     // ── Drive Properties ──
     section_heading(ui, t(L10nKey::TitleDriveProperties, state.resolved_lang));
@@ -729,7 +666,31 @@ fn show_main_content(
 
     ui.add_space(6.0);
 
+    // ── Status ──
+    section_heading(ui, "Status");
+    ui.add_space(2.0);
+    if state.busy {
+        let status = format!("{}…", state.status_message.trim_end_matches('…'));
+        if state.progress_indeterminate && state.progress <= 0.0 {
+            ui.add(egui::ProgressBar::new(0.0).animate(true).text(status));
+        } else {
+            ui.add(
+                egui::ProgressBar::new(state.progress / 100.0)
+                    .show_percentage()
+                    .text(status),
+            );
+        }
+    } else {
+        // Idle: empty track with no fill — same widget as busy state
+        ui.add(
+            egui::ProgressBar::new(0.0)
+                .fill(egui::Color32::TRANSPARENT)
+                .text("READY"),
+        );
+    }
+
     // ── Action buttons ──
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
@@ -770,8 +731,13 @@ fn show_main_content(
 
     // ── Log (fills remaining space) ──
     ui.add_space(2.0);
+    // Reserve space for the status bar at the very bottom
+    let log_height = ui.available_height() - 20.0;
+    let log_height = log_height.max(40.0);
+
     egui::ScrollArea::vertical()
         .stick_to_bottom(true)
+        .max_height(log_height)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             if state.log_text.is_empty() {
@@ -780,6 +746,15 @@ fn show_main_content(
                 ui.label(egui::RichText::new(&state.log_text).monospace().size(11.0));
             }
         });
+
+    // ── Status bar (drive count) ──
+    let drive_count = state.drives.len();
+    let status_text = if drive_count == 0 {
+        "No drives found".to_string()
+    } else {
+        format!("{drive_count} drive(s) found")
+    };
+    ui.label(egui::RichText::new(status_text).small().weak());
 }
 
 fn status_indicator(ui: &mut egui::Ui, probed: bool, ok: bool) {
@@ -794,9 +769,8 @@ fn status_indicator(ui: &mut egui::Ui, probed: bool, ok: bool) {
 
 fn show_firmware_selector(ui: &mut egui::Ui, state: &mut AppState) {
     let firmware_img_text = t(L10nKey::SectionFirmwareImage, state.resolved_lang);
-    let select_placeholder = format!("{}…", firmware_img_text);
     let selected = if state.firmware_path.is_empty() {
-        select_placeholder
+        "Select firmware .bin…".to_string()
     } else {
         std::path::Path::new(&state.firmware_path)
             .file_name()
