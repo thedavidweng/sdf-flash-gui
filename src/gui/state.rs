@@ -116,6 +116,13 @@ impl AppState {
         self.status_message = msg.into();
         self.progress = progress.clamp(0.0, 100.0);
     }
+
+    pub fn begin_operation(&mut self, status: &str) {
+        self.busy = true;
+        self.progress_indeterminate = true;
+        self.progress = 0.0;
+        self.set_status(status, 0.0);
+    }
 }
 
 pub fn find_sdf_bin() -> String {

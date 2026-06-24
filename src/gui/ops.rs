@@ -165,7 +165,7 @@ pub fn execute_start(state: &mut AppState, worker_tx: &Sender<WorkerMsg>) {
             };
             match command::plan_command(req) {
                 Ok(plan) => {
-                    begin_operation(state, "Reading firmware");
+                    state.begin_operation("Reading firmware");
                     spawn_streaming_command(worker_tx, plan.command, "Reading firmware");
                 }
                 Err(e) => state.log(&format!("ERROR: {e}")),
@@ -193,7 +193,7 @@ pub fn execute_start(state: &mut AppState, worker_tx: &Sender<WorkerMsg>) {
             };
             match command::plan_command(req) {
                 Ok(plan) => {
-                    begin_operation(state, "Writing firmware");
+                    state.begin_operation("Writing firmware");
                     spawn_streaming_command(worker_tx, plan.command, "Writing firmware");
                 }
                 Err(e) => state.log(&format!("ERROR: {e}")),
@@ -216,20 +216,13 @@ pub fn execute_start(state: &mut AppState, worker_tx: &Sender<WorkerMsg>) {
             };
             match command::plan_command(req) {
                 Ok(plan) => {
-                    begin_operation(state, "Recovering drive");
+                    state.begin_operation("Recovering drive");
                     spawn_streaming_command(worker_tx, plan.command, "Recovering drive");
                 }
                 Err(e) => state.log(&format!("ERROR: {e}")),
             }
         }
     }
-}
-
-fn begin_operation(state: &mut AppState, status: &str) {
-    state.busy = true;
-    state.progress_indeterminate = true;
-    state.progress = 0.0;
-    state.set_status(status, 0.0);
 }
 
 pub fn refresh_drives(state: &mut AppState) {

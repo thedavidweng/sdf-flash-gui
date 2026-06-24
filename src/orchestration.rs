@@ -38,12 +38,19 @@ pub fn parse_drive_identity(device: &str, info_output: &str) -> manifest::DriveM
         }
     }
 
-    // Fall back to device label parsing if info output didn't contain fields
-    if vendor.is_empty() && model.is_empty() {
-        let parts: Vec<&str> = device.split(['_', '-', ' ']).collect();
-        if parts.len() >= 2 {
-            vendor = parts[0].to_string();
-            model = parts[1].to_string();
+    // Fall back to device label parsing if info output didn't contain fields.
+    // Split on '_' only to preserve hyphenated vendor names like "HL-DT-ST".
+    if vendor.is_empty() && model.is_empty() && device.contains('_') {
+        let mut parts = device.splitn(2, '_');
+        if let Some(v) = parts.next() {
+            if !v.is_empty() {
+                vendor = v.to_string();
+            }
+        }
+        if let Some(m) = parts.next() {
+            if !m.is_empty() {
+                model = m.to_string();
+            }
         }
     }
 
@@ -90,7 +97,7 @@ pub fn resolve_recovery_token(
         command::extract_recovery_boot_token(&data)
             .map_err(|e| format!("cannot extract recovery boot token: {e}"))
     } else {
-        Err("--recover requires either --recovery-token or --recovery-file".to_string())
+        Err("--recover requires either --recovery-token or --wrong-firmware".to_string())
     }
 }
 
@@ -174,12 +181,12 @@ mod tests {
 
     #[test]
     fn parse_drive_identity_fallback_to_device() {
-        // Falls back to splitting on '_', '-', ' '. "HL-DT-ST_BU40N_1.03"
-        // splits on first '-', so vendor="HL", model="DT".
+        // Falls back to splitting on '_' only, preserving hyphenated vendor names.
+        // "HL-DT-ST_BU40N_1.03" → vendor="HL-DT-ST", model="BU40N_1.03".
         let output = "no useful info here";
         let dm = parse_drive_identity("HL-DT-ST_BU40N_1.03", output);
-        assert_eq!(dm.vendor, "HL");
-        assert_eq!(dm.model, "DT");
+        assert_eq!(dm.vendor, "HL-DT-ST");
+        assert_eq!(dm.model, "BU40N_1.03");
     }
 
     #[test]

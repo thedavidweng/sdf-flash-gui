@@ -228,7 +228,7 @@ pub fn spawn_streaming_command(tx: &Sender<WorkerMsg>, cmd: Command, initial_sta
 
 pub fn spawn_list_drives(tx: &Sender<WorkerMsg>, state: &mut AppState) {
     let cmd = command::plan_drive_list(state.backend, &state.tool_path);
-    begin_operation(state, "Listing drives");
+    state.begin_operation("Listing drives");
     state.log(&format!("> {}", process::format_command(&cmd)));
 
     let tx = tx.clone();
@@ -255,13 +255,6 @@ pub fn spawn_list_drives(tx: &Sender<WorkerMsg>, state: &mut AppState) {
             });
         }
     });
-}
-
-fn begin_operation(state: &mut AppState, status: &str) {
-    state.busy = true;
-    state.progress_indeterminate = true;
-    state.progress = 0.0;
-    state.set_status(status, 0.0);
 }
 
 fn parse_drive_list(output: &str) -> Vec<Drive> {
