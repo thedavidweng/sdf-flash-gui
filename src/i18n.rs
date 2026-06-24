@@ -657,10 +657,10 @@ mod tests {
             L10nKey::ReasonRunValidation,
             L10nKey::ReasonEnterToken,
         ];
-        assert!(
-            all_keys.len() >= 45,
-            "expected at least 45 L10nKey variants, got {}",
-            all_keys.len()
+        assert_eq!(
+            all_keys.len(),
+            58,
+            "L10nKey variant count changed — update this test if intentional"
         );
     }
 }
