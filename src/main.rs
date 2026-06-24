@@ -6,9 +6,10 @@ mod flash;
 mod gui;
 mod i18n;
 mod manifest;
+mod orchestration;
+mod process;
 mod sdf;
 
-use std::process;
 
 fn main() {
     env_logger::init();
@@ -19,7 +20,7 @@ fn main() {
         // No arguments — launch GUI
         if let Err(e) = gui::run() {
             eprintln!("GUI error: {e}");
-            process::exit(1);
+            std::process::exit(1);
         }
         return;
     }
@@ -30,14 +31,14 @@ fn main() {
         "info" => {
             if args.len() < 3 {
                 eprintln!("Usage: sdf-flash-gui info <device>");
-                process::exit(1);
+                std::process::exit(1);
             }
             cmd_info(&args[2]);
         }
         "dump" => {
             if args.len() < 3 {
                 eprintln!("Usage: sdf-flash-gui dump <device> -o <output_dir>");
-                process::exit(1);
+                std::process::exit(1);
             }
             let output_dir = args
                 .iter()
@@ -54,7 +55,7 @@ fn main() {
             {
                 print_flash_help();
                 if args.len() < 3 {
-                    process::exit(1);
+                    std::process::exit(1);
                 }
                 return;
             }
@@ -106,7 +107,7 @@ fn main() {
                 Some(f) => cmd_sdf_info(f),
                 None => {
                     eprintln!("Usage: sdf-flash-gui sdf-info --file <sdf.bin>");
-                    process::exit(1);
+                    std::process::exit(1);
                 }
             }
         }
@@ -116,7 +117,7 @@ fn main() {
         other => {
             eprintln!("Unknown command: {other}");
             print_help();
-            process::exit(1);
+            std::process::exit(1);
         }
     }
 }
@@ -160,7 +161,7 @@ fn print_flash_help() {
 fn find_backend() -> (command::Backend, String) {
     drive::find_backend().unwrap_or_else(|| {
         eprintln!("ERROR: sdftool or makemkvcon not found. Install MakeMKV or sdftool.");
-        process::exit(1);
+        std::process::exit(1);
     })
 }
 
@@ -171,7 +172,7 @@ fn cmd_list() {
         // Try backend
         let (backend, path) = find_backend();
         let cmd = command::plan_drive_list(backend, &path);
-        match drive::run_command(&cmd.program, &cmd.args) {
+        match process::run_command(&cmd.program, &cmd.args) {
             Ok(out) => print!("{}", out.combined()),
             Err(e) => eprintln!("ERROR: {e}"),
         }
@@ -190,7 +191,7 @@ fn cmd_list() {
 fn cmd_info(device: &str) {
     let (backend, path) = find_backend();
     let cmd = command::plan_drive_info(backend, &path, device);
-    match drive::run_command(&cmd.program, &cmd.args) {
+    match process::run_command(&cmd.program, &cmd.args) {
         Ok(out) => {
             print!("{}", out.combined());
             let safety = command::classify_drive_safety(device, &out.combined());
@@ -233,18 +234,18 @@ fn cmd_dump(device: &str, output_dir: &str) {
             ]
         },
     };
-    match drive::run_command(&cmd.program, &cmd.args) {
+    match process::run_command(&cmd.program, &cmd.args) {
         Ok(out) => {
             if out.success() {
                 println!("Firmware dumped to {output_dir}");
             } else {
                 eprintln!("ERROR: {}", out.combined());
-                process::exit(1);
+                std::process::exit(1);
             }
         }
         Err(e) => {
             eprintln!("ERROR: {e}");
-            process::exit(1);
+            std::process::exit(1);
         }
     }
 }
@@ -265,14 +266,14 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
     // Validate conflicting options
     if args.encrypted && args.include_boot_loader {
         eprintln!("ERROR: --encrypted and --include-boot-loader cannot be combined");
-        process::exit(1);
+        std::process::exit(1);
     }
 
     let firmware = match args.firmware {
         Some(f) => f.as_str(),
         None => {
             eprintln!("ERROR: -i <firmware> is required");
-            process::exit(1);
+            std::process::exit(1);
         }
     };
 
@@ -280,26 +281,27 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("ERROR: cannot read firmware: {e}");
-            process::exit(1);
+            std::process::exit(1);
         }
     };
 
     // Probe drive and determine safety
     let (backend, path) = find_backend();
     let info_cmd = command::plan_drive_info(backend, &path, device);
-    let info_out = drive::run_command(&info_cmd.program, &info_cmd.args).unwrap_or_else(|e| {
-        eprintln!("ERROR: cannot probe drive: {e}");
-        process::exit(1);
-    });
+    let info_out =
+        process::run_command(&info_cmd.program, &info_cmd.args).unwrap_or_else(|e| {
+            eprintln!("ERROR: cannot probe drive: {e}");
+            std::process::exit(1);
+        });
 
     let safety = command::classify_drive_safety(device, &info_out.combined());
     if !safety.mt1959 {
         eprintln!("ERROR: drive is not MT1959 platform");
-        process::exit(1);
+        std::process::exit(1);
     }
 
     // Parse drive identity from info output for manifest matching
-    let drive_match = parse_drive_identity(device, &info_out.combined());
+    let drive_match = orchestration::parse_drive_identity(device, &info_out.combined());
 
     // If manifest provided, run validation
     if let Some(mp) = args.manifest_path {
@@ -307,55 +309,61 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("ERROR: cannot read manifest: {e}");
-                process::exit(1);
+                std::process::exit(1);
             }
         };
         let manifest = match manifest::parse_manifest(&manifest_data) {
             Ok(m) => m,
             Err(e) => {
                 eprintln!("ERROR: invalid manifest: {e}");
-                process::exit(1);
+                std::process::exit(1);
             }
         };
 
         // Resolve image ID
-        let image_id = resolve_image_id(&manifest, args.image_id);
-
-        let request = flash::FlashPlanRequest {
-            image_id: &image_id,
-            current_version: &drive_match.revision,
-            firmware_size: firmware_data.len() as u64,
-            firmware_sha256: &flash::sha256_hex(&firmware_data),
-            signature_present: manifest
-                .firmware_images
-                .iter()
-                .find(|i| i.image_id == image_id)
-                .map(|i| i.signature_present)
-                .unwrap_or(false),
-            user_confirmed: args.confirm,
+        let image_id = match orchestration::resolve_image_id(&manifest, args.image_id.map(String::as_str)) {
+            Ok(id) => id,
+            Err(e) => {
+                eprintln!("ERROR: {e}");
+                std::process::exit(1);
+            }
         };
 
-        match flash::build_flash_plan(&manifest, &drive_match, request) {
-            Ok(plan) => {
-                let report = flash::dry_run(&plan);
+        match orchestration::validate_flash(
+            &manifest,
+            &drive_match,
+            &image_id,
+            &firmware_data,
+            args.confirm,
+        ) {
+            Ok(report) => {
                 println!("{}", report.summary);
                 if !report.would_execute {
                     if !args.confirm {
                         println!("Add --confirm to proceed.");
                     }
-                    process::exit(1);
+                    std::process::exit(1);
                 }
             }
             Err(e) => {
-                eprintln!("Validation failed: {e}");
-                process::exit(1);
+                eprintln!("{e}");
+                std::process::exit(1);
             }
         }
     }
 
     // Build the operation
     let operation = if args.recover {
-        let token = resolve_recovery_token(args.wrong_firmware, args.recovery_token);
+        let token = match orchestration::resolve_recovery_token(
+            args.wrong_firmware.map(String::as_str),
+            args.recovery_token.map(String::as_str),
+        ) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("ERROR: {e}");
+                std::process::exit(1);
+            }
+        };
         command::Operation::Recover {
             firmware_path: firmware.to_string(),
             recovery_boot_token: token,
@@ -389,122 +397,25 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
                 println!("Add --confirm to proceed.");
                 return;
             }
-            match drive::run_command(&plan.command.program, &plan.command.args) {
+            match process::run_command(&plan.command.program, &plan.command.args) {
                 Ok(out) => {
                     if out.success() {
                         println!("Flash completed successfully.");
                     } else {
                         eprintln!("ERROR: {}", out.combined());
-                        process::exit(1);
+                        std::process::exit(1);
                     }
                 }
                 Err(e) => {
                     eprintln!("ERROR: {e}");
-                    process::exit(1);
+                    std::process::exit(1);
                 }
             }
         }
         Err(e) => {
             eprintln!("Cannot plan flash: {e}");
-            process::exit(1);
+            std::process::exit(1);
         }
-    }
-}
-
-/// Parse drive identity from sdftool `--info` output for manifest matching.
-fn parse_drive_identity(device: &str, info_output: &str) -> manifest::DriveMatch {
-    let mut vendor = String::new();
-    let mut model = String::new();
-    let mut revision = String::new();
-
-    for line in info_output.lines() {
-        let line = line.trim();
-        if let Some(val) = line
-            .strip_prefix("Vendor:")
-            .or_else(|| line.strip_prefix("vendor:"))
-        {
-            vendor = val.trim().to_string();
-        } else if let Some(val) = line
-            .strip_prefix("Product:")
-            .or_else(|| line.strip_prefix("product:"))
-            .or_else(|| line.strip_prefix("Model:"))
-            .or_else(|| line.strip_prefix("model:"))
-        {
-            model = val.trim().to_string();
-        } else if let Some(val) = line
-            .strip_prefix("Revision:")
-            .or_else(|| line.strip_prefix("revision:"))
-            .or_else(|| line.strip_prefix("Firmware:"))
-            .or_else(|| line.strip_prefix("firmware:"))
-        {
-            revision = val.trim().to_string();
-        }
-    }
-
-    // Fall back to device label parsing if info output didn't contain fields
-    if vendor.is_empty() && model.is_empty() {
-        let parts: Vec<&str> = device.split(['_', '-', ' ']).collect();
-        if parts.len() >= 2 {
-            vendor = parts[0].to_string();
-            model = parts[1].to_string();
-        }
-    }
-
-    manifest::DriveMatch {
-        vendor,
-        model,
-        revision,
-    }
-}
-
-/// Resolve image ID from manifest, picking the only image if there's exactly one.
-fn resolve_image_id(manifest: &manifest::FirmwareManifest, explicit: Option<&String>) -> String {
-    if let Some(id) = explicit {
-        return id.clone();
-    }
-    if manifest.firmware_images.len() == 1 {
-        manifest.firmware_images[0].image_id.clone()
-    } else {
-        eprintln!(
-            "ERROR: manifest contains {} images; specify --image-id",
-            manifest.firmware_images.len()
-        );
-        for img in &manifest.firmware_images {
-            eprintln!("  - {}", img.image_id);
-        }
-        process::exit(1);
-    }
-}
-
-/// Resolve recovery boot token from either explicit flag or by extracting from a firmware file.
-fn resolve_recovery_token(
-    wrong_firmware: Option<&String>,
-    explicit_token: Option<&String>,
-) -> String {
-    if let Some(token) = explicit_token {
-        return token.clone();
-    }
-    if let Some(path) = wrong_firmware {
-        let data = match std::fs::read(path) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("ERROR: cannot read wrong firmware {path}: {e}");
-                process::exit(1);
-            }
-        };
-        match command::extract_recovery_boot_token(&data) {
-            Ok(token) => {
-                println!("Extracted recovery boot token: {token}");
-                token
-            }
-            Err(e) => {
-                eprintln!("ERROR: cannot extract recovery boot token: {e}");
-                process::exit(1);
-            }
-        }
-    } else {
-        eprintln!("ERROR: --recover requires either --recovery-token or --wrong-firmware");
-        process::exit(1);
     }
 }
 
@@ -513,7 +424,7 @@ fn cmd_sdf_info(file: &str) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("ERROR: cannot read {file}: {e}");
-            process::exit(1);
+            std::process::exit(1);
         }
     };
 
@@ -543,7 +454,7 @@ fn cmd_sdf_info(file: &str) {
         }
         Err(e) => {
             eprintln!("ERROR: {e}");
-            process::exit(1);
+            std::process::exit(1);
         }
     }
 }
