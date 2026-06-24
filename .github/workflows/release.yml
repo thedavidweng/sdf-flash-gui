@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-release:
+  build-other:
     strategy:
       fail-fast: false
       matrix:
@@ -16,14 +16,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
             binary_name: sdf-flash-gui
             upx: true
-          - os: macos-13
-            target: x86_64-apple-darwin
-            binary_name: sdf-flash-gui
-            upx: false
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            binary_name: sdf-flash-gui
-            upx: false
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary_name: sdf-flash-gui.exe
@@ -34,16 +26,13 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
 
@@ -57,43 +46,71 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: choco install upx
 
-      - name: Install cargo-packager
-        run: cargo install cargo-packager
+      - run: cargo install cargo-packager
 
-      - name: Build Application
-        run: cargo build --release --target ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }}
 
       - name: UPX Compress Binary
         if: matrix.upx
         run: upx --best --lzma target/${{ matrix.target }}/release/${{ matrix.binary_name }}
 
-      - name: Package Application
-        run: cargo packager --release --target ${{ matrix.target }}
+      - run: cargo packager --release --target ${{ matrix.target }}
 
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*.dmg
             dist/*.appimage
             dist/*.deb
             dist/*.msi
             dist/*.nsis
 
-  update-homebrew-tap:
-    needs: build-and-release
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
 
     steps:
-      - name: Checkout tap repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - run: cargo install cargo-packager
+
+      - run: cargo build --release --target ${{ matrix.target }}
+
+      - run: cargo packager --release --target ${{ matrix.target }}
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
+
+  update-homebrew-tap:
+    needs: build-macos
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
         with:
           repository: thedavidweng/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
-      - name: Download release assets
+      - name: Download DMGs from Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -103,7 +120,7 @@ jobs:
             --dir release-assets \
             --pattern "*.dmg"
 
-      - name: Compute DMG checksums and update cask
+      - name: Update cask
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
 
@@ -119,14 +136,9 @@ jobs:
           INTEL_SHA256=$(shasum -a 256 "$INTEL_DMG" | awk '{print $1}')
           ARM_SHA256=$(shasum -a 256 "$ARM_DMG" | awk '{print $1}')
 
+          RELEASE_URL="https://github.com/thedavidweng/sdf-flash-gui/releases/download/${GITHUB_REF_NAME}"
           INTEL_FILENAME=$(basename "$INTEL_DMG")
           ARM_FILENAME=$(basename "$ARM_DMG")
-
-          echo "Version: $VERSION"
-          echo "Intel DMG: $INTEL_FILENAME (sha256: $INTEL_SHA256)"
-          echo "ARM DMG: $ARM_FILENAME (sha256: $ARM_SHA256)"
-
-          RELEASE_URL="https://github.com/thedavidweng/sdf-flash-gui/releases/download/${GITHUB_REF_NAME}"
 
           cat > homebrew-tap/Casks/sdf-flash-gui.rb <<RUBY
           cask "sdf-flash-gui" do
