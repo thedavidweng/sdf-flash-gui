@@ -1,6 +1,6 @@
 // Abstraction over native file dialogs for testability.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Trait for file/folder picker operations.
 pub trait FileDialog {
@@ -10,6 +10,7 @@ pub trait FileDialog {
         title: &str,
         filter_name: &str,
         extensions: &[&str],
+        initial_dir: Option<&Path>,
     ) -> Option<PathBuf>;
 }
 
@@ -26,10 +27,14 @@ impl FileDialog for NativeDialog {
         title: &str,
         filter_name: &str,
         extensions: &[&str],
+        initial_dir: Option<&Path>,
     ) -> Option<PathBuf> {
-        rfd::FileDialog::new()
+        let mut dialog = rfd::FileDialog::new()
             .set_title(title)
-            .add_filter(filter_name, extensions)
-            .pick_file()
+            .add_filter(filter_name, extensions);
+        if let Some(dir) = initial_dir {
+            dialog = dialog.set_directory(dir);
+        }
+        dialog.pick_file()
     }
 }

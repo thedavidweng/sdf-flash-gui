@@ -25,8 +25,8 @@ impl CommandOutput {
         let err = self.stderr.trim();
         match (out.is_empty(), err.is_empty()) {
             (true, true) => String::new(),
-            (false, true) => self.stdout.clone(),
-            (true, false) => self.stderr.clone(),
+            (false, true) => out.to_string(),
+            (true, false) => err.to_string(),
             (false, false) => format!("{out}\n{err}"),
         }
     }
@@ -263,7 +263,7 @@ mod tests {
             stdout: "hello\n".into(),
             stderr: String::new(),
         };
-        assert_eq!(out.combined(), "hello\n");
+        assert_eq!(out.combined(), "hello");
     }
 
     #[test]
@@ -274,7 +274,7 @@ mod tests {
             stdout: String::new(),
             stderr: "error\n".into(),
         };
-        assert_eq!(out.combined(), "error\n");
+        assert_eq!(out.combined(), "error");
     }
 
     #[test]
@@ -298,7 +298,7 @@ mod tests {
             stdout: "   \n  ".into(),
             stderr: "err\n".into(),
         };
-        assert_eq!(out.combined(), "err\n");
+        assert_eq!(out.combined(), "err");
     }
 
     #[test]

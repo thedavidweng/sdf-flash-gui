@@ -335,6 +335,7 @@ pub fn prompt_recovery_wrong_firmware(state: &mut AppState, dialog: &impl FileDi
         "Wrong firmware (for token extraction)",
         "Firmware",
         &["bin"],
+        None,
     ) {
         state.wrong_firmware_path = file.to_string_lossy().to_string();
         extract_recovery_token_from_wrong_firmware(state);
@@ -361,7 +362,10 @@ pub fn extract_recovery_token_from_wrong_firmware(state: &mut AppState) {
 }
 
 pub fn browse_firmware_file(state: &mut AppState, dialog: &impl FileDialog) {
-    if let Some(file) = dialog.pick_file_with_title("Firmware", "Firmware", &["bin"]) {
+    let initial_dir = std::path::Path::new(&state.firmware_path)
+        .parent()
+        .filter(|_| !state.firmware_path.is_empty());
+    if let Some(file) = dialog.pick_file_with_title("Firmware", "Firmware", &["bin"], initial_dir) {
         load_firmware(state, &file.to_string_lossy());
     }
 }
@@ -441,6 +445,7 @@ mod tests {
             _title: &str,
             _filter_name: &str,
             _extensions: &[&str],
+            _initial_dir: Option<&std::path::Path>,
         ) -> Option<PathBuf> {
             self.file.lock().unwrap().take()
         }
