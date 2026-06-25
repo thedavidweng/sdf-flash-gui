@@ -321,13 +321,11 @@ mod tests {
     }
 
     #[test]
-    fn validate_flash_with_matching_checksum() {
+    fn validate_flash_checksum_mismatch() {
         let manifest = test_manifest();
         let drive = test_drive();
-        // The manifest expects sha256="abcd1234" and size=1024
-        // We can't easily produce data with that exact sha256, but we can verify the function runs
+        // Manifest expects sha256="abcd1234" and size=1024; vec![0u8; 1024] has a different hash
         let report = validate_flash(&manifest, &drive, "main", &vec![0u8; 1024], true).unwrap();
-        // sha256 won't match, but function should not error
         assert!(!report.would_execute);
         assert!(report.summary.contains("checksum"));
     }

@@ -406,8 +406,8 @@ mod tests {
             got: *b"NOPE",
         };
         let msg = format!("{err}");
-        // The error uses {:?} for byte arrays, so it formats as [83, 68, 70, 48] and [78, 79, 80, 69]
-        assert!(msg.contains("SDF0")); // "expected" text is in the error message
+        // "SDF0" appears in the literal error message template "invalid SDF0 magic"
+        assert!(msg.contains("SDF0"));
         assert!(msg.contains("invalid SDF0 magic"));
     }
 
