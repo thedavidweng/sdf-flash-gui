@@ -794,9 +794,10 @@ mod tests {
         state.selected_drive = Some(0);
         refresh_drives(&mut state);
         // On CI there are no optical drives — verify postcondition
-        if state.drives.is_empty() {
-            assert!(state.selected_drive.is_none());
-        }
+        assert!(
+            !state.drives.is_empty() || state.selected_drive.is_none(),
+            "when no drives found, selected_drive must be None"
+        );
     }
 
     #[test]
