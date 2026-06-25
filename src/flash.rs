@@ -428,4 +428,154 @@ mod tests {
         assert_eq!(compare_versions("abc", "def"), FlashDirection::Upgrade);
         assert_eq!(compare_versions("def", "abc"), FlashDirection::Downgrade);
     }
+
+    #[test]
+    fn compare_versions_mixed_numeric_non_numeric() {
+        // One parses as numeric, the other doesn't — falls back to string comparison
+        assert_eq!(compare_versions("1.0", "abc"), FlashDirection::Upgrade);
+    }
+
+    #[test]
+    fn build_flash_plan_vendor_mismatch() {
+        let manifest = test_manifest();
+        let mut drive = test_drive();
+        drive.vendor = "LG".into();
+        let plan = build_flash_plan(
+            &manifest,
+            &drive,
+            FlashPlanRequest {
+                image_id: "main",
+                current_version: "1.03",
+                firmware_size: 1024,
+                firmware_sha256: "abcd1234",
+                signature_present: true,
+                user_confirmed: true,
+            },
+        )
+        .unwrap();
+        assert!(!plan.model_match); // vendor mismatch
+    }
+
+    #[test]
+    fn build_flash_plan_model_mismatch() {
+        let manifest = test_manifest();
+        let mut drive = test_drive();
+        drive.model = "WH16NS40".into();
+        let plan = build_flash_plan(
+            &manifest,
+            &drive,
+            FlashPlanRequest {
+                image_id: "main",
+                current_version: "1.03",
+                firmware_size: 1024,
+                firmware_sha256: "abcd1234",
+                signature_present: true,
+                user_confirmed: true,
+            },
+        )
+        .unwrap();
+        assert!(!plan.model_match);
+    }
+
+    #[test]
+    fn build_flash_plan_revision_mismatch() {
+        let manifest = test_manifest();
+        let mut drive = test_drive();
+        drive.revision = "2.00".into(); // doesn't match "1.0*"
+        let plan = build_flash_plan(
+            &manifest,
+            &drive,
+            FlashPlanRequest {
+                image_id: "main",
+                current_version: "2.00",
+                firmware_size: 1024,
+                firmware_sha256: "abcd1234",
+                signature_present: true,
+                user_confirmed: true,
+            },
+        )
+        .unwrap();
+        assert!(!plan.model_match); // revision glob "1.0*" doesn't match "2.00"
+    }
+
+    #[test]
+    fn dry_run_multiple_failures() {
+        let manifest = test_manifest();
+        let drive = test_drive();
+        let plan = build_flash_plan(
+            &manifest,
+            &drive,
+            FlashPlanRequest {
+                image_id: "main",
+                current_version: "1.03",
+                firmware_size: 1,     // wrong size
+                firmware_sha256: "x", // wrong hash
+                signature_present: false,
+                user_confirmed: false,
+            },
+        )
+        .unwrap();
+        let report = dry_run(&plan);
+        assert!(!report.would_execute);
+        assert!(report.summary.contains("checksum failed"));
+        assert!(report.summary.contains("no signature"));
+        assert!(report.summary.contains("not confirmed"));
+    }
+
+    #[test]
+    fn dry_run_downgrade() {
+        let manifest = test_manifest();
+        let drive = test_drive();
+        let plan = build_flash_plan(
+            &manifest,
+            &drive,
+            FlashPlanRequest {
+                image_id: "main",
+                current_version: "1.05",
+                firmware_size: 1024,
+                firmware_sha256: "abcd1234",
+                signature_present: true,
+                user_confirmed: true,
+            },
+        )
+        .unwrap();
+        let report = dry_run(&plan);
+        assert!(report.would_execute);
+        assert_eq!(report.direction, FlashDirection::Downgrade);
+    }
+
+    #[test]
+    fn dry_run_same_version() {
+        let manifest = test_manifest();
+        let drive = test_drive();
+        let plan = build_flash_plan(
+            &manifest,
+            &drive,
+            FlashPlanRequest {
+                image_id: "main",
+                current_version: "1.04",
+                firmware_size: 1024,
+                firmware_sha256: "abcd1234",
+                signature_present: true,
+                user_confirmed: true,
+            },
+        )
+        .unwrap();
+        let report = dry_run(&plan);
+        assert_eq!(report.direction, FlashDirection::Same);
+    }
+
+    #[test]
+    fn sha256_hex_deterministic() {
+        let a = sha256_hex(b"test data");
+        let b = sha256_hex(b"test data");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn sha256_hex_different_inputs() {
+        let a = sha256_hex(b"hello");
+        let b = sha256_hex(b"world");
+        assert_ne!(a, b);
+    }
 }

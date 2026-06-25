@@ -235,4 +235,182 @@ mod tests {
     fn prgv_zero_total_clamps() {
         assert_eq!(parse_progress_percent("PRGV:0,0"), None);
     }
+
+    #[cfg(unix)]
+    fn make_exit_status(code: i32) -> std::process::ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(code)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn combined_both_empty() {
+        let out = CommandOutput {
+            status: make_exit_status(0),
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        assert_eq!(out.combined(), "");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn combined_only_stdout() {
+        let out = CommandOutput {
+            status: make_exit_status(0),
+            stdout: "hello\n".into(),
+            stderr: String::new(),
+        };
+        assert_eq!(out.combined(), "hello\n");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn combined_only_stderr() {
+        let out = CommandOutput {
+            status: make_exit_status(0),
+            stdout: String::new(),
+            stderr: "error\n".into(),
+        };
+        assert_eq!(out.combined(), "error\n");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn combined_both_present() {
+        let out = CommandOutput {
+            status: make_exit_status(0),
+            stdout: "out\n".into(),
+            stderr: "err\n".into(),
+        };
+        let c = out.combined();
+        assert!(c.contains("out"));
+        assert!(c.contains("err"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn combined_whitespace_only_stdout() {
+        let out = CommandOutput {
+            status: make_exit_status(0),
+            stdout: "   \n  ".into(),
+            stderr: "err\n".into(),
+        };
+        assert_eq!(out.combined(), "err\n");
+    }
+
+    #[test]
+    fn format_command_simple() {
+        let cmd = crate::command::Command {
+            program: "/usr/bin/sdftool".into(),
+            args: vec!["-d".into(), "/dev/sr0".into(), "--info".into()],
+        };
+        assert_eq!(format_command(&cmd), "/usr/bin/sdftool -d /dev/sr0 --info");
+    }
+
+    #[test]
+    fn format_command_quoted_arg() {
+        let cmd = crate::command::Command {
+            program: "/usr/bin/sdftool".into(),
+            args: vec!["-d".into(), "path with spaces".into()],
+        };
+        let result = format_command(&cmd);
+        assert!(result.contains("\"path with spaces\""));
+    }
+
+    #[test]
+    fn parse_progress_percent_prgv_partial() {
+        // PRGV with only one value — should return None
+        assert_eq!(parse_progress_percent("PRGV:50"), None);
+    }
+
+    #[test]
+    fn parse_progress_percent_prgv_over_100() {
+        // Should clamp to 100
+        let p = parse_progress_percent("PRGV:200,100").unwrap();
+        assert!((p - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_progress_percent_prgv_negative() {
+        // Should clamp to 0
+        let p = parse_progress_percent("PRGV:-10,100").unwrap();
+        assert!((p - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_progress_percent_multiple_percent_signs() {
+        // Should use the last % sign
+        assert_eq!(parse_progress_percent("10% then 90%"), Some(90.0));
+    }
+
+    #[test]
+    fn parse_progress_percent_no_digits_before_percent() {
+        assert_eq!(parse_progress_percent("%"), None);
+    }
+
+    #[test]
+    fn run_command_echo() {
+        let result = run_command("echo", &["hello".into()]);
+        assert!(result.is_ok());
+        let out = result.unwrap();
+        assert!(out.success());
+        assert!(out.stdout.contains("hello"));
+    }
+
+    #[test]
+    fn run_command_fails_for_nonexistent() {
+        let result = run_command("definitely_not_a_real_command_12345", &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn run_command_exit_code() {
+        // Use a command that exits with a non-zero code
+        let result = run_command("sh", &["-c".into(), "exit 42".into()]);
+        assert!(result.is_ok());
+        let out = result.unwrap();
+        assert!(!out.success());
+    }
+
+    #[test]
+    fn run_command_stderr() {
+        let result = run_command("sh", &["-c".into(), "echo error >&2".into()]);
+        assert!(result.is_ok());
+        let out = result.unwrap();
+        assert!(out.stderr.contains("error"));
+    }
+
+    #[test]
+    fn run_command_streaming_echo() {
+        let mut lines = Vec::new();
+        let result = run_command_streaming("echo", &["hello".into()], |line| {
+            lines.push(line.to_string());
+        });
+        assert!(result.is_ok());
+        let out = result.unwrap();
+        assert!(out.success());
+        assert!(lines.iter().any(|l| l.contains("hello")));
+    }
+
+    #[test]
+    fn run_command_streaming_fails() {
+        let result = run_command_streaming("definitely_not_real_12345", &[], |_| {});
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn run_command_streaming_stderr() {
+        let mut lines = Vec::new();
+        let result = run_command_streaming(
+            "sh",
+            &["-c".into(), "echo out; echo err >&2".into()],
+            |line| {
+                lines.push(line.to_string());
+            },
+        );
+        assert!(result.is_ok());
+        assert!(lines.iter().any(|l| l.contains("out")));
+        assert!(lines.iter().any(|l| l.contains("err")));
+    }
 }

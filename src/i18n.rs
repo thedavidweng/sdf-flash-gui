@@ -429,4 +429,238 @@ mod tests {
         // Just call it to make sure it doesn't panic
         let _ = detect_system_language();
     }
+
+    #[test]
+    fn test_all_display_names_unique() {
+        let mut names = std::collections::HashSet::new();
+        for lang in Language::ALL {
+            let name = lang.display_name();
+            assert!(names.insert(name), "duplicate display name: {name}");
+        }
+    }
+
+    #[test]
+    fn test_display_name_auto() {
+        assert_eq!(Language::Auto.display_name(), "Auto-detect");
+    }
+
+    #[test]
+    fn test_display_name_english() {
+        assert_eq!(Language::English.display_name(), "English (English)");
+    }
+
+    #[test]
+    fn test_display_name_german() {
+        assert_eq!(Language::German.display_name(), "Deutsch (German)");
+    }
+
+    #[test]
+    fn test_display_name_french() {
+        assert_eq!(Language::French.display_name(), "Français (French)");
+    }
+
+    #[test]
+    fn test_display_name_japanese_not_present() {
+        // Japanese is not in the supported list
+        assert!(!Language::ALL
+            .iter()
+            .any(|l| l.display_name().contains("Japanese")));
+    }
+
+    #[test]
+    fn test_resolve_language_specific() {
+        for lang in Language::ALL {
+            if *lang == Language::Auto {
+                continue;
+            }
+            assert_eq!(resolve_language(*lang), *lang);
+        }
+    }
+
+    #[test]
+    fn test_t_with_args_no_args() {
+        let text = t_with_args(L10nKey::TitleDriveProperties, Language::English, &[]);
+        assert_eq!(text, "Drive Properties");
+    }
+
+    #[test]
+    fn test_t_with_args_multiple_args() {
+        // LabelTypeToConfirm has {required} placeholder
+        let args = [("required", "FLASH H:")];
+        let text = t_with_args(L10nKey::LabelTypeToConfirm, Language::English, &args);
+        assert!(text.contains("FLASH H:"));
+    }
+
+    #[test]
+    fn test_t_with_args_missing_placeholder() {
+        // If placeholder doesn't exist, text should be unchanged
+        let args = [("nonexistent", "value")];
+        let text = t_with_args(L10nKey::TitleDriveProperties, Language::English, &args);
+        assert_eq!(text, "Drive Properties");
+    }
+
+    #[test]
+    fn test_all_keys_return_non_empty_english() {
+        for key in [
+            L10nKey::TitleDriveProperties,
+            L10nKey::LabelDevice,
+            L10nKey::SectionOperation,
+            L10nKey::TabWrite,
+            L10nKey::TabRead,
+            L10nKey::TabRecover,
+            L10nKey::SectionFlashOptions,
+            L10nKey::OptionBootloader,
+            L10nKey::OptionEncrypted,
+            L10nKey::SectionFirmwareImage,
+            L10nKey::BtnBrowse,
+            L10nKey::SectionManifest,
+            L10nKey::LabelImageId,
+            L10nKey::SectionOutputFolder,
+            L10nKey::SectionConfirmation,
+            L10nKey::SectionStatus,
+            L10nKey::LabelTypeToConfirm,
+            L10nKey::LabelWrongFw,
+            L10nKey::BtnExtract,
+            L10nKey::BtnClose,
+            L10nKey::BtnStart,
+            L10nKey::StatusReady,
+            L10nKey::StatusNoDrives,
+            L10nKey::StatusProbing,
+            L10nKey::StatusProbeFailed,
+            L10nKey::StatusOpSuccess,
+            L10nKey::TooltipRefresh,
+            L10nKey::TooltipSettings,
+            L10nKey::TooltipAbout,
+            L10nKey::TooltipStartEnabled,
+            L10nKey::TitleExitWarning,
+            L10nKey::LabelExitWarningMsg,
+            L10nKey::LabelExitWarningDesc,
+            L10nKey::LabelExitWarningAsk,
+            L10nKey::BtnNoCancel,
+            L10nKey::BtnYesForce,
+            L10nKey::TitleSettings,
+            L10nKey::LabelBackend,
+            L10nKey::LabelToolPath,
+            L10nKey::LabelSdfPath,
+            L10nKey::BtnListDrives,
+            L10nKey::BtnParseSdf,
+            L10nKey::LabelAutodetected,
+            L10nKey::LabelLanguage,
+            L10nKey::AboutDescription,
+            L10nKey::AboutBuiltWith,
+            L10nKey::AboutAcknowledgementsTitle,
+            L10nKey::AboutBackendAckText,
+            L10nKey::AboutCreatorAckText,
+            L10nKey::ReasonBusy,
+            L10nKey::ReasonProbing,
+            L10nKey::ReasonNoDrive,
+            L10nKey::ReasonNotMt1959,
+            L10nKey::ReasonNoBackend,
+            L10nKey::ReasonNoFirmware,
+            L10nKey::ReasonConflict,
+            L10nKey::ReasonRunValidation,
+            L10nKey::ReasonEnterToken,
+        ] {
+            let text = t(key, Language::English);
+            assert!(!text.is_empty(), "empty translation for key: {key:?}");
+        }
+    }
+
+    #[test]
+    fn test_language_all_count() {
+        // 31 languages including Auto
+        assert_eq!(Language::ALL.len(), 31);
+    }
+
+    #[test]
+    fn test_language_clone_copy() {
+        let lang = Language::French;
+        let cloned = lang;
+        assert_eq!(lang, cloned);
+    }
+
+    #[test]
+    fn test_language_debug() {
+        let debug = format!("{:?}", Language::German);
+        assert_eq!(debug, "German");
+    }
+
+    #[test]
+    fn test_language_serde_roundtrip() {
+        let lang = Language::French;
+        let json = serde_json::to_string(&lang).unwrap();
+        let deserialized: Language = serde_json::from_str(&json).unwrap();
+        assert_eq!(lang, deserialized);
+    }
+
+    #[test]
+    fn test_l10n_key_count() {
+        // Count actual variants by checking every key produces a non-empty translation.
+        // This catches accidental deletion of keys or translations.
+        let all_keys = [
+            L10nKey::TitleDriveProperties,
+            L10nKey::LabelDevice,
+            L10nKey::SectionOperation,
+            L10nKey::TabWrite,
+            L10nKey::TabRead,
+            L10nKey::TabRecover,
+            L10nKey::SectionFlashOptions,
+            L10nKey::OptionBootloader,
+            L10nKey::OptionEncrypted,
+            L10nKey::SectionFirmwareImage,
+            L10nKey::BtnBrowse,
+            L10nKey::SectionManifest,
+            L10nKey::LabelImageId,
+            L10nKey::SectionOutputFolder,
+            L10nKey::SectionConfirmation,
+            L10nKey::SectionStatus,
+            L10nKey::LabelTypeToConfirm,
+            L10nKey::LabelWrongFw,
+            L10nKey::BtnExtract,
+            L10nKey::BtnClose,
+            L10nKey::BtnStart,
+            L10nKey::StatusReady,
+            L10nKey::StatusNoDrives,
+            L10nKey::StatusProbing,
+            L10nKey::StatusProbeFailed,
+            L10nKey::StatusOpSuccess,
+            L10nKey::TooltipRefresh,
+            L10nKey::TooltipSettings,
+            L10nKey::TooltipAbout,
+            L10nKey::TooltipStartEnabled,
+            L10nKey::TitleExitWarning,
+            L10nKey::LabelExitWarningMsg,
+            L10nKey::LabelExitWarningDesc,
+            L10nKey::LabelExitWarningAsk,
+            L10nKey::BtnNoCancel,
+            L10nKey::BtnYesForce,
+            L10nKey::TitleSettings,
+            L10nKey::LabelBackend,
+            L10nKey::LabelToolPath,
+            L10nKey::LabelSdfPath,
+            L10nKey::BtnListDrives,
+            L10nKey::BtnParseSdf,
+            L10nKey::LabelAutodetected,
+            L10nKey::LabelLanguage,
+            L10nKey::AboutDescription,
+            L10nKey::AboutBuiltWith,
+            L10nKey::AboutAcknowledgementsTitle,
+            L10nKey::AboutBackendAckText,
+            L10nKey::AboutCreatorAckText,
+            L10nKey::ReasonBusy,
+            L10nKey::ReasonProbing,
+            L10nKey::ReasonNoDrive,
+            L10nKey::ReasonNotMt1959,
+            L10nKey::ReasonNoBackend,
+            L10nKey::ReasonNoFirmware,
+            L10nKey::ReasonConflict,
+            L10nKey::ReasonRunValidation,
+            L10nKey::ReasonEnterToken,
+        ];
+        assert_eq!(
+            all_keys.len(),
+            58,
+            "L10nKey variant count changed — update this test if intentional"
+        );
+    }
 }

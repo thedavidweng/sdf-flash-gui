@@ -299,4 +299,133 @@ mod tests {
         assert!(container.metadata.vendor.is_none());
         assert!(container.metadata.model.is_none());
     }
+
+    #[test]
+    fn parse_sdf0_model_key() {
+        let mut data = build_sdf0_header(1, 24, 24, 0x00, 56);
+        data.extend_from_slice(b"Model\0BU40N\0");
+        let mut cursor = Cursor::new(&data);
+        let container = parse_sdf0(&mut cursor).unwrap();
+        assert_eq!(container.metadata.model.as_deref(), Some("BU40N"));
+    }
+
+    #[test]
+    fn parse_sdf0_model_lowercase() {
+        let mut data = build_sdf0_header(1, 24, 24, 0x00, 56);
+        data.extend_from_slice(b"model\0BU40N\0");
+        let mut cursor = Cursor::new(&data);
+        let container = parse_sdf0(&mut cursor).unwrap();
+        assert_eq!(container.metadata.model.as_deref(), Some("BU40N"));
+    }
+
+    #[test]
+    fn parse_sdf0_fwver_key() {
+        let mut data = build_sdf0_header(1, 24, 24, 0x00, 60);
+        data.extend_from_slice(b"FWVer\01.04\0");
+        let mut cursor = Cursor::new(&data);
+        let container = parse_sdf0(&mut cursor).unwrap();
+        assert_eq!(container.metadata.firmware_version.as_deref(), Some("1.04"));
+    }
+
+    #[test]
+    fn parse_sdf0_unknown_key_in_extra() {
+        let mut data = build_sdf0_header(1, 24, 24, 0x00, 60);
+        data.extend_from_slice(b"CustomKey\0CustomVal\0");
+        let mut cursor = Cursor::new(&data);
+        let container = parse_sdf0(&mut cursor).unwrap();
+        assert_eq!(container.metadata.extra.len(), 1);
+        assert_eq!(container.metadata.extra[0].0, "CustomKey");
+        assert_eq!(container.metadata.extra[0].1, "CustomVal");
+        // Unknown keys don't map to known fields
+        assert!(container.metadata.vendor.is_none());
+    }
+
+    #[test]
+    fn parse_sdf0_known_and_unknown_keys() {
+        let mut data = build_sdf0_header(1, 24, 24, 0x00, 80);
+        data.extend_from_slice(b"Vendor\0LG\0Custom\0Val\0Model\0BU40N\0");
+        let mut cursor = Cursor::new(&data);
+        let container = parse_sdf0(&mut cursor).unwrap();
+        assert_eq!(container.metadata.vendor.as_deref(), Some("LG"));
+        assert_eq!(container.metadata.model.as_deref(), Some("BU40N"));
+        assert_eq!(container.metadata.extra.len(), 3);
+    }
+
+    #[test]
+    fn parse_sdf0_truncated_metadata() {
+        // Metadata table with truncated key (no null terminator)
+        let mut data = build_sdf0_header(1, 24, 24, 0x00, 30);
+        data.extend_from_slice(b"Ven"); // truncated, no null
+        let mut cursor = Cursor::new(&data);
+        let container = parse_sdf0(&mut cursor).unwrap();
+        // Should not crash, metadata should be empty or partial
+        assert!(container.metadata.vendor.is_none());
+    }
+
+    #[test]
+    fn parse_sdf0_truncated_value() {
+        // Key present but value truncated
+        let mut data = build_sdf0_header(1, 24, 24, 0x00, 32);
+        data.extend_from_slice(b"Vendor\0LG"); // no null terminator for value
+        let mut cursor = Cursor::new(&data);
+        let container = parse_sdf0(&mut cursor).unwrap();
+        // Should not crash
+        assert!(container.metadata.vendor.is_none()); // value wasn't terminated
+    }
+
+    #[test]
+    fn parse_sdf0_larger_header() {
+        // header_size > 24 means there's extra header data to skip
+        let mut data = build_sdf0_header(1, 32, 32, 0x00, 64);
+        // 8 bytes of extra header padding
+        data.extend_from_slice(&[0xAA; 8]);
+        // metadata table
+        data.extend_from_slice(b"Vendor\0Test\0");
+        let mut cursor = Cursor::new(&data);
+        let container = parse_sdf0(&mut cursor).unwrap();
+        assert_eq!(container.metadata.vendor.as_deref(), Some("Test"));
+    }
+
+    #[test]
+    fn parse_sdf0_zero_table_offset() {
+        let data = build_sdf0_header(1, 24, 0, 0x00, 24);
+        let mut cursor = Cursor::new(&data);
+        let container = parse_sdf0(&mut cursor).unwrap();
+        assert!(container.metadata.vendor.is_none());
+    }
+
+    #[test]
+    fn sdf0_magic_constant() {
+        assert_eq!(SDF0_MAGIC, b"SDF0");
+    }
+
+    #[test]
+    fn sdf_error_display() {
+        let err = SdfError::InvalidMagic {
+            expected: *SDF0_MAGIC,
+            got: *b"NOPE",
+        };
+        let msg = format!("{err}");
+        // "SDF0" appears in the literal error message template "invalid SDF0 magic"
+        assert!(msg.contains("SDF0"));
+        assert!(msg.contains("invalid SDF0 magic"));
+    }
+
+    #[test]
+    fn sdf_error_data_too_short_display() {
+        let err = SdfError::DataTooShort {
+            needed: 24,
+            have: 10,
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("24"));
+        assert!(msg.contains("10"));
+    }
+
+    #[test]
+    fn sdf_error_invalid_version_display() {
+        let err = SdfError::InvalidVersion(0);
+        let msg = format!("{err}");
+        assert!(msg.contains("0"));
+    }
 }

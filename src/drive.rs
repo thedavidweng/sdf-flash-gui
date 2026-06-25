@@ -324,3 +324,154 @@ fn which(name: &str) -> Result<String, String> {
     }
     Err(format!("{name} not found"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_from_name_sdftool() {
+        assert_eq!(
+            backend_from_name("sdftool"),
+            crate::command::Backend::SdfTool
+        );
+        assert_eq!(
+            backend_from_name("sdftool64"),
+            crate::command::Backend::SdfTool
+        );
+        assert_eq!(
+            backend_from_name("/usr/bin/sdftool"),
+            crate::command::Backend::SdfTool
+        );
+    }
+
+    #[test]
+    fn backend_from_name_makemkvcon() {
+        assert_eq!(
+            backend_from_name("makemkvcon"),
+            crate::command::Backend::MakeMkvCon
+        );
+        assert_eq!(
+            backend_from_name("makemkvcon64"),
+            crate::command::Backend::MakeMkvCon
+        );
+        assert_eq!(
+            backend_from_name("makemkv_something"),
+            crate::command::Backend::MakeMkvCon
+        );
+    }
+
+    #[test]
+    fn backend_from_name_unknown() {
+        assert_eq!(
+            backend_from_name("unknown_tool"),
+            crate::command::Backend::SdfTool
+        );
+        assert_eq!(backend_from_name(""), crate::command::Backend::SdfTool);
+    }
+
+    #[test]
+    fn resolve_name_existing_file() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_resolve");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("test_binary");
+        std::fs::write(&file, b"").unwrap();
+        let name = resolve_name(&file.to_string_lossy());
+        assert_eq!(name, "test_binary");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_name_nonexistent() {
+        let name = resolve_name("/nonexistent/path/binary");
+        assert_eq!(name, "binary");
+    }
+
+    #[test]
+    fn drive_to_drive_match() {
+        let drive = Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        };
+        let dm: manifest::DriveMatch = (&drive).into();
+        assert_eq!(dm.vendor, "HL-DT-ST");
+        assert_eq!(dm.model, "BU40N");
+        assert_eq!(dm.revision, "1.03");
+    }
+
+    #[test]
+    fn drive_to_drive_match_empty() {
+        let drive = Drive {
+            device: "/dev/sr0".into(),
+            vendor: String::new(),
+            product: String::new(),
+            revision: String::new(),
+        };
+        let dm: manifest::DriveMatch = (&drive).into();
+        assert!(dm.vendor.is_empty());
+        assert!(dm.model.is_empty());
+        assert!(dm.revision.is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn parse_vendor_product_underscore() {
+        let (v, p) = parse_vendor_product("HL-DT-ST_BU40N");
+        assert_eq!(v, "HL-DT-ST");
+        assert_eq!(p, "BU40N");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn parse_vendor_product_space() {
+        let (v, p) = parse_vendor_product("HL-DT-ST BU40N");
+        assert_eq!(v, "HL-DT-ST");
+        assert_eq!(p, "BU40N");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn parse_vendor_product_no_separator() {
+        let (v, p) = parse_vendor_product("BU40N");
+        assert!(v.is_empty());
+        assert_eq!(p, "BU40N");
+    }
+
+    #[test]
+    fn which_returns_error_for_nonexistent() {
+        let result = which("definitely_not_a_real_command_12345");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn which_finds_echo() {
+        let result = which("echo");
+        assert!(result.is_ok());
+        assert!(result.unwrap().contains("echo"));
+    }
+
+    #[test]
+    fn find_backend_returns_option() {
+        // On CI, this may return None (no sdftool/makemkvcon installed)
+        // The important thing is it doesn't crash
+        let result = find_backend();
+        if let Some((backend, path)) = result {
+            assert!(!path.is_empty());
+            match backend {
+                crate::command::Backend::SdfTool | crate::command::Backend::MakeMkvCon => {}
+            }
+        }
+    }
+
+    #[test]
+    fn enumerate_drives_returns_vec() {
+        // On CI, this returns an empty vec (no optical drives)
+        let drives = enumerate_drives();
+        // Just verify it doesn't crash
+        for d in &drives {
+            assert!(!d.device.is_empty());
+        }
+    }
+}

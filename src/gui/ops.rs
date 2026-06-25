@@ -390,3 +390,677 @@ fn drive_serial_hint(drive: &Drive) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::state::AppState;
+    use super::super::OperationMode;
+    use super::*;
+    use crate::drive::Drive;
+
+    fn test_drive() -> Drive {
+        Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        }
+    }
+
+    #[test]
+    fn drive_label_with_vendor() {
+        let d = test_drive();
+        let label = drive_label(&d);
+        assert!(label.contains("HL-DT-ST"));
+        assert!(label.contains("BU40N"));
+        assert!(label.contains("1.03"));
+        assert!(label.contains("/dev/sr0"));
+    }
+
+    #[test]
+    fn drive_label_without_vendor() {
+        let d = Drive {
+            device: "/dev/sr0".into(),
+            vendor: String::new(),
+            product: String::new(),
+            revision: String::new(),
+        };
+        let label = drive_label(&d);
+        assert_eq!(label, "/dev/sr0");
+    }
+
+    #[test]
+    fn drive_serial_hint_basic() {
+        let d = test_drive();
+        let hint = drive_serial_hint(&d);
+        // "HL-DT-ST_BU40N_1.03" split by ['_', '-', ' '] → ["HL", "DT", "ST", "BU40N", "1.03"]
+        // skip 2 → "ST BU40N 1.03"
+        assert_eq!(hint, "ST BU40N 1.03");
+    }
+
+    #[test]
+    fn drive_serial_hint_longer() {
+        let d = Drive {
+            device: "/dev/sr0".into(),
+            vendor: "VENDOR".into(),
+            product: "PRODUCT".into(),
+            revision: "REV".into(),
+        };
+        let hint = drive_serial_hint(&d);
+        assert_eq!(hint, "REV");
+    }
+
+    #[test]
+    fn can_start_no_drive() {
+        let mut state = AppState::new_no_backend();
+        state.selected_drive = None;
+        assert!(!can_start(&state));
+    }
+
+    #[test]
+    fn can_start_busy() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.busy = true;
+        assert!(!can_start(&state));
+    }
+
+    #[test]
+    fn can_start_probing() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.probing = true;
+        assert!(!can_start(&state));
+    }
+
+    #[test]
+    fn can_start_not_mt1959() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = false;
+        assert!(!can_start(&state));
+    }
+
+    #[test]
+    fn can_start_read_mode_valid() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Read;
+        // Need a valid tool path — create a temp file
+        let temp_dir = std::env::temp_dir().join("sdf_flash_test_ops");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let tool = temp_dir.join("sdftool_test");
+        std::fs::write(&tool, b"").unwrap();
+        state.tool_path = tool.to_string_lossy().to_string();
+        // validate_sdf_path with empty is ok
+        state.sdf_path = String::new();
+        assert!(can_start(&state));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn can_start_write_no_firmware() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.firmware_data = None;
+        state.firmware_path = String::new();
+        assert!(!can_start(&state));
+    }
+
+    #[test]
+    fn can_start_write_conflicting_modes() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.firmware_data = Some(vec![0u8; 100]);
+        state.firmware_path = "fw.bin".into();
+        state.encrypted_write = true;
+        state.include_boot_loader = true;
+        assert!(!can_start(&state));
+    }
+
+    #[test]
+    fn can_start_recover_no_token() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Recover;
+        state.recovery_token = String::new();
+        assert!(!can_start(&state));
+    }
+
+    #[test]
+    fn can_start_recover_wrong_confirmation() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Recover;
+        state.recovery_token = "ABCDEFGHIJKLMNOP".into();
+        state.firmware_path = "fw.bin".into();
+        state.confirmation = "WRONG".into();
+        assert!(!can_start(&state));
+    }
+
+    #[test]
+    fn start_disabled_reason_busy() {
+        let mut state = AppState::new_no_backend();
+        state.busy = true;
+        let reason = start_disabled_reason(&state);
+        assert!(reason.contains("progress"));
+    }
+
+    #[test]
+    fn start_disabled_reason_probing() {
+        let mut state = AppState::new_no_backend();
+        state.probing = true;
+        let reason = start_disabled_reason(&state);
+        assert!(reason.contains("Probing"));
+    }
+
+    #[test]
+    fn start_disabled_reason_no_drive() {
+        let mut state = AppState::new_no_backend();
+        state.selected_drive = None;
+        let reason = start_disabled_reason(&state);
+        assert!(reason.contains("drive"));
+    }
+
+    #[test]
+    fn start_disabled_reason_not_mt1959() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = false;
+        let reason = start_disabled_reason(&state);
+        assert!(reason.contains("MT1959"));
+    }
+
+    fn state_with_valid_paths(suffix: &str) -> (AppState, std::path::PathBuf) {
+        let temp_dir = std::env::temp_dir().join(format!("sdf_flash_test_reasons_{suffix}"));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let tool = temp_dir.join("sdftool_test");
+        std::fs::write(&tool, b"").unwrap();
+        let mut state = AppState::new_no_backend();
+        state.tool_path = tool.to_string_lossy().to_string();
+        state.sdf_path = String::new(); // empty sdf_path is OK (validate_sdf_path returns Ok for empty)
+        (state, temp_dir)
+    }
+
+    #[test]
+    fn start_disabled_reason_write_no_firmware() {
+        let (mut state, temp_dir) = state_with_valid_paths("nofw");
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.firmware_data = None;
+        let reason = start_disabled_reason(&state);
+        assert!(
+            !reason.is_empty(),
+            "reason should not be empty when no firmware"
+        );
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn start_disabled_reason_write_conflict() {
+        let (mut state, temp_dir) = state_with_valid_paths("conflict");
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.firmware_data = Some(vec![0u8; 100]);
+        state.encrypted_write = true;
+        state.include_boot_loader = true;
+        let reason = start_disabled_reason(&state);
+        assert!(!reason.is_empty(), "reason should not be empty");
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn start_disabled_reason_recover() {
+        let (mut state, temp_dir) = state_with_valid_paths("recover");
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Recover;
+        state.recovery_token = String::new();
+        let reason = start_disabled_reason(&state);
+        assert!(!reason.is_empty(), "reason should not be empty");
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn on_operation_mode_changed_read() {
+        let mut state = AppState::new_no_backend();
+        state.flash_report = Some(crate::flash::FlashReport {
+            would_execute: true,
+            direction: crate::flash::FlashDirection::Upgrade,
+            checks: crate::flash::FlashChecks {
+                model_match: true,
+                revision_check: true,
+                image_checksum: true,
+                signature_present: true,
+                user_confirmed: true,
+            },
+            summary: "test".into(),
+        });
+        state.confirmation = "test".into();
+        on_operation_mode_changed(&mut state, OperationMode::Read);
+        assert!(state.flash_report.is_none());
+        assert!(state.confirmation.is_empty());
+    }
+
+    #[test]
+    fn on_operation_mode_changed_write() {
+        let mut state = AppState::new_no_backend();
+        on_operation_mode_changed(&mut state, OperationMode::Write);
+        assert!(state.flash_report.is_none());
+        assert!(state.status_message.contains("firmware"));
+    }
+
+    #[test]
+    fn on_operation_mode_changed_recover() {
+        let mut state = AppState::new_no_backend();
+        on_operation_mode_changed(&mut state, OperationMode::Recover);
+        assert!(state.pending_recover_browse);
+        assert!(state.status_message.contains("token"));
+    }
+
+    #[test]
+    fn load_firmware_nonexistent() {
+        let mut state = AppState::new_no_backend();
+        load_firmware(&mut state, "/nonexistent/path/fw.bin");
+        assert!(state.firmware_data.is_none());
+        assert!(state.firmware_path == "/nonexistent/path/fw.bin");
+        assert!(state.log_text.contains("ERROR"));
+    }
+
+    #[test]
+    fn load_firmware_empty_file() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_load_fw");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("empty.bin");
+        std::fs::write(&file, b"").unwrap();
+        let mut state = AppState::new_no_backend();
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert!(state.firmware_data.is_none());
+        assert!(state.log_text.contains("empty"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_firmware_valid() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_load_fw_valid");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("valid.bin");
+        std::fs::write(&file, &[0u8; 1024]).unwrap();
+        let mut state = AppState::new_no_backend();
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert!(state.firmware_data.is_some());
+        assert_eq!(state.firmware_data.as_ref().unwrap().len(), 1024);
+        assert!(state.log_text.contains("Loaded firmware"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_manifest_nonexistent() {
+        let mut state = AppState::new_no_backend();
+        load_manifest(&mut state, "/nonexistent/manifest.json");
+        assert!(state.manifest.is_none());
+        assert!(state.log_text.contains("ERROR"));
+    }
+
+    #[test]
+    fn load_manifest_valid() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_load_mf");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("manifest.json");
+        let json = r#"{
+            "schema_version": 1,
+            "vendor": "HL-DT-ST",
+            "model": "BU40N",
+            "revision_match": "*",
+            "firmware_images": [{
+                "image_id": "main",
+                "filename": "fw.bin",
+                "target_version": "1.04",
+                "size": 1024,
+                "sha256": "abcd"
+            }]
+        }"#;
+        std::fs::write(&file, json).unwrap();
+        let mut state = AppState::new_no_backend();
+        load_manifest(&mut state, &file.to_string_lossy());
+        assert!(state.manifest.is_some());
+        assert_eq!(state.selected_image_id.as_deref(), Some("main"));
+        assert!(state.log_text.contains("Loaded manifest"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_manifest_invalid_json() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_load_mf_bad");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("bad.json");
+        std::fs::write(&file, "not json").unwrap();
+        let mut state = AppState::new_no_backend();
+        load_manifest(&mut state, &file.to_string_lossy());
+        assert!(state.manifest.is_none());
+        assert!(state.log_text.contains("invalid manifest"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_manifest_multiple_images() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_load_mf_multi");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("manifest.json");
+        let json = r#"{
+            "schema_version": 1,
+            "vendor": "V",
+            "model": "M",
+            "revision_match": "*",
+            "firmware_images": [
+                {"image_id": "a", "filename": "a.bin", "target_version": "1.0", "size": 100, "sha256": "aa"},
+                {"image_id": "b", "filename": "b.bin", "target_version": "2.0", "size": 200, "sha256": "bb"}
+            ]
+        }"#;
+        std::fs::write(&file, json).unwrap();
+        let mut state = AppState::new_no_backend();
+        load_manifest(&mut state, &file.to_string_lossy());
+        assert!(state.manifest.is_some());
+        assert!(state.selected_image_id.is_none()); // multiple images, no auto-select
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn refresh_drives_empty() {
+        let mut state = AppState::new_no_backend();
+        state.selected_drive = Some(0);
+        refresh_drives(&mut state);
+        // On CI there are no optical drives — verify postcondition
+        assert!(
+            !state.drives.is_empty() || state.selected_drive.is_none(),
+            "when no drives found, selected_drive must be None"
+        );
+    }
+
+    #[test]
+    fn validate_flash_no_drive() {
+        let mut state = AppState::new_no_backend();
+        state.selected_drive = None;
+        validate_flash(&mut state);
+        // Should not crash, no flash report set
+        assert!(state.flash_report.is_none());
+    }
+
+    #[test]
+    fn validate_flash_no_manifest() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.manifest = None;
+        validate_flash(&mut state);
+        assert!(state.flash_report.is_none());
+        assert!(state.log_text.contains("manifest"));
+    }
+
+    #[test]
+    fn validate_flash_no_firmware_data() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.manifest = Some(crate::manifest::FirmwareManifest {
+            schema_version: 1,
+            vendor: "V".into(),
+            model: "M".into(),
+            revision_match: "*".into(),
+            capabilities: vec![],
+            firmware_images: vec![crate::manifest::FirmwareImage {
+                image_id: "main".into(),
+                filename: "fw.bin".into(),
+                target_version: "1.04".into(),
+                size: 1024,
+                sha256: "abcd".into(),
+                signature_present: true,
+            }],
+        });
+        state.firmware_data = None;
+        validate_flash(&mut state);
+        assert!(state.flash_report.is_none());
+    }
+
+    #[test]
+    fn validate_flash_no_image_id() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.manifest = Some(crate::manifest::FirmwareManifest {
+            schema_version: 1,
+            vendor: "V".into(),
+            model: "M".into(),
+            revision_match: "*".into(),
+            capabilities: vec![],
+            firmware_images: vec![crate::manifest::FirmwareImage {
+                image_id: "main".into(),
+                filename: "fw.bin".into(),
+                target_version: "1.04".into(),
+                size: 1024,
+                sha256: "abcd".into(),
+                signature_present: true,
+            }],
+        });
+        state.firmware_data = Some(vec![0u8; 1024]);
+        state.selected_image_id = None;
+        validate_flash(&mut state);
+        assert!(state.flash_report.is_none());
+        assert!(state.log_text.contains("image"));
+    }
+
+    #[test]
+    fn validate_flash_success() {
+        let temp_dir = std::env::temp_dir().join("sdf_flash_test_validate");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let tool = temp_dir.join("sdftool_test");
+        std::fs::write(&tool, b"").unwrap();
+
+        let mut state = AppState::new_no_backend();
+        state.tool_path = tool.to_string_lossy().to_string();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.manifest = Some(crate::manifest::FirmwareManifest {
+            schema_version: 1,
+            vendor: "HL-DT-ST".into(),
+            model: "BU40N".into(),
+            revision_match: "1.0*".into(),
+            capabilities: vec![],
+            firmware_images: vec![crate::manifest::FirmwareImage {
+                image_id: "main".into(),
+                filename: "fw.bin".into(),
+                target_version: "1.04".into(),
+                size: 1024,
+                sha256: "abcd1234".into(),
+                signature_present: true,
+            }],
+        });
+        state.firmware_data = Some(vec![0u8; 1024]);
+        state.selected_image_id = Some("main".into());
+        state.confirmation = "FLASH /dev/sr0".into();
+        validate_flash(&mut state);
+        // flash_report should be set (even if checksum doesn't match)
+        assert!(state.flash_report.is_some());
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn extract_recovery_token_from_wrong_firmware_empty_path() {
+        let mut state = AppState::new_no_backend();
+        state.wrong_firmware_path = String::new();
+        extract_recovery_token_from_wrong_firmware(&mut state);
+        // Should not crash, should not log error
+        assert!(state.log_text.is_empty());
+    }
+
+    #[test]
+    fn extract_recovery_token_from_wrong_firmware_nonexistent() {
+        let mut state = AppState::new_no_backend();
+        state.wrong_firmware_path = "/nonexistent/fw.bin".into();
+        extract_recovery_token_from_wrong_firmware(&mut state);
+        assert!(state.log_text.contains("ERROR"));
+    }
+
+    #[test]
+    fn extract_recovery_token_from_wrong_firmware_valid() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_extract_token");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("wrong.bin");
+        let mut data = vec![0u8; 12_288 + 16];
+        data[12_288..12_304].copy_from_slice(b"ABCDEFGHIJKLMNOP");
+        std::fs::write(&file, &data).unwrap();
+
+        let mut state = AppState::new_no_backend();
+        state.wrong_firmware_path = file.to_string_lossy().to_string();
+        extract_recovery_token_from_wrong_firmware(&mut state);
+        assert_eq!(state.recovery_token, "ABCDEFGHIJKLMNOP");
+        assert!(state.log_text.contains("Extracted"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn extract_recovery_token_from_wrong_firmware_too_short() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_extract_short");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("short.bin");
+        std::fs::write(&file, &[0u8; 100]).unwrap();
+
+        let mut state = AppState::new_no_backend();
+        state.wrong_firmware_path = file.to_string_lossy().to_string();
+        extract_recovery_token_from_wrong_firmware(&mut state);
+        assert!(state.log_text.contains("ERROR"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn prompt_recovery_wrong_firmware_already_set() {
+        let mut state = AppState::new_no_backend();
+        state.wrong_firmware_path = "/some/path.bin".into();
+        prompt_recovery_wrong_firmware(&mut state);
+        // Should not log anything since path is already set
+        assert!(state.log_text.is_empty());
+    }
+
+    #[test]
+    fn can_start_read_no_tool_path() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Read;
+        state.tool_path = String::new();
+        assert!(!can_start(&state));
+    }
+
+    #[test]
+    fn can_start_read_invalid_sdf_path() {
+        let (mut state, temp_dir) = state_with_valid_paths("invaliddf");
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Read;
+        state.sdf_path = "/nonexistent/file.txt".into();
+        assert!(!can_start(&state));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn execute_start_write_no_drive() {
+        let mut state = AppState::new_no_backend();
+        state.selected_drive = None;
+        let (tx, _rx) = std::sync::mpsc::channel();
+        execute_start(&mut state, &tx);
+        // Should not crash
+    }
+
+    #[test]
+    fn execute_start_write_validation_fails() {
+        let mut state = AppState::new_no_backend();
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.firmware_data = None; // no firmware → validation fails
+        let (tx, _rx) = std::sync::mpsc::channel();
+        execute_start(&mut state, &tx);
+        // Should not crash, flash_report should be None
+        assert!(state.flash_report.is_none());
+    }
+
+    #[test]
+    fn execute_start_recover_no_drive() {
+        let mut state = AppState::new_no_backend();
+        state.operation_mode = OperationMode::Recover;
+        state.selected_drive = None;
+        let (tx, _rx) = std::sync::mpsc::channel();
+        execute_start(&mut state, &tx);
+        // Should not crash
+    }
+
+    #[test]
+    fn start_disabled_reason_read_empty() {
+        let (mut state, temp_dir) = state_with_valid_paths("readempty");
+        state.drives.push(test_drive());
+        state.selected_drive = Some(0);
+        state.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Read;
+        let reason = start_disabled_reason(&state);
+        // Read mode with valid paths should return empty (can start)
+        assert!(
+            reason.is_empty(),
+            "read mode should be startable, got: {reason}"
+        );
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn load_firmware_populates_candidates() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_fw_candidates");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("a.bin"), &[0u8; 10]).unwrap();
+        std::fs::write(dir.join("b.bin"), &[0u8; 20]).unwrap();
+        std::fs::write(dir.join("c.txt"), b"not a bin").unwrap();
+
+        let mut state = AppState::new_no_backend();
+        load_firmware(&mut state, &dir.join("a.bin").to_string_lossy());
+        assert!(state.firmware_data.is_some());
+        // Should find .bin files but not .txt
+        assert!(state
+            .firmware_candidates
+            .iter()
+            .any(|p| p.contains("a.bin")));
+        assert!(state
+            .firmware_candidates
+            .iter()
+            .any(|p| p.contains("b.bin")));
+        assert!(!state
+            .firmware_candidates
+            .iter()
+            .any(|p| p.contains("c.txt")));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
