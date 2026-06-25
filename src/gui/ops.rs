@@ -436,10 +436,6 @@ mod tests {
             self.folder.lock().unwrap().take()
         }
 
-        fn pick_file(&self) -> Option<PathBuf> {
-            self.file.lock().unwrap().take()
-        }
-
         fn pick_file_with_title(
             &self,
             _title: &str,
