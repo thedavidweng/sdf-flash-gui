@@ -9,7 +9,6 @@ pub enum FlashDirection {
     Upgrade,
     Downgrade,
     Same,
-    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,7 +79,12 @@ pub enum FlashError {
 
 pub fn sha256_hex(data: &[u8]) -> String {
     let hash = Sha256::digest(data);
-    hash.iter().map(|b| format!("{b:02x}")).collect()
+    let mut hex = String::with_capacity(64);
+    for b in hash {
+        use std::fmt::Write;
+        let _ = write!(hex, "{b:02x}");
+    }
+    hex
 }
 
 pub fn build_flash_plan(
@@ -174,9 +178,9 @@ fn compare_versions(current: &str, target: &str) -> FlashDirection {
     if current == target {
         return FlashDirection::Same;
     }
-    let cp: Option<Vec<u32>> = current.split(['.', '-']).map(|p| p.parse().ok()).collect();
-    let tp: Option<Vec<u32>> = target.split(['.', '-']).map(|p| p.parse().ok()).collect();
-    if let (Some(cp), Some(tp)) = (&cp, &tp) {
+    let c_parts: Option<Vec<u32>> = current.split(['.', '-']).map(|p| p.parse().ok()).collect();
+    let t_parts: Option<Vec<u32>> = target.split(['.', '-']).map(|p| p.parse().ok()).collect();
+    if let (Some(cp), Some(tp)) = (&c_parts, &t_parts) {
         let max_len = cp.len().max(tp.len());
         for i in 0..max_len {
             let c = cp.get(i).copied().unwrap_or(0);
@@ -189,9 +193,7 @@ fn compare_versions(current: &str, target: &str) -> FlashDirection {
         }
         return FlashDirection::Same;
     }
-    // At least one version string contains non-numeric components (parse failed).
-    // Fall back to lexicographic comparison. Equal is impossible here because
-    // identical strings are caught by the early return at the top of the function.
+    // At least one version contains non-numeric segments; fall back to lexicographic.
     if current < target {
         FlashDirection::Upgrade
     } else {

@@ -21,11 +21,13 @@ impl CommandOutput {
     }
 
     pub fn combined(&self) -> String {
-        match (self.stdout.trim().is_empty(), self.stderr.trim().is_empty()) {
+        let out = self.stdout.trim();
+        let err = self.stderr.trim();
+        match (out.is_empty(), err.is_empty()) {
             (true, true) => String::new(),
             (false, true) => self.stdout.clone(),
             (true, false) => self.stderr.clone(),
-            (false, false) => format!("{}\n{}", self.stdout.trim(), self.stderr.trim()),
+            (false, false) => format!("{out}\n{err}"),
         }
     }
 }
