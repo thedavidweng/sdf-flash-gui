@@ -40,14 +40,11 @@ pub fn parse_drive_identity(device: &str, info_output: &str) -> manifest::DriveM
 
     // Fall back to device label parsing if info output didn't contain fields.
     // Split on '_' only to preserve hyphenated vendor names like "HL-DT-ST".
-    if vendor.is_empty() && model.is_empty() && device.contains('_') {
-        let mut parts = device.splitn(2, '_');
-        if let Some(v) = parts.next() {
+    if vendor.is_empty() && model.is_empty() {
+        if let Some((v, m)) = device.split_once('_') {
             if !v.is_empty() {
                 vendor = v.to_string();
             }
-        }
-        if let Some(m) = parts.next() {
             if !m.is_empty() {
                 model = m.to_string();
             }
@@ -284,6 +281,22 @@ mod tests {
         let dm = parse_drive_identity("VENDOR_MODEL", "");
         assert_eq!(dm.vendor, "VENDOR");
         assert_eq!(dm.model, "MODEL");
+    }
+
+    #[test]
+    fn parse_drive_identity_underscore_empty_vendor() {
+        // "_MODEL" → empty vendor part is skipped, model = "MODEL"
+        let dm = parse_drive_identity("_MODEL", "");
+        assert!(dm.vendor.is_empty());
+        assert_eq!(dm.model, "MODEL");
+    }
+
+    #[test]
+    fn parse_drive_identity_underscore_empty_model() {
+        // "VENDOR_" → vendor = "VENDOR", empty model part is skipped
+        let dm = parse_drive_identity("VENDOR_", "");
+        assert_eq!(dm.vendor, "VENDOR");
+        assert!(dm.model.is_empty());
     }
 
     #[test]

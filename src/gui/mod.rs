@@ -3,7 +3,9 @@
 // This module owns the UI rendering and the eframe::App lifecycle.
 // Business logic lives in ops.rs, workers in workers.rs, state in state.rs.
 
+pub mod file_dialog;
 mod ops;
+mod process_runner;
 mod state;
 mod validation;
 mod workers;
@@ -17,6 +19,8 @@ use eframe::egui;
 use std::sync::mpsc;
 
 use state::AppState;
+use file_dialog::NativeDialog;
+use process_runner::NativeRunner;
 use workers::{spawn_list_drives, spawn_probe, WorkerMsg};
 
 const WINDOW_WIDTH: f32 = 380.0;
@@ -53,6 +57,7 @@ struct App {
     state: AppState,
     worker_rx: mpsc::Receiver<WorkerMsg>,
     worker_tx: mpsc::Sender<WorkerMsg>,
+    runner: std::sync::Arc<dyn process_runner::ProcessRunner>,
 }
 
 impl App {
@@ -71,6 +76,7 @@ impl App {
             state,
             worker_rx,
             worker_tx,
+            runner: std::sync::Arc::new(NativeRunner),
         }
     }
 }
@@ -79,6 +85,7 @@ fn handle_global_shortcuts(
     ctx: &egui::Context,
     state: &mut AppState,
     worker_tx: &mpsc::Sender<WorkerMsg>,
+    runner: &std::sync::Arc<dyn process_runner::ProcessRunner>,
 ) {
     ctx.input_mut(|i| {
         let settings_shortcut =
@@ -110,7 +117,7 @@ fn handle_global_shortcuts(
             && !state.probing
             && ops::can_start(state)
         {
-            ops::execute_start(state, worker_tx);
+            ops::execute_start(state, worker_tx, &NativeDialog, runner);
         }
     });
 }
@@ -118,7 +125,7 @@ fn handle_global_shortcuts(
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         workers::poll_worker(&mut self.state, &self.worker_rx, ctx);
-        handle_global_shortcuts(ctx, &mut self.state, &self.worker_tx);
+        handle_global_shortcuts(ctx, &mut self.state, &self.worker_tx, &self.runner);
 
         if ctx.input(|i| i.viewport().close_requested()) && self.state.busy {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -130,14 +137,14 @@ impl eframe::App for App {
             && self.state.selected_drive != self.state.last_probed_drive
         {
             if let Some(idx) = self.state.selected_drive {
-                spawn_probe(&self.worker_tx, &self.state, idx);
+                spawn_probe(&self.worker_tx, &self.state, idx, &self.runner);
                 self.state.probing = true;
             }
         }
 
         if self.state.pending_recover_browse {
             self.state.pending_recover_browse = false;
-            ops::prompt_recovery_wrong_firmware(&mut self.state);
+            ops::prompt_recovery_wrong_firmware(&mut self.state, &NativeDialog);
         }
 
         let panel_frame =
@@ -146,12 +153,12 @@ impl eframe::App for App {
             .frame(panel_frame)
             .show(ctx, |ui| {
                 ui.add_enabled_ui(!self.state.show_exit_confirmation, |ui| {
-                    show_main_ui(ui, ctx, frame, &mut self.state, &self.worker_tx);
+                    show_main_ui(ui, ctx, frame, &mut self.state, &self.worker_tx, &self.runner);
                 });
             });
 
         if self.state.show_settings {
-            show_settings_window(ctx, &mut self.state, &self.worker_tx);
+            show_settings_window(ctx, &mut self.state, &self.worker_tx, &self.runner);
         }
 
         if self.state.show_about {
@@ -207,6 +214,7 @@ fn show_main_ui(
     frame: &mut eframe::Frame,
     state: &mut AppState,
     worker_tx: &mpsc::Sender<WorkerMsg>,
+    runner: &std::sync::Arc<dyn process_runner::ProcessRunner>,
 ) {
     // ── Toolbar ──
     ui.horizontal(|ui| {
@@ -408,7 +416,7 @@ fn show_main_ui(
                     .on_disabled_hover_text(hover)
                     .clicked()
                 {
-                    ops::execute_start(state, worker_tx);
+                    ops::execute_start(state, worker_tx, &NativeDialog, runner);
                 }
             });
         });
@@ -470,7 +478,7 @@ fn show_firmware_selector(ui: &mut egui::Ui, state: &mut AppState) {
                 .button(t(L10nKey::BtnBrowse, state.resolved_lang))
                 .clicked()
             {
-                ops::browse_firmware_file(state);
+                ops::browse_firmware_file(state, &NativeDialog);
             }
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 if state.firmware_picker_items.len() > 1 {
@@ -495,7 +503,7 @@ fn show_firmware_selector(ui: &mut egui::Ui, state: &mut AppState) {
                         )
                         .on_hover_text(&state.firmware_path);
                     if response.clicked() {
-                        ops::browse_firmware_file(state);
+                        ops::browse_firmware_file(state, &NativeDialog);
                     }
                 }
             });
@@ -746,6 +754,7 @@ fn show_settings_window(
     ctx: &egui::Context,
     state: &mut AppState,
     worker_tx: &mpsc::Sender<WorkerMsg>,
+    runner: &std::sync::Arc<dyn process_runner::ProcessRunner>,
 ) {
     ctx.show_viewport_immediate(
         egui::ViewportId::from_hash_of("settings_viewport"),
@@ -883,7 +892,7 @@ fn show_settings_window(
                         )
                         .clicked()
                     {
-                        spawn_list_drives(worker_tx, state);
+                        spawn_list_drives(worker_tx, state, runner);
                     }
 
                     if ui

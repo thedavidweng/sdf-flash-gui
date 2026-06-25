@@ -108,70 +108,76 @@ impl Language {
     }
 }
 
+/// Map a BCP-47 locale string (case-insensitive) to a supported language.
+/// Returns `English` for any unrecognized prefix.
+pub fn locale_to_language(locale: &str) -> Language {
+    let locale = locale.to_lowercase();
+    if locale.starts_with("bg") {
+        Language::Bulgarian
+    } else if locale.starts_with("hr") {
+        Language::Croatian
+    } else if locale.starts_with("cs") {
+        Language::Czech
+    } else if locale.starts_with("da") {
+        Language::Danish
+    } else if locale.starts_with("nl") {
+        Language::Dutch
+    } else if locale.starts_with("et") {
+        Language::Estonian
+    } else if locale.starts_with("fi") {
+        Language::Finnish
+    } else if locale.starts_with("fr") {
+        Language::French
+    } else if locale.starts_with("gl") {
+        Language::Galician
+    } else if locale.starts_with("de") {
+        Language::German
+    } else if locale.starts_with("el") {
+        Language::Greek
+    } else if locale.starts_with("hu") {
+        Language::Hungarian
+    } else if locale.starts_with("id") {
+        Language::Indonesian
+    } else if locale.starts_with("it") {
+        Language::Italian
+    } else if locale.starts_with("lv") {
+        Language::Latvian
+    } else if locale.starts_with("lt") {
+        Language::Lithuanian
+    } else if locale.starts_with("ms") {
+        Language::Malay
+    } else if locale.starts_with("nb") || locale.starts_with("no") || locale.starts_with("nn") {
+        Language::Norwegian
+    } else if locale.starts_with("pl") {
+        Language::Polish
+    } else if locale.starts_with("pt-br") {
+        Language::PortugueseBrazilian
+    } else if locale.starts_with("pt") {
+        Language::Portuguese
+    } else if locale.starts_with("ro") {
+        Language::Romanian
+    } else if locale.starts_with("ru") {
+        Language::Russian
+    } else if locale.starts_with("sk") {
+        Language::Slovak
+    } else if locale.starts_with("sl") {
+        Language::Slovenian
+    } else if locale.starts_with("es") {
+        Language::Spanish
+    } else if locale.starts_with("sv") {
+        Language::Swedish
+    } else if locale.starts_with("tr") {
+        Language::Turkish
+    } else if locale.starts_with("uk") {
+        Language::Ukrainian
+    } else {
+        Language::English
+    }
+}
+
 pub fn detect_system_language() -> Language {
     if let Some(locale) = sys_locale::get_locale() {
-        let locale = locale.to_lowercase();
-        if locale.starts_with("bg") {
-            Language::Bulgarian
-        } else if locale.starts_with("hr") {
-            Language::Croatian
-        } else if locale.starts_with("cs") {
-            Language::Czech
-        } else if locale.starts_with("da") {
-            Language::Danish
-        } else if locale.starts_with("nl") {
-            Language::Dutch
-        } else if locale.starts_with("et") {
-            Language::Estonian
-        } else if locale.starts_with("fi") {
-            Language::Finnish
-        } else if locale.starts_with("fr") {
-            Language::French
-        } else if locale.starts_with("gl") {
-            Language::Galician
-        } else if locale.starts_with("de") {
-            Language::German
-        } else if locale.starts_with("el") {
-            Language::Greek
-        } else if locale.starts_with("hu") {
-            Language::Hungarian
-        } else if locale.starts_with("id") {
-            Language::Indonesian
-        } else if locale.starts_with("it") {
-            Language::Italian
-        } else if locale.starts_with("lv") {
-            Language::Latvian
-        } else if locale.starts_with("lt") {
-            Language::Lithuanian
-        } else if locale.starts_with("ms") {
-            Language::Malay
-        } else if locale.starts_with("nb") || locale.starts_with("no") || locale.starts_with("nn") {
-            Language::Norwegian
-        } else if locale.starts_with("pl") {
-            Language::Polish
-        } else if locale.starts_with("pt-br") {
-            Language::PortugueseBrazilian
-        } else if locale.starts_with("pt") {
-            Language::Portuguese
-        } else if locale.starts_with("ro") {
-            Language::Romanian
-        } else if locale.starts_with("ru") {
-            Language::Russian
-        } else if locale.starts_with("sk") {
-            Language::Slovak
-        } else if locale.starts_with("sl") {
-            Language::Slovenian
-        } else if locale.starts_with("es") {
-            Language::Spanish
-        } else if locale.starts_with("sv") {
-            Language::Swedish
-        } else if locale.starts_with("tr") {
-            Language::Turkish
-        } else if locale.starts_with("uk") {
-            Language::Ukrainian
-        } else {
-            Language::English
-        }
+        locale_to_language(&locale)
     } else {
         Language::English
     }
@@ -428,6 +434,83 @@ mod tests {
     fn test_system_language_detection() {
         // Just call it to make sure it doesn't panic
         let _ = detect_system_language();
+    }
+
+    #[test]
+    fn test_locale_to_language_all_prefixes() {
+        let cases = [
+            ("bg", Language::Bulgarian),
+            ("bg-BG", Language::Bulgarian),
+            ("hr", Language::Croatian),
+            ("hr-HR", Language::Croatian),
+            ("cs", Language::Czech),
+            ("cs-CZ", Language::Czech),
+            ("da", Language::Danish),
+            ("da-DK", Language::Danish),
+            ("nl", Language::Dutch),
+            ("nl-NL", Language::Dutch),
+            ("et", Language::Estonian),
+            ("et-EE", Language::Estonian),
+            ("fi", Language::Finnish),
+            ("fi-FI", Language::Finnish),
+            ("fr", Language::French),
+            ("fr-FR", Language::French),
+            ("gl", Language::Galician),
+            ("gl-ES", Language::Galician),
+            ("de", Language::German),
+            ("de-DE", Language::German),
+            ("el", Language::Greek),
+            ("el-GR", Language::Greek),
+            ("hu", Language::Hungarian),
+            ("hu-HU", Language::Hungarian),
+            ("id", Language::Indonesian),
+            ("id-ID", Language::Indonesian),
+            ("it", Language::Italian),
+            ("it-IT", Language::Italian),
+            ("lv", Language::Latvian),
+            ("lv-LV", Language::Latvian),
+            ("lt", Language::Lithuanian),
+            ("lt-LT", Language::Lithuanian),
+            ("ms", Language::Malay),
+            ("ms-MY", Language::Malay),
+            ("nb", Language::Norwegian),
+            ("nb-NO", Language::Norwegian),
+            ("no", Language::Norwegian),
+            ("nn", Language::Norwegian),
+            ("pl", Language::Polish),
+            ("pl-PL", Language::Polish),
+            ("pt-br", Language::PortugueseBrazilian),
+            ("pt-BR", Language::PortugueseBrazilian),
+            ("pt", Language::Portuguese),
+            ("pt-PT", Language::Portuguese),
+            ("ro", Language::Romanian),
+            ("ro-RO", Language::Romanian),
+            ("ru", Language::Russian),
+            ("ru-RU", Language::Russian),
+            ("sk", Language::Slovak),
+            ("sk-SK", Language::Slovak),
+            ("sl", Language::Slovenian),
+            ("sl-SI", Language::Slovenian),
+            ("es", Language::Spanish),
+            ("es-ES", Language::Spanish),
+            ("sv", Language::Swedish),
+            ("sv-SE", Language::Swedish),
+            ("tr", Language::Turkish),
+            ("tr-TR", Language::Turkish),
+            ("uk", Language::Ukrainian),
+            ("uk-UA", Language::Ukrainian),
+            ("en", Language::English),
+            ("en-US", Language::English),
+            ("ja", Language::English), // unsupported → English
+            ("zh-CN", Language::English),
+        ];
+        for (locale, expected) in &cases {
+            assert_eq!(
+                locale_to_language(locale),
+                *expected,
+                "locale_to_language({locale}) should return {expected:?}"
+            );
+        }
     }
 
     #[test]

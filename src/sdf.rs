@@ -386,6 +386,46 @@ mod tests {
         assert_eq!(container.metadata.vendor.as_deref(), Some("Test"));
     }
 
+    /// A reader that returns a non-EOF IO error on the first read.
+    struct FailingReader;
+
+    impl Read for FailingReader {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied"))
+        }
+    }
+
+    #[test]
+    fn parse_sdf0_io_error() {
+        let mut reader = FailingReader;
+        let err = parse_sdf0(&mut reader).unwrap_err();
+        assert!(matches!(err, SdfError::Io(_)));
+    }
+
+    #[test]
+    fn parse_metadata_key_no_null() {
+        // Buffer > 4 bytes with no null terminator → break on key search
+        let data = b"Vendor"; // 6 bytes, no null
+        let metadata = parse_metadata_table(data).unwrap();
+        assert!(metadata.vendor.is_none());
+    }
+
+    #[test]
+    fn parse_metadata_key_then_no_room_for_value() {
+        // Key with null terminator, but nothing after it → break on value position check
+        let data = b"Ven\0"; // 4 bytes: key + null, pos becomes 4 which >= buf.len()
+        let metadata = parse_metadata_table(data).unwrap();
+        assert!(metadata.vendor.is_none());
+    }
+
+    #[test]
+    fn parse_metadata_value_no_null() {
+        // Key with null, value without null → break on value search
+        let data = b"Vendor\0Test"; // 11 bytes, value has no null
+        let metadata = parse_metadata_table(data).unwrap();
+        assert!(metadata.vendor.is_none()); // value wasn't terminated, so not set
+    }
+
     #[test]
     fn parse_sdf0_zero_table_offset() {
         let data = build_sdf0_header(1, 24, 0, 0x00, 24);

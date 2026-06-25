@@ -413,4 +413,39 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("out")));
         assert!(lines.iter().any(|l| l.contains("err")));
     }
+
+    #[test]
+    fn run_command_streaming_multi_line_stdout() {
+        let mut lines = Vec::new();
+        let result = run_command_streaming(
+            "sh",
+            &["-c".into(), "echo line1; echo line2".into()],
+            |line| {
+                lines.push(line.to_string());
+            },
+        );
+        assert!(result.is_ok());
+        let out = result.unwrap();
+        // Both lines should appear in stdout buffer (joined by newline)
+        assert!(out.stdout.contains("line1"));
+        assert!(out.stdout.contains("line2"));
+        assert!(lines.iter().any(|l| l.contains("line1")));
+        assert!(lines.iter().any(|l| l.contains("line2")));
+    }
+
+    #[test]
+    fn run_command_streaming_multi_line_stderr() {
+        let mut lines = Vec::new();
+        let result = run_command_streaming(
+            "sh",
+            &["-c".into(), "echo err1 >&2; echo err2 >&2".into()],
+            |line| {
+                lines.push(line.to_string());
+            },
+        );
+        assert!(result.is_ok());
+        let out = result.unwrap();
+        assert!(out.stderr.contains("err1"));
+        assert!(out.stderr.contains("err2"));
+    }
 }
