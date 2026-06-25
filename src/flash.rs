@@ -9,7 +9,6 @@ pub enum FlashDirection {
     Upgrade,
     Downgrade,
     Same,
-    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,7 +79,12 @@ pub enum FlashError {
 
 pub fn sha256_hex(data: &[u8]) -> String {
     let hash = Sha256::digest(data);
-    hash.iter().map(|b| format!("{b:02x}")).collect()
+    let mut hex = String::with_capacity(64);
+    for b in hash {
+        use std::fmt::Write;
+        let _ = write!(hex, "{b:02x}");
+    }
+    hex
 }
 
 pub fn build_flash_plan(
@@ -174,9 +178,9 @@ fn compare_versions(current: &str, target: &str) -> FlashDirection {
     if current == target {
         return FlashDirection::Same;
     }
-    let cp: Option<Vec<u32>> = current.split(['.', '-']).map(|p| p.parse().ok()).collect();
-    let tp: Option<Vec<u32>> = target.split(['.', '-']).map(|p| p.parse().ok()).collect();
-    if let (Some(cp), Some(tp)) = (&cp, &tp) {
+    let c_parts: Option<Vec<u32>> = current.split(['.', '-']).map(|p| p.parse().ok()).collect();
+    let t_parts: Option<Vec<u32>> = target.split(['.', '-']).map(|p| p.parse().ok()).collect();
+    if let (Some(cp), Some(tp)) = (&c_parts, &t_parts) {
         let max_len = cp.len().max(tp.len());
         for i in 0..max_len {
             let c = cp.get(i).copied().unwrap_or(0);
@@ -189,10 +193,11 @@ fn compare_versions(current: &str, target: &str) -> FlashDirection {
         }
         return FlashDirection::Same;
     }
-    match current.cmp(target) {
-        std::cmp::Ordering::Less => FlashDirection::Upgrade,
-        std::cmp::Ordering::Greater => FlashDirection::Downgrade,
-        std::cmp::Ordering::Equal => FlashDirection::Same,
+    // At least one version contains non-numeric segments; fall back to lexicographic.
+    if current < target {
+        FlashDirection::Upgrade
+    } else {
+        FlashDirection::Downgrade
     }
 }
 
@@ -399,6 +404,58 @@ mod tests {
     }
 
     #[test]
+    fn dry_run_blocks_on_model_mismatch() {
+        let manifest = test_manifest();
+        // Drive with wrong model — build_flash_plan sets model_match = false
+        let bad_drive = DriveMatch {
+            vendor: "OTHER".into(),
+            model: "WRONG".into(),
+            revision: "1.03".into(),
+        };
+        let plan = build_flash_plan(
+            &manifest,
+            &bad_drive,
+            FlashPlanRequest {
+                image_id: "main",
+                current_version: "1.03",
+                firmware_size: 1024,
+                firmware_sha256: "abcd1234",
+                signature_present: true,
+                user_confirmed: true,
+            },
+        )
+        .unwrap();
+        assert!(!plan.model_match);
+        let report = dry_run(&plan);
+        assert!(!report.would_execute);
+        assert!(report.summary.contains("model mismatch"));
+    }
+
+    #[test]
+    fn dry_run_blocks_on_revision_mismatch() {
+        let manifest = test_manifest();
+        let drive = test_drive();
+        let mut plan = build_flash_plan(
+            &manifest,
+            &drive,
+            FlashPlanRequest {
+                image_id: "main",
+                current_version: "1.03",
+                firmware_size: 1024,
+                firmware_sha256: "abcd1234",
+                signature_present: true,
+                user_confirmed: true,
+            },
+        )
+        .unwrap();
+        // Force revision_check to false to cover that branch
+        plan.revision_check = false;
+        let report = dry_run(&plan);
+        assert!(!report.would_execute);
+        assert!(report.summary.contains("revision mismatch"));
+    }
+
+    #[test]
     fn compare_versions_upgrade() {
         assert_eq!(compare_versions("1.03", "1.04"), FlashDirection::Upgrade);
         assert_eq!(compare_versions("1.0", "2.0"), FlashDirection::Upgrade);
@@ -414,6 +471,13 @@ mod tests {
     fn compare_versions_same() {
         assert_eq!(compare_versions("1.03", "1.03"), FlashDirection::Same);
         assert_eq!(compare_versions("1.0.0", "1.0.0"), FlashDirection::Same);
+    }
+
+    #[test]
+    fn compare_versions_same_numeric_different_text() {
+        // "1.0" and "1.00" differ as strings but parse to [1, 0] vs [1, 0].
+        // Exercises the post-loop return (line 190).
+        assert_eq!(compare_versions("1.0", "1.00"), FlashDirection::Same);
     }
 
     #[test]

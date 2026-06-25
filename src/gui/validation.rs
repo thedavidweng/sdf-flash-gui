@@ -145,4 +145,22 @@ mod tests {
         assert!(validate_sdf_path(&file.to_string_lossy()).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn validate_tool_path_is_directory() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_validation_isdir");
+        let _ = std::fs::create_dir_all(&dir);
+        let err = validate_tool_path(&dir.to_string_lossy(), Backend::SdfTool).unwrap_err();
+        assert!(err.contains("not a file"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn validate_sdf_path_is_directory() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_validation_sdfdir");
+        let _ = std::fs::create_dir_all(&dir);
+        let err = validate_sdf_path(&dir.to_string_lossy()).unwrap_err();
+        assert!(err.contains("not a file"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

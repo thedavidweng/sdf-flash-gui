@@ -55,7 +55,7 @@ jobs:
 
       - name: Run tests with coverage (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: cargo llvm-cov --lcov --output-path lcov.info --target ${{ matrix.target }} --ignore-filename-regex '(main\.rs|gui/mod\.rs|gui/workers\.rs|drive\.rs)'
+        run: cargo llvm-cov --lcov --output-path lcov.info --target ${{ matrix.target }} --ignore-filename-regex '(src/main\.rs|src/gui/mod\.rs|src/drive\.rs|src/gui/file_dialog\.rs|src/gui/process_runner\.rs)'
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'

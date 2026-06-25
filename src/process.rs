@@ -21,11 +21,13 @@ impl CommandOutput {
     }
 
     pub fn combined(&self) -> String {
-        match (self.stdout.trim().is_empty(), self.stderr.trim().is_empty()) {
+        let out = self.stdout.trim();
+        let err = self.stderr.trim();
+        match (out.is_empty(), err.is_empty()) {
             (true, true) => String::new(),
-            (false, true) => self.stdout.clone(),
-            (true, false) => self.stderr.clone(),
-            (false, false) => format!("{}\n{}", self.stdout.trim(), self.stderr.trim()),
+            (false, true) => out.to_string(),
+            (true, false) => err.to_string(),
+            (false, false) => format!("{out}\n{err}"),
         }
     }
 }
@@ -261,7 +263,7 @@ mod tests {
             stdout: "hello\n".into(),
             stderr: String::new(),
         };
-        assert_eq!(out.combined(), "hello\n");
+        assert_eq!(out.combined(), "hello");
     }
 
     #[test]
@@ -272,7 +274,7 @@ mod tests {
             stdout: String::new(),
             stderr: "error\n".into(),
         };
-        assert_eq!(out.combined(), "error\n");
+        assert_eq!(out.combined(), "error");
     }
 
     #[test]
@@ -296,7 +298,7 @@ mod tests {
             stdout: "   \n  ".into(),
             stderr: "err\n".into(),
         };
-        assert_eq!(out.combined(), "err\n");
+        assert_eq!(out.combined(), "err");
     }
 
     #[test]
@@ -412,5 +414,40 @@ mod tests {
         assert!(result.is_ok());
         assert!(lines.iter().any(|l| l.contains("out")));
         assert!(lines.iter().any(|l| l.contains("err")));
+    }
+
+    #[test]
+    fn run_command_streaming_multi_line_stdout() {
+        let mut lines = Vec::new();
+        let result = run_command_streaming(
+            "sh",
+            &["-c".into(), "echo line1; echo line2".into()],
+            |line| {
+                lines.push(line.to_string());
+            },
+        );
+        assert!(result.is_ok());
+        let out = result.unwrap();
+        // Both lines should appear in stdout buffer (joined by newline)
+        assert!(out.stdout.contains("line1"));
+        assert!(out.stdout.contains("line2"));
+        assert!(lines.iter().any(|l| l.contains("line1")));
+        assert!(lines.iter().any(|l| l.contains("line2")));
+    }
+
+    #[test]
+    fn run_command_streaming_multi_line_stderr() {
+        let mut lines = Vec::new();
+        let result = run_command_streaming(
+            "sh",
+            &["-c".into(), "echo err1 >&2; echo err2 >&2".into()],
+            |line| {
+                lines.push(line.to_string());
+            },
+        );
+        assert!(result.is_ok());
+        let out = result.unwrap();
+        assert!(out.stderr.contains("err1"));
+        assert!(out.stderr.contains("err2"));
     }
 }
