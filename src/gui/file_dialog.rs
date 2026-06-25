@@ -6,8 +6,12 @@ use std::path::PathBuf;
 pub trait FileDialog {
     fn pick_folder(&self) -> Option<PathBuf>;
     fn pick_file(&self) -> Option<PathBuf>;
-    fn pick_file_with_title(&self, title: &str, filter_name: &str, extensions: &[&str])
-        -> Option<PathBuf>;
+    fn pick_file_with_title(
+        &self,
+        title: &str,
+        filter_name: &str,
+        extensions: &[&str],
+    ) -> Option<PathBuf>;
 }
 
 /// Production implementation using rfd (native dialogs).

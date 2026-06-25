@@ -1139,8 +1139,7 @@ mod tests {
             summary: "Flash ready".into(),
         });
         state.firmware_path = "fw.bin".into();
-        state.confirmation =
-            crate::command::required_flash_confirmation(&test_drive().device);
+        state.confirmation = crate::command::required_flash_confirmation(&test_drive().device);
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
         // Should have called begin_operation
@@ -1157,8 +1156,7 @@ mod tests {
         state.operation_mode = OperationMode::Recover;
         state.firmware_path = "fw.bin".into();
         state.recovery_token = "ABCDEFGHIJKLMNOP".into();
-        state.confirmation =
-            crate::command::required_flash_confirmation(&test_drive().device);
+        state.confirmation = crate::command::required_flash_confirmation(&test_drive().device);
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
         assert!(state.busy);
@@ -1334,8 +1332,7 @@ mod tests {
         state.operation_mode = OperationMode::Recover;
         state.firmware_path = "fw.bin".into();
         state.recovery_token = "ABCDEFGHIJKLMNOP".into();
-        state.confirmation =
-            crate::command::required_flash_confirmation(&test_drive().device);
+        state.confirmation = crate::command::required_flash_confirmation(&test_drive().device);
         assert!(can_start(&state));
         let _ = std::fs::remove_dir_all(temp_dir);
     }
@@ -1417,7 +1414,12 @@ mod tests {
         validate_flash(&mut state);
         assert!(state.flash_report.is_some());
         assert!(!state.flash_report.as_ref().unwrap().would_execute);
-        assert!(state.flash_report.as_ref().unwrap().summary.contains("model"));
+        assert!(state
+            .flash_report
+            .as_ref()
+            .unwrap()
+            .summary
+            .contains("model"));
     }
 
     #[test]

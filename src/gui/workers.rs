@@ -930,7 +930,9 @@ mod tests {
         }
         let last = messages.last().unwrap();
         match last {
-            WorkerMsg::OperationComplete { success, status, .. } => {
+            WorkerMsg::OperationComplete {
+                success, status, ..
+            } => {
                 assert!(!success);
                 assert!(status.contains("failed"));
             }

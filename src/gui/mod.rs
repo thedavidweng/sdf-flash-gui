@@ -18,9 +18,9 @@ use crate::sdf;
 use eframe::egui;
 use std::sync::mpsc;
 
-use state::AppState;
 use file_dialog::NativeDialog;
 use process_runner::NativeRunner;
+use state::AppState;
 use workers::{spawn_list_drives, spawn_probe, WorkerMsg};
 
 const WINDOW_WIDTH: f32 = 380.0;
@@ -153,7 +153,14 @@ impl eframe::App for App {
             .frame(panel_frame)
             .show(ctx, |ui| {
                 ui.add_enabled_ui(!self.state.show_exit_confirmation, |ui| {
-                    show_main_ui(ui, ctx, frame, &mut self.state, &self.worker_tx, &self.runner);
+                    show_main_ui(
+                        ui,
+                        ctx,
+                        frame,
+                        &mut self.state,
+                        &self.worker_tx,
+                        &self.runner,
+                    );
                 });
             });
 
