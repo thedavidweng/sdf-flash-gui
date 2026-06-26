@@ -2,31 +2,6 @@
 
 All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
-## [Unreleased]
-
-### <!-- 1 -->🐛 Bug Fixes
-
-- Set product display name to SDF Flash GUI
-- Unify SDF Flash GUI display name across all platforms
-
-### <!-- 10 -->💼 Other
-
-- **deps:** Bump env_logger from 0.11.10 to 0.11.11
-- **deps:** Bump sha2 from 0.10.9 to 0.11.0
-- **deps:** Bump codecov/codecov-action from 5 to 7
-- **deps:** Bump actions/download-artifact from 7 to 8
-
-### <!-- 7 -->⚙️ Miscellaneous Tasks
-
-- **changelog:** Sync CHANGELOG.md
-- **changelog:** Sync CHANGELOG.md for v0.2.0
-- Match x64 DMG filename in homebrew tap release step
-- **changelog:** Sync CHANGELOG.md
-- Split fmt/clippy checks and update GitHub Actions
-- **changelog:** Sync CHANGELOG.md
-- **changelog:** Sync CHANGELOG.md
-- Extract Homebrew cask template with quarantine postflight
-- **changelog:** Sync CHANGELOG.md
 ## [0.2.0] - 2026-06-26
 
 ### <!-- 0 -->🚀 Features
@@ -47,6 +22,15 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Remove unused pick_file from FileDialog trait — clippy dead_code
 - Address greptile review — restore initial-dir hint in browse_firmware, trim combined() consistently
 - **gui:** Mark probe handled after force-kill to stop auto-reprobe loop
+- Set product display name to SDF Flash GUI
+- Unify SDF Flash GUI display name across all platforms
+
+### <!-- 10 -->💼 Other
+
+- **deps:** Bump env_logger from 0.11.10 to 0.11.11
+- **deps:** Bump sha2 from 0.10.9 to 0.11.0
+- **deps:** Bump codecov/codecov-action from 5 to 7
+- **deps:** Bump actions/download-artifact from 7 to 8
 
 ### <!-- 2 -->🚜 Refactor
 
@@ -77,6 +61,16 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Replace deprecated macos-13 with macos-15-intel
 - Exclude drive.rs from coverage — platform-specific code untestable on Linux
 - Git-cliff release automation, codecov, and workflow fixes
+- **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md for v0.2.0
+- Match x64 DMG filename in homebrew tap release step
+- **changelog:** Sync CHANGELOG.md
+- Split fmt/clippy checks and update GitHub Actions
+- **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md
+- Extract Homebrew cask template with quarantine postflight
+- **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md
 ## [0.1.0] - 2026-06-24
 
 ### <!-- 0 -->🚀 Features
