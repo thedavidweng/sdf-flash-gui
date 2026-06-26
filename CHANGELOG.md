@@ -9,6 +9,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **deps:** Bump env_logger from 0.11.10 to 0.11.11
 - **deps:** Bump sha2 from 0.10.9 to 0.11.0
 - **deps:** Bump codecov/codecov-action from 5 to 7
+- **deps:** Bump actions/download-artifact from 7 to 8
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
@@ -17,6 +18,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Match x64 DMG filename in homebrew tap release step
 - **changelog:** Sync CHANGELOG.md
 - Split fmt/clippy checks and update GitHub Actions
+- **changelog:** Sync CHANGELOG.md
 ## [0.2.0] - 2026-06-26
 
 ### <!-- 0 -->🚀 Features
