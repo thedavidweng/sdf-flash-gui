@@ -1,46 +1,180 @@
-// Business logic operations — flash validation, execute, can_start, etc.
-//
-// These are pure helpers that operate on AppState. They don't render UI
-// or spawn threads — that happens in mod.rs and workers.rs.
+// Pure helpers that operate on AppState — no UI rendering or thread spawning.
+
+mod labels;
+
+pub use labels::{drive_label, firmware_basename, firmware_sha_prefix, flash_mode_label};
 
 use crate::command::{self, Operation, PlanRequest};
-use crate::drive::{self, Drive};
+use crate::drive;
 use crate::flash;
-use crate::i18n::{t, L10nKey};
+use crate::i18n::{log_error, plan_error_message, t, t_with_args, L10nKey, Language};
 use crate::manifest;
 use crate::orchestration;
+use crate::process;
 
 use super::file_dialog::FileDialog;
 use super::process_runner::ProcessRunner;
-use super::state::AppState;
+use super::state::{AppState, StopDialog};
 use super::validation::{validate_sdf_path, validate_tool_path};
 use super::workers::{spawn_streaming_command, WorkerMsg};
 use super::OperationMode;
 
 use std::sync::mpsc::Sender;
 
+fn begin_app_shutdown(state: &mut AppState) {
+    state.chrome.exiting = true;
+    state.chrome.show_settings = false;
+    state.chrome.show_about = false;
+    state.chrome.show_quit_confirmation = false;
+    state.runtime.stop_dialog = StopDialog::None;
+    if let Some(control) = state.runtime.probe_control.take() {
+        control.request_force_kill();
+        control.reap_registered_child();
+    }
+    state.runtime.probing = false;
+}
+
+fn close_child_viewports(ctx: &eframe::egui::Context) {
+    use eframe::egui::{ViewportCommand, ViewportId};
+    ctx.send_viewport_cmd_to(
+        ViewportId::from_hash_of("settings_viewport"),
+        ViewportCommand::Close,
+    );
+    ctx.send_viewport_cmd_to(
+        ViewportId::from_hash_of("about_viewport"),
+        ViewportCommand::Close,
+    );
+}
+
+fn prepare_app_exit(ctx: &eframe::egui::Context, state: &mut AppState) {
+    if state.chrome.exiting {
+        return;
+    }
+    begin_app_shutdown(state);
+    close_child_viewports(ctx);
+    ctx.request_repaint();
+}
+
+pub fn request_app_quit(ctx: &eframe::egui::Context, state: &mut AppState) {
+    if state.runtime.busy {
+        state.chrome.show_quit_confirmation = true;
+    } else {
+        prepare_app_exit(ctx, state);
+        ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Close);
+    }
+}
+
+pub fn on_viewport_close_requested(ctx: &eframe::egui::Context, state: &mut AppState) {
+    if state.runtime.busy {
+        ctx.send_viewport_cmd(eframe::egui::ViewportCommand::CancelClose);
+        state.chrome.show_quit_confirmation = true;
+    } else {
+        prepare_app_exit(ctx, state);
+    }
+}
+
+/// Force-kill any running backend and close immediately.
+///
+/// Clears `busy` before requesting close so `on_viewport_close_requested` does not
+/// re-issue `CancelClose` while the worker is still winding down.
+pub fn confirm_force_quit_exit(ctx: &eframe::egui::Context, state: &mut AppState) {
+    if let Some(control) = state.runtime.probe_control.as_ref() {
+        control.request_force_kill();
+    }
+    if let Some(control) = state.runtime.active_operation.as_ref() {
+        control.request_force_kill();
+    }
+    state.finish_probe();
+    state.finish_operation();
+    prepare_app_exit(ctx, state);
+    ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Close);
+}
+
+pub fn request_stop(state: &mut AppState) {
+    if !state.runtime.busy {
+        return;
+    }
+    state.runtime.stop_dialog = if state.runtime.waiting_for_backend_stop {
+        StopDialog::ConfirmForceKill
+    } else {
+        StopDialog::ConfirmStop
+    };
+}
+
+pub fn confirm_graceful_stop(state: &mut AppState) {
+    if let Some(control) = &state.runtime.active_operation {
+        control.request_graceful_cancel();
+        state.set_status_key(L10nKey::StatusCancelling, state.runtime.progress);
+    }
+    state.runtime.stop_dialog = StopDialog::None;
+}
+
+pub fn confirm_force_kill(state: &mut AppState) {
+    if let Some(control) = state.runtime.probe_control.as_ref() {
+        control.request_force_kill();
+    }
+    if let Some(control) = state.runtime.active_operation.as_ref() {
+        control.request_force_kill();
+    }
+    state.log(t(L10nKey::LogOpCancelled, state.chrome.resolved_lang));
+    if state.runtime.probe_control.is_some() {
+        state.finish_probe();
+        state.set_status_key(L10nKey::StatusProbeFailed, 0.0);
+    }
+    if state.runtime.busy {
+        state.finish_operation();
+        state.set_status_key(L10nKey::StatusOpCancelled, 0.0);
+    } else {
+        state.runtime.stop_dialog = StopDialog::None;
+    }
+}
+
+pub fn decline_force_kill(state: &mut AppState) {
+    // User chose to wait: keep busy + active_operation (or an active probe) so another
+    // flash cannot start while the backend is still mutating the drive. Leave the
+    // force-kill dialog open so the user can retry a hard stop if needed.
+    if state.runtime.active_operation.is_some() {
+        state.runtime.waiting_for_backend_stop = true;
+        state.set_status_key(L10nKey::StatusCancelling, state.runtime.progress);
+    }
+}
+
 pub fn can_start(state: &AppState) -> bool {
-    if state.busy || state.probing || state.selected_drive().is_none() || !state.drive_mt1959 {
+    if state.runtime.busy
+        || state.runtime.probing
+        || state.selected_drive().is_none()
+        || !state.drive.drive_mt1959
+    {
         return false;
     }
-    if validate_tool_path(&state.tool_path, state.backend).is_err() {
+    if validate_tool_path(
+        &state.config.tool_path,
+        state.config.backend,
+        crate::i18n::Language::English,
+    )
+    .is_err()
+    {
         return false;
     }
-    if validate_sdf_path(&state.sdf_path).is_err() {
+    if validate_sdf_path(&state.config.sdf_path, crate::i18n::Language::English).is_err() {
         return false;
     }
     match state.operation_mode {
         OperationMode::Read => true,
         OperationMode::Write => {
-            state.firmware_data.is_some()
-                && !state.firmware_path.is_empty()
-                && !(state.encrypted_write && state.include_boot_loader)
-                && state.flash_report.as_ref().is_some_and(|r| r.would_execute)
+            state.flash.firmware_data.is_some()
+                && !state.flash.firmware_path.is_empty()
+                && !(state.flash.encrypted_write && state.flash.include_boot_loader)
+                && state
+                    .flash
+                    .flash_report
+                    .as_ref()
+                    .is_some_and(|r| r.would_execute)
         }
         OperationMode::Recover => {
-            !state.firmware_path.is_empty()
-                && state.recovery_token.len() == 16
-                && state.confirmation
+            !state.flash.firmware_path.is_empty()
+                && state.flash.recovery_token.len() == 16
+                && state.flash.confirmation
                     == state
                         .selected_drive()
                         .map(|d| command::required_flash_confirmation(&d.device))
@@ -50,32 +184,32 @@ pub fn can_start(state: &AppState) -> bool {
 }
 
 pub fn start_disabled_reason(state: &AppState) -> String {
-    let lang = state.resolved_lang;
-    if state.busy {
+    let lang = state.chrome.resolved_lang;
+    if state.runtime.busy {
         return t(L10nKey::ReasonBusy, lang).to_string();
     }
-    if state.probing {
+    if state.runtime.probing {
         return t(L10nKey::ReasonProbing, lang).to_string();
     }
     if state.selected_drive().is_none() {
         return t(L10nKey::ReasonNoDrive, lang).to_string();
     }
-    if !state.drive_mt1959 {
+    if !state.drive.drive_mt1959 {
         return t(L10nKey::ReasonNotMt1959, lang).to_string();
     }
-    if let Err(e) = validate_tool_path(&state.tool_path, state.backend) {
-        return format!("Invalid tool path: {e}");
+    if let Err(e) = validate_tool_path(&state.config.tool_path, state.config.backend, lang) {
+        return t_with_args(L10nKey::ReasonInvalidToolPath, lang, &[("error", &e)]);
     }
-    if let Err(e) = validate_sdf_path(&state.sdf_path) {
-        return format!("Invalid sdf.bin: {e}");
+    if let Err(e) = validate_sdf_path(&state.config.sdf_path, lang) {
+        return t_with_args(L10nKey::ReasonInvalidSdfPath, lang, &[("error", &e)]);
     }
     match state.operation_mode {
         OperationMode::Read => String::new(),
         OperationMode::Write => {
-            if state.firmware_data.is_none() {
+            if state.flash.firmware_data.is_none() {
                 return t(L10nKey::ReasonNoFirmware, lang).to_string();
             }
-            if state.encrypted_write && state.include_boot_loader {
+            if state.flash.encrypted_write && state.flash.include_boot_loader {
                 return t(L10nKey::ReasonConflict, lang).to_string();
             }
             t(L10nKey::ReasonRunValidation, lang).to_string()
@@ -84,19 +218,29 @@ pub fn start_disabled_reason(state: &AppState) -> String {
     }
 }
 
+/// Returns true when a valid backend executable is configured.
+pub fn backend_configured(state: &AppState) -> bool {
+    validate_tool_path(
+        &state.config.tool_path,
+        state.config.backend,
+        Language::English,
+    )
+    .is_ok()
+}
+
 pub fn on_operation_mode_changed(state: &mut AppState, mode: OperationMode) {
-    state.flash_report = None;
-    state.confirmation.clear();
+    state.flash.flash_report = None;
+    state.flash.confirmation.clear();
     match mode {
         OperationMode::Read => {
-            state.set_status("Select output folder when you start", 0.0);
+            state.set_status_key(L10nKey::StatusHintRead, 0.0);
         }
         OperationMode::Write => {
-            state.set_status("Load firmware and manifest, then validate", 0.0);
+            state.set_status_key(L10nKey::StatusHintWrite, 0.0);
         }
         OperationMode::Recover => {
-            state.set_status("Recovery needs boot token from wrong firmware", 0.0);
-            state.pending_recover_browse = true;
+            state.set_status_key(L10nKey::StatusHintRecover, 0.0);
+            state.flash.pending_recover_browse = true;
         }
     }
 }
@@ -106,28 +250,38 @@ pub fn validate_flash(state: &mut AppState) {
         Some(d) => d,
         None => return,
     };
-    let manifest = match &state.manifest {
+    let manifest = match &state.flash.manifest {
         Some(m) => m,
         None => {
-            state.log("ERROR: load a manifest before validating");
+            state.log(t(
+                L10nKey::LogErrLoadManifestBeforeValidate,
+                state.chrome.resolved_lang,
+            ));
             return;
         }
     };
-    let firmware_data = match &state.firmware_data {
+    let firmware_data = match &state.flash.firmware_data {
         Some(d) => d,
         None => return,
     };
 
-    let image_id = match &state.selected_image_id {
+    let image_id = match &state.flash.selected_image_id {
         Some(id) => id.clone(),
         None => {
-            state.log("ERROR: select an image before validating");
+            state.log(t(
+                L10nKey::LogErrSelectImageBeforeValidate,
+                state.chrome.resolved_lang,
+            ));
             return;
         }
     };
 
-    let drive_match: manifest::DriveMatch = drive.into();
-    let user_confirmed = state.confirmation == command::required_flash_confirmation(&drive.device);
+    let drive_match = state
+        .drive_match()
+        .expect("selected drive implies drive match");
+    let user_confirmed =
+        state.flash.confirmation == command::required_flash_confirmation(&drive.device);
+    let lang = state.chrome.resolved_lang;
 
     match orchestration::validate_flash(
         manifest,
@@ -135,14 +289,15 @@ pub fn validate_flash(state: &mut AppState) {
         &image_id,
         firmware_data,
         user_confirmed,
+        lang,
     ) {
         Ok(report) => {
             state.log(&report.summary);
-            state.flash_report = Some(report);
+            state.flash.flash_report = Some(report);
         }
         Err(e) => {
             state.log(&e);
-            state.flash_report = None;
+            state.flash.flash_report = None;
         }
     }
 }
@@ -153,6 +308,8 @@ pub fn execute_start(
     dialog: &impl FileDialog,
     runner: &std::sync::Arc<dyn ProcessRunner>,
 ) {
+    let lang = state.chrome.resolved_lang;
+
     match state.operation_mode {
         OperationMode::Read => {
             let Some(drive) = state.selected_drive() else {
@@ -163,47 +320,64 @@ pub fn execute_start(
             };
             let output_dir = folder.to_string_lossy().to_string();
             let req = PlanRequest {
-                backend: state.backend,
-                tool_path: state.tool_path.clone(),
+                backend: state.config.backend,
+                tool_path: state.config.tool_path.clone(),
                 drive: drive.device.clone(),
-                drive_is_mt1959: state.drive_mt1959,
+                drive_is_mt1959: state.drive.drive_mt1959,
                 confirmation: String::new(),
                 operation: Operation::Read { output_dir },
             };
+            let lang = state.chrome.resolved_lang;
             match command::plan_command(req) {
                 Ok(plan) => {
-                    state.begin_operation("Reading firmware");
-                    spawn_streaming_command(worker_tx, plan.command, "Reading firmware", runner);
+                    let status = t(L10nKey::StatusReadingFirmware, lang);
+                    let control = state.begin_operation(status);
+                    spawn_streaming_command(worker_tx, plan.command, status, runner, lang, control);
                 }
-                Err(e) => state.log(&format!("ERROR: {e}")),
+                Err(e) => state.log(&log_error(lang, &plan_error_message(&e, lang))),
             }
         }
         OperationMode::Write => {
             validate_flash(state);
-            if !state.flash_report.as_ref().is_some_and(|r| r.would_execute) {
+            if !state
+                .flash
+                .flash_report
+                .as_ref()
+                .is_some_and(|r| r.would_execute)
+            {
                 return;
             }
             let Some(drive) = state.selected_drive() else {
                 return;
             };
             let req = PlanRequest {
-                backend: state.backend,
-                tool_path: state.tool_path.clone(),
+                backend: state.config.backend,
+                tool_path: state.config.tool_path.clone(),
                 drive: drive.device.clone(),
-                drive_is_mt1959: state.drive_mt1959,
-                confirmation: state.confirmation.clone(),
+                drive_is_mt1959: state.drive.drive_mt1959,
+                confirmation: state.flash.confirmation.clone(),
                 operation: Operation::Write {
-                    firmware_path: state.firmware_path.clone(),
-                    encrypted: state.encrypted_write,
-                    include_boot_loader: state.include_boot_loader,
+                    firmware_path: state.flash.firmware_path.clone(),
+                    encrypted: state.flash.encrypted_write,
+                    include_boot_loader: state.flash.include_boot_loader,
                 },
             };
             match command::plan_command(req) {
                 Ok(plan) => {
-                    state.begin_operation("Writing firmware");
-                    spawn_streaming_command(worker_tx, plan.command, "Writing firmware", runner);
+                    if state.flash.dry_run_only {
+                        state.log(&t_with_args(
+                            L10nKey::LogDryRunCommand,
+                            lang,
+                            &[("command", &process::format_command(&plan.command))],
+                        ));
+                        state.set_status_key(L10nKey::StatusReady, 100.0);
+                        return;
+                    }
+                    let status = t(L10nKey::StatusWritingFirmware, lang);
+                    let control = state.begin_operation(status);
+                    spawn_streaming_command(worker_tx, plan.command, status, runner, lang, control);
                 }
-                Err(e) => state.log(&format!("ERROR: {e}")),
+                Err(e) => state.log(&log_error(lang, &plan_error_message(&e, lang))),
             }
         }
         OperationMode::Recover => {
@@ -211,60 +385,80 @@ pub fn execute_start(
                 return;
             };
             let req = PlanRequest {
-                backend: state.backend,
-                tool_path: state.tool_path.clone(),
+                backend: state.config.backend,
+                tool_path: state.config.tool_path.clone(),
                 drive: drive.device.clone(),
-                drive_is_mt1959: state.drive_mt1959,
-                confirmation: state.confirmation.clone(),
+                drive_is_mt1959: state.drive.drive_mt1959,
+                confirmation: state.flash.confirmation.clone(),
                 operation: Operation::Recover {
-                    firmware_path: state.firmware_path.clone(),
-                    recovery_boot_token: state.recovery_token.clone(),
+                    firmware_path: state.flash.firmware_path.clone(),
+                    recovery_boot_token: state.flash.recovery_token.clone(),
                 },
             };
+            let lang = state.chrome.resolved_lang;
             match command::plan_command(req) {
                 Ok(plan) => {
-                    state.begin_operation("Recovering drive");
-                    spawn_streaming_command(worker_tx, plan.command, "Recovering drive", runner);
+                    let status = t(L10nKey::StatusRecoveringDrive, lang);
+                    let control = state.begin_operation(status);
+                    spawn_streaming_command(worker_tx, plan.command, status, runner, lang, control);
                 }
-                Err(e) => state.log(&format!("ERROR: {e}")),
+                Err(e) => state.log(&log_error(lang, &plan_error_message(&e, lang))),
             }
         }
+    }
+}
+
+fn finalize_drive_selection(state: &mut AppState) {
+    if state.drive.drives.is_empty() {
+        state.drive.selected_drive = None;
+        state.set_status_key(L10nKey::StatusNoDrives, 0.0);
+    } else if state.drive.selected_drive.is_none() {
+        state.drive.selected_drive = Some(0);
+        state.set_status_key(L10nKey::StatusReady, 0.0);
     }
 }
 
 pub fn refresh_drives(state: &mut AppState) {
-    state.drives = drive::enumerate_drives();
-    state.last_probed_drive = None;
-    state.log(&format!("Found {} drive(s).", state.drives.len()));
-    if state.drives.is_empty() {
-        state.selected_drive = None;
-        state.set_status("No optical drives detected", 0.0);
-    } else if state.selected_drive.is_none() {
-        state.selected_drive = Some(0);
-        state.set_status("Ready", 0.0);
-    }
+    let lang = state.chrome.resolved_lang;
+    state.drive.drives = drive::enumerate_drives();
+    state.drive.last_probed_drive = None;
+    state.log(&t_with_args(
+        L10nKey::StatusDrivesFound,
+        lang,
+        &[("count", &state.drive.drives.len().to_string())],
+    ));
+    finalize_drive_selection(state);
 }
 
 pub fn load_firmware(state: &mut AppState, path: &str) {
-    state.firmware_path = path.to_string();
-    state.flash_report = None;
+    let lang = state.chrome.resolved_lang;
+    state.flash.firmware_path = path.to_string();
+    state.flash.flash_report = None;
     match std::fs::read(path) {
         Ok(data) => {
             if data.is_empty() {
-                state.log(&format!("ERROR: firmware file is empty: {path}"));
-                state.firmware_data = None;
+                state.log(&t_with_args(
+                    L10nKey::LogFirmwareEmpty,
+                    lang,
+                    &[("path", path)],
+                ));
+                state.flash.firmware_data = None;
             } else {
-                state.firmware_data = Some(data);
+                state.flash.firmware_data = Some(data);
             }
         }
         Err(e) => {
-            state.log(&format!("ERROR: cannot read firmware file {path}: {e}"));
-            state.firmware_data = None;
+            state.log(&t_with_args(
+                L10nKey::LogFirmwareReadFailed,
+                lang,
+                &[("path", path), ("error", &e.to_string())],
+            ));
+            state.flash.firmware_data = None;
         }
     }
 
     if let Some(parent) = std::path::Path::new(path).parent() {
-        state.firmware_candidates = std::fs::read_dir(parent)
+        state.flash.firmware_candidates = std::fs::read_dir(parent)
             .map(|entries| {
                 let mut files: Vec<String> = entries
                     .filter_map(|e| e.ok())
@@ -278,7 +472,8 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
             .unwrap_or_default();
     }
 
-    state.firmware_picker_items = state
+    state.flash.firmware_picker_items = state
+        .flash
         .firmware_candidates
         .iter()
         .map(|path| {
@@ -291,109 +486,97 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
         })
         .collect();
 
-    if let Some(data) = &state.firmware_data {
-        state.log(&format!(
-            "Loaded firmware: {} ({} bytes, sha256 {})",
-            path,
-            data.len(),
-            &flash::sha256_hex(data)[..16]
+    if let Some(data) = &state.flash.firmware_data {
+        state.log(&t_with_args(
+            L10nKey::LogFirmwareLoaded,
+            lang,
+            &[
+                ("path", path),
+                ("size", &data.len().to_string()),
+                ("hash", &flash::sha256_hex(data)[..16]),
+            ],
         ));
     }
 }
 
 pub fn load_manifest(state: &mut AppState, path: &str) {
-    state.manifest_path = path.to_string();
+    let lang = state.chrome.resolved_lang;
+    state.flash.manifest_path = path.to_string();
     match std::fs::read(path) {
         Ok(data) => match manifest::parse_manifest(&data) {
             Ok(m) => {
-                state.log(&format!(
-                    "Loaded manifest: {} {} ({} image(s))",
-                    m.vendor,
-                    m.model,
-                    m.firmware_images.len()
+                state.log(&t_with_args(
+                    L10nKey::LogManifestLoaded,
+                    lang,
+                    &[
+                        ("vendor", &m.vendor),
+                        ("model", &m.model),
+                        ("count", &m.firmware_images.len().to_string()),
+                    ],
                 ));
-                state.selected_image_id = if m.firmware_images.len() == 1 {
+                state.flash.selected_image_id = if m.firmware_images.len() == 1 {
                     Some(m.firmware_images[0].image_id.clone())
                 } else {
                     None
                 };
-                state.manifest = Some(m);
-                state.flash_report = None;
+                state.flash.manifest = Some(m);
+                state.flash.flash_report = None;
             }
-            Err(e) => state.log(&format!("ERROR: invalid manifest: {e}")),
+            Err(e) => state.log(&t_with_args(
+                L10nKey::LogManifestInvalid,
+                lang,
+                &[("error", &e.to_string())],
+            )),
         },
-        Err(e) => state.log(&format!("ERROR: cannot read manifest: {e}")),
+        Err(e) => state.log(&t_with_args(
+            L10nKey::LogManifestReadFailed,
+            lang,
+            &[("error", &e.to_string())],
+        )),
     }
 }
 
 pub fn prompt_recovery_wrong_firmware(state: &mut AppState, dialog: &impl FileDialog) {
-    if !state.wrong_firmware_path.is_empty() {
+    if !state.flash.wrong_firmware_path.is_empty() {
         return;
     }
-    state.log("RECOVER: select the wrong firmware file to extract boot token");
+    let lang = state.chrome.resolved_lang;
+    state.log(t(L10nKey::LogRecoverSelectWrongFw, lang));
     if let Some(file) = dialog.pick_file_with_title(
-        "Wrong firmware (for token extraction)",
+        t(L10nKey::DialogTitleWrongFirmware, lang),
         "Firmware",
         &["bin"],
         None,
     ) {
-        state.wrong_firmware_path = file.to_string_lossy().to_string();
+        state.flash.wrong_firmware_path = file.to_string_lossy().to_string();
         extract_recovery_token_from_wrong_firmware(state);
     }
 }
 
 pub fn extract_recovery_token_from_wrong_firmware(state: &mut AppState) {
-    if state.wrong_firmware_path.is_empty() {
+    if state.flash.wrong_firmware_path.is_empty() {
         return;
     }
-    match std::fs::read(&state.wrong_firmware_path) {
+    let lang = state.chrome.resolved_lang;
+    let path = state.flash.wrong_firmware_path.clone();
+    match std::fs::read(&path) {
         Ok(data) => match command::extract_recovery_boot_token(&data) {
             Ok(token) => {
-                state.recovery_token = token.clone();
-                state.log(&format!("Extracted recovery boot token: {token}"));
+                state.flash.recovery_token = token.clone();
+                state.log(&t_with_args(
+                    L10nKey::LogRecoveryTokenExtracted,
+                    lang,
+                    &[("token", &token)],
+                ));
             }
-            Err(e) => state.log(&format!("ERROR: {e}")),
+            Err(e) => state.log(&log_error(lang, &plan_error_message(&e, lang))),
         },
-        Err(e) => state.log(&format!(
-            "ERROR: cannot read {}: {e}",
-            state.wrong_firmware_path
+        Err(e) => state.log(&t_with_args(
+            L10nKey::LogFileReadFailed,
+            lang,
+            &[("path", &path), ("error", &e.to_string())],
         )),
     }
-}
-
-pub fn browse_firmware_file(state: &mut AppState, dialog: &impl FileDialog) {
-    let initial_dir = std::path::Path::new(&state.firmware_path)
-        .parent()
-        .filter(|_| !state.firmware_path.is_empty());
-    if let Some(file) = dialog.pick_file_with_title("Firmware", "Firmware", &["bin"], initial_dir) {
-        load_firmware(state, &file.to_string_lossy());
-    }
-}
-
-pub fn drive_label(drive: &Drive) -> String {
-    if drive.vendor.is_empty() {
-        drive.device.clone()
-    } else {
-        format!(
-            "{} {} {} {} {}",
-            drive.device,
-            drive.vendor,
-            drive.product,
-            drive.revision,
-            drive_serial_hint(drive)
-        )
-        .trim()
-        .to_string()
-    }
-}
-
-fn drive_serial_hint(drive: &Drive) -> String {
-    let label = format!("{}_{}_{}", drive.vendor, drive.product, drive.revision);
-    label
-        .split(['_', '-', ' '])
-        .skip(2)
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 #[cfg(test)]
@@ -406,7 +589,6 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Mutex;
 
-    /// Mock file dialog for testing. Each method returns a pre-configured path.
     struct MockDialog {
         folder: Mutex<Option<PathBuf>>,
         file: Mutex<Option<PathBuf>>,
@@ -455,7 +637,6 @@ mod tests {
         MockDialog::returning_nothing()
     }
 
-    /// Mock process runner for testing.
     struct MockRunner;
 
     impl super::super::process_runner::ProcessRunner for MockRunner {
@@ -463,7 +644,8 @@ mod tests {
             &self,
             _program: &str,
             _args: &[String],
-        ) -> Result<crate::process::CommandOutput, String> {
+            _control: Option<&crate::process::OperationControl>,
+        ) -> Result<crate::process::CommandRunOutcome, String> {
             Err("mock: not implemented".into())
         }
 
@@ -472,7 +654,8 @@ mod tests {
             _program: &str,
             _args: &[String],
             _on_line: &dyn Fn(&str),
-        ) -> Result<crate::process::CommandOutput, String> {
+            _control: Option<&crate::process::OperationControl>,
+        ) -> Result<crate::process::CommandRunOutcome, String> {
             Err("mock: not implemented".into())
         }
     }
@@ -501,6 +684,77 @@ mod tests {
     }
 
     #[test]
+    fn backend_configured_empty_path() {
+        let state = AppState::new_no_backend();
+        assert!(!backend_configured(&state));
+    }
+
+    #[test]
+    fn flash_mode_label_read() {
+        let mut state = AppState::new_no_backend();
+        state.operation_mode = OperationMode::Read;
+        assert!(flash_mode_label(&state).contains("READ"));
+    }
+
+    #[test]
+    fn flash_mode_label_write_standard() {
+        let mut state = AppState::new_no_backend();
+        state.operation_mode = OperationMode::Write;
+        assert!(flash_mode_label(&state).contains("Standard"));
+    }
+
+    #[test]
+    fn firmware_sha_prefix_with_data() {
+        let mut state = AppState::new_no_backend();
+        state.flash.firmware_data = Some(vec![1, 2, 3, 4]);
+        let prefix = firmware_sha_prefix(&state);
+        assert_eq!(prefix.len(), 8);
+        assert_ne!(prefix, "N/A");
+    }
+
+    #[test]
+    fn flash_mode_label_bootloader() {
+        let mut state = AppState::new_no_backend();
+        state.operation_mode = OperationMode::Write;
+        state.flash.include_boot_loader = true;
+        assert!(flash_mode_label(&state).contains("Boot"));
+    }
+
+    #[test]
+    fn flash_mode_label_write_encrypted() {
+        let mut state = AppState::new_no_backend();
+        state.operation_mode = OperationMode::Write;
+        state.flash.encrypted_write = true;
+        assert!(flash_mode_label(&state).contains("Encrypted"));
+    }
+
+    #[test]
+    fn flash_mode_label_recover() {
+        let mut state = AppState::new_no_backend();
+        state.operation_mode = OperationMode::Recover;
+        assert!(flash_mode_label(&state).contains("Recovery"));
+    }
+
+    #[test]
+    fn firmware_sha_prefix_without_data() {
+        let state = AppState::new_no_backend();
+        assert_eq!(firmware_sha_prefix(&state), "N/A");
+    }
+
+    #[test]
+    fn firmware_basename_empty_path() {
+        let state = AppState::new_no_backend();
+        assert!(firmware_basename(&state).contains("N/A"));
+    }
+
+    #[test]
+    fn firmware_basename_from_path() {
+        let mut state = AppState::new_no_backend();
+        state.flash.firmware_path = "/tmp/firmware/test_fw.bin".into();
+        assert_eq!(firmware_basename(&state), "test_fw.bin");
+    }
+
+    #[test]
     fn drive_label_without_vendor() {
         let d = Drive {
             device: "/dev/sr0".into(),
@@ -515,7 +769,7 @@ mod tests {
     #[test]
     fn drive_serial_hint_basic() {
         let d = test_drive();
-        let hint = drive_serial_hint(&d);
+        let hint = labels::drive_serial_hint(&d);
         // "HL-DT-ST_BU40N_1.03" split by ['_', '-', ' '] → ["HL", "DT", "ST", "BU40N", "1.03"]
         // skip 2 → "ST BU40N 1.03"
         assert_eq!(hint, "ST BU40N 1.03");
@@ -529,61 +783,240 @@ mod tests {
             product: "PRODUCT".into(),
             revision: "REV".into(),
         };
-        let hint = drive_serial_hint(&d);
+        let hint = labels::drive_serial_hint(&d);
         assert_eq!(hint, "REV");
     }
 
     #[test]
     fn can_start_no_drive() {
         let mut state = AppState::new_no_backend();
-        state.selected_drive = None;
+        state.drive.selected_drive = None;
         assert!(!can_start(&state));
     }
 
     #[test]
     fn can_start_busy() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
-        state.busy = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.runtime.busy = true;
         assert!(!can_start(&state));
+    }
+
+    #[test]
+    fn idle_viewport_close_prepares_exit_without_blocking() {
+        let mut state = AppState::new_no_backend();
+        state.chrome.show_settings = true;
+        state.chrome.show_about = true;
+
+        super::begin_app_shutdown(&mut state);
+
+        assert!(state.chrome.exiting);
+        assert!(!state.chrome.show_settings);
+        assert!(!state.chrome.show_about);
+        assert!(!state.chrome.show_quit_confirmation);
+        assert_eq!(state.runtime.stop_dialog, StopDialog::None);
+    }
+
+    #[test]
+    fn begin_app_shutdown_force_kills_active_probe() {
+        let mut state = AppState::new_no_backend();
+        let control = std::sync::Arc::new(crate::process::OperationControl::new());
+        state.runtime.probe_control = Some(control.clone());
+        super::begin_app_shutdown(&mut state);
+        assert!(control.is_force_kill_requested());
+        assert!(state.runtime.probe_control.is_none());
+    }
+
+    #[test]
+    fn request_app_quit_when_idle_exits() {
+        let ctx = eframe::egui::Context::default();
+        let mut state = AppState::new_no_backend();
+        super::request_app_quit(&ctx, &mut state);
+        assert!(state.chrome.exiting);
+    }
+
+    #[test]
+    fn request_app_quit_when_already_exiting_is_idempotent() {
+        let ctx = eframe::egui::Context::default();
+        let mut state = AppState::new_no_backend();
+        state.chrome.exiting = true;
+        super::request_app_quit(&ctx, &mut state);
+        assert!(state.chrome.exiting);
+        assert!(!state.chrome.show_quit_confirmation);
+    }
+
+    #[test]
+    fn request_app_quit_when_busy_shows_confirmation() {
+        let ctx = eframe::egui::Context::default();
+        let mut state = AppState::new_no_backend();
+        let _ = state.begin_operation("busy");
+        super::request_app_quit(&ctx, &mut state);
+        assert!(state.chrome.show_quit_confirmation);
+        assert!(!state.chrome.exiting);
+    }
+
+    #[test]
+    fn on_viewport_close_when_busy_blocks_exit() {
+        let ctx = eframe::egui::Context::default();
+        let mut state = AppState::new_no_backend();
+        let _ = state.begin_operation("busy");
+        super::on_viewport_close_requested(&ctx, &mut state);
+        assert!(state.chrome.show_quit_confirmation);
+        assert!(!state.chrome.exiting);
+    }
+
+    #[test]
+    fn on_viewport_close_when_idle_exits() {
+        let ctx = eframe::egui::Context::default();
+        let mut state = AppState::new_no_backend();
+        super::on_viewport_close_requested(&ctx, &mut state);
+        assert!(state.chrome.exiting);
+    }
+
+    #[test]
+    fn request_stop_noop_when_idle() {
+        let mut state = AppState::new_no_backend();
+        super::request_stop(&mut state);
+        assert_eq!(state.runtime.stop_dialog, StopDialog::None);
+    }
+
+    #[test]
+    fn request_stop_sets_confirm_dialog_when_busy() {
+        let mut state = AppState::new_no_backend();
+        let _ = state.begin_operation("running");
+        super::request_stop(&mut state);
+        assert_eq!(state.runtime.stop_dialog, StopDialog::ConfirmStop);
+    }
+
+    #[test]
+    fn request_stop_reopens_force_kill_while_waiting_for_backend() {
+        let mut state = AppState::new_no_backend();
+        let _ = state.begin_operation("running");
+        state.runtime.waiting_for_backend_stop = true;
+        state.runtime.stop_dialog = StopDialog::None;
+        super::request_stop(&mut state);
+        assert_eq!(state.runtime.stop_dialog, StopDialog::ConfirmForceKill);
+    }
+
+    #[test]
+    fn confirm_graceful_stop_clears_dialog() {
+        let mut state = AppState::new_no_backend();
+        let _ = state.begin_operation("running");
+        state.runtime.stop_dialog = StopDialog::ConfirmStop;
+        super::confirm_graceful_stop(&mut state);
+        assert_eq!(state.runtime.stop_dialog, StopDialog::None);
+    }
+
+    #[test]
+    fn confirm_force_kill_clears_busy_state() {
+        let mut state = AppState::new_no_backend();
+        let _ = state.begin_operation("running");
+        state.runtime.stop_dialog = StopDialog::ConfirmForceKill;
+        super::confirm_force_kill(&mut state);
+        assert_eq!(state.runtime.stop_dialog, StopDialog::None);
+        assert!(!state.runtime.busy);
+        assert!(state.runtime.active_operation.is_none());
+        assert_eq!(state.runtime.progress, 0.0);
+    }
+
+    #[test]
+    fn confirm_force_kill_reaps_probe_control() {
+        let mut state = AppState::new_no_backend();
+        let control = std::sync::Arc::new(crate::process::OperationControl::new());
+        state.runtime.probe_control = Some(control.clone());
+        state.runtime.probing = true;
+        state.runtime.stop_dialog = StopDialog::ConfirmForceKill;
+        super::confirm_force_kill(&mut state);
+        assert_eq!(state.runtime.stop_dialog, StopDialog::None);
+        assert!(state.runtime.probe_control.is_none());
+        assert!(!state.runtime.probing);
+        assert!(control.is_force_kill_requested());
+    }
+
+    #[test]
+    fn decline_force_kill_keeps_operation_locked_and_dialog() {
+        let mut state = AppState::new_no_backend();
+        let control = state.begin_operation("running");
+        state.runtime.stop_dialog = StopDialog::ConfirmForceKill;
+        super::decline_force_kill(&mut state);
+        assert_eq!(state.runtime.stop_dialog, StopDialog::ConfirmForceKill);
+        assert!(state.runtime.busy);
+        assert!(state.runtime.waiting_for_backend_stop);
+        assert_eq!(
+            state
+                .runtime
+                .active_operation
+                .as_ref()
+                .map(std::sync::Arc::as_ptr),
+            Some(std::sync::Arc::as_ptr(&control))
+        );
+        assert_eq!(
+            state.runtime.status_message,
+            t(L10nKey::StatusCancelling, state.chrome.resolved_lang)
+        );
+    }
+
+    #[test]
+    fn confirm_force_quit_exit_clears_busy() {
+        let mut state = AppState::new_no_backend();
+        let _ = state.begin_operation("running");
+        let ctx = eframe::egui::Context::default();
+        super::confirm_force_quit_exit(&ctx, &mut state);
+        assert!(!state.runtime.busy);
+        assert!(state.runtime.active_operation.is_none());
+        assert!(state.chrome.exiting);
+    }
+
+    #[test]
+    fn confirm_force_quit_exit_force_kills_active_probe() {
+        let ctx = eframe::egui::Context::default();
+        let mut state = AppState::new_no_backend();
+        let control = std::sync::Arc::new(crate::process::OperationControl::new());
+        state.runtime.probe_control = Some(control.clone());
+        state.runtime.probing = true;
+        super::confirm_force_quit_exit(&ctx, &mut state);
+        assert!(control.is_force_kill_requested());
+        assert!(state.runtime.probe_control.is_none());
+        assert!(!state.runtime.probing);
+        assert!(state.chrome.exiting);
     }
 
     #[test]
     fn can_start_probing() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
-        state.probing = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.runtime.probing = true;
         assert!(!can_start(&state));
     }
 
     #[test]
     fn can_start_not_mt1959() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = false;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = false;
         assert!(!can_start(&state));
     }
 
     #[test]
     fn can_start_read_mode_valid() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Read;
         // Need a valid tool path — create a temp file
         let temp_dir = std::env::temp_dir().join("sdf_flash_test_ops");
         let _ = std::fs::create_dir_all(&temp_dir);
         let tool = temp_dir.join("sdftool_test");
         std::fs::write(&tool, b"").unwrap();
-        state.tool_path = tool.to_string_lossy().to_string();
+        state.config.tool_path = tool.to_string_lossy().to_string();
         // validate_sdf_path with empty is ok
-        state.sdf_path = String::new();
+        state.config.sdf_path = String::new();
         assert!(can_start(&state));
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -591,57 +1024,57 @@ mod tests {
     #[test]
     fn can_start_write_no_firmware() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Write;
-        state.firmware_data = None;
-        state.firmware_path = String::new();
+        state.flash.firmware_data = None;
+        state.flash.firmware_path = String::new();
         assert!(!can_start(&state));
     }
 
     #[test]
     fn can_start_write_conflicting_modes() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Write;
-        state.firmware_data = Some(vec![0u8; 100]);
-        state.firmware_path = "fw.bin".into();
-        state.encrypted_write = true;
-        state.include_boot_loader = true;
+        state.flash.firmware_data = Some(vec![0u8; 100]);
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.encrypted_write = true;
+        state.flash.include_boot_loader = true;
         assert!(!can_start(&state));
     }
 
     #[test]
     fn can_start_recover_no_token() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Recover;
-        state.recovery_token = String::new();
+        state.flash.recovery_token = String::new();
         assert!(!can_start(&state));
     }
 
     #[test]
     fn can_start_recover_wrong_confirmation() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Recover;
-        state.recovery_token = "ABCDEFGHIJKLMNOP".into();
-        state.firmware_path = "fw.bin".into();
-        state.confirmation = "WRONG".into();
+        state.flash.recovery_token = "ABCDEFGHIJKLMNOP".into();
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.confirmation = "WRONG".into();
         assert!(!can_start(&state));
     }
 
     #[test]
     fn start_disabled_reason_busy() {
         let mut state = AppState::new_no_backend();
-        state.busy = true;
+        state.runtime.busy = true;
         let reason = start_disabled_reason(&state);
         assert!(reason.contains("progress"));
     }
@@ -649,7 +1082,7 @@ mod tests {
     #[test]
     fn start_disabled_reason_probing() {
         let mut state = AppState::new_no_backend();
-        state.probing = true;
+        state.runtime.probing = true;
         let reason = start_disabled_reason(&state);
         assert!(reason.contains("Probing"));
     }
@@ -657,7 +1090,7 @@ mod tests {
     #[test]
     fn start_disabled_reason_no_drive() {
         let mut state = AppState::new_no_backend();
-        state.selected_drive = None;
+        state.drive.selected_drive = None;
         let reason = start_disabled_reason(&state);
         assert!(reason.contains("drive"));
     }
@@ -665,9 +1098,9 @@ mod tests {
     #[test]
     fn start_disabled_reason_not_mt1959() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = false;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = false;
         let reason = start_disabled_reason(&state);
         assert!(reason.contains("MT1959"));
     }
@@ -678,19 +1111,19 @@ mod tests {
         let tool = temp_dir.join("sdftool_test");
         std::fs::write(&tool, b"").unwrap();
         let mut state = AppState::new_no_backend();
-        state.tool_path = tool.to_string_lossy().to_string();
-        state.sdf_path = String::new(); // empty sdf_path is OK (validate_sdf_path returns Ok for empty)
+        state.config.tool_path = tool.to_string_lossy().to_string();
+        state.config.sdf_path = String::new(); // empty sdf_path is OK (validate_sdf_path returns Ok for empty)
         (state, temp_dir)
     }
 
     #[test]
     fn start_disabled_reason_write_no_firmware() {
         let (mut state, temp_dir) = state_with_valid_paths("nofw");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Write;
-        state.firmware_data = None;
+        state.flash.firmware_data = None;
         let reason = start_disabled_reason(&state);
         assert!(
             !reason.is_empty(),
@@ -702,13 +1135,13 @@ mod tests {
     #[test]
     fn start_disabled_reason_write_conflict() {
         let (mut state, temp_dir) = state_with_valid_paths("conflict");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Write;
-        state.firmware_data = Some(vec![0u8; 100]);
-        state.encrypted_write = true;
-        state.include_boot_loader = true;
+        state.flash.firmware_data = Some(vec![0u8; 100]);
+        state.flash.encrypted_write = true;
+        state.flash.include_boot_loader = true;
         let reason = start_disabled_reason(&state);
         assert!(!reason.is_empty(), "reason should not be empty");
         let _ = std::fs::remove_dir_all(temp_dir);
@@ -717,11 +1150,11 @@ mod tests {
     #[test]
     fn start_disabled_reason_recover() {
         let (mut state, temp_dir) = state_with_valid_paths("recover");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Recover;
-        state.recovery_token = String::new();
+        state.flash.recovery_token = String::new();
         let reason = start_disabled_reason(&state);
         assert!(!reason.is_empty(), "reason should not be empty");
         let _ = std::fs::remove_dir_all(temp_dir);
@@ -730,7 +1163,7 @@ mod tests {
     #[test]
     fn on_operation_mode_changed_read() {
         let mut state = AppState::new_no_backend();
-        state.flash_report = Some(crate::flash::FlashReport {
+        state.flash.flash_report = Some(crate::flash::FlashReport {
             would_execute: true,
             direction: crate::flash::FlashDirection::Upgrade,
             checks: crate::flash::FlashChecks {
@@ -741,36 +1174,45 @@ mod tests {
                 user_confirmed: true,
             },
             summary: "test".into(),
+            warnings: vec![],
         });
-        state.confirmation = "test".into();
+        state.flash.confirmation = "test".into();
         on_operation_mode_changed(&mut state, OperationMode::Read);
-        assert!(state.flash_report.is_none());
-        assert!(state.confirmation.is_empty());
+        assert!(state.flash.flash_report.is_none());
+        assert!(state.flash.confirmation.is_empty());
     }
 
     #[test]
     fn on_operation_mode_changed_write() {
         let mut state = AppState::new_no_backend();
         on_operation_mode_changed(&mut state, OperationMode::Write);
-        assert!(state.flash_report.is_none());
-        assert!(state.status_message.contains("firmware"));
+        assert!(state.flash.flash_report.is_none());
+        assert!(
+            state.runtime.status_message.contains("firmware"),
+            "got: {}",
+            state.runtime.status_message
+        );
     }
 
     #[test]
     fn on_operation_mode_changed_recover() {
         let mut state = AppState::new_no_backend();
         on_operation_mode_changed(&mut state, OperationMode::Recover);
-        assert!(state.pending_recover_browse);
-        assert!(state.status_message.contains("token"));
+        assert!(state.flash.pending_recover_browse);
+        assert!(
+            state.runtime.status_message.contains("token"),
+            "got: {}",
+            state.runtime.status_message
+        );
     }
 
     #[test]
     fn load_firmware_nonexistent() {
         let mut state = AppState::new_no_backend();
         load_firmware(&mut state, "/nonexistent/path/fw.bin");
-        assert!(state.firmware_data.is_none());
-        assert!(state.firmware_path == "/nonexistent/path/fw.bin");
-        assert!(state.log_text.contains("ERROR"));
+        assert!(state.flash.firmware_data.is_none());
+        assert!(state.flash.firmware_path == "/nonexistent/path/fw.bin");
+        assert!(state.runtime.log_text.contains("ERROR"));
     }
 
     #[test]
@@ -781,8 +1223,8 @@ mod tests {
         std::fs::write(&file, b"").unwrap();
         let mut state = AppState::new_no_backend();
         load_firmware(&mut state, &file.to_string_lossy());
-        assert!(state.firmware_data.is_none());
-        assert!(state.log_text.contains("empty"));
+        assert!(state.flash.firmware_data.is_none());
+        assert!(state.runtime.log_text.contains("empty"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -794,9 +1236,9 @@ mod tests {
         std::fs::write(&file, &[0u8; 1024]).unwrap();
         let mut state = AppState::new_no_backend();
         load_firmware(&mut state, &file.to_string_lossy());
-        assert!(state.firmware_data.is_some());
-        assert_eq!(state.firmware_data.as_ref().unwrap().len(), 1024);
-        assert!(state.log_text.contains("Loaded firmware"));
+        assert!(state.flash.firmware_data.is_some());
+        assert_eq!(state.flash.firmware_data.as_ref().unwrap().len(), 1024);
+        assert!(state.runtime.log_text.contains("Loaded firmware"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -804,8 +1246,8 @@ mod tests {
     fn load_manifest_nonexistent() {
         let mut state = AppState::new_no_backend();
         load_manifest(&mut state, "/nonexistent/manifest.json");
-        assert!(state.manifest.is_none());
-        assert!(state.log_text.contains("ERROR"));
+        assert!(state.flash.manifest.is_none());
+        assert!(state.runtime.log_text.contains("ERROR"));
     }
 
     #[test]
@@ -829,9 +1271,9 @@ mod tests {
         std::fs::write(&file, json).unwrap();
         let mut state = AppState::new_no_backend();
         load_manifest(&mut state, &file.to_string_lossy());
-        assert!(state.manifest.is_some());
-        assert_eq!(state.selected_image_id.as_deref(), Some("main"));
-        assert!(state.log_text.contains("Loaded manifest"));
+        assert!(state.flash.manifest.is_some());
+        assert_eq!(state.flash.selected_image_id.as_deref(), Some("main"));
+        assert!(state.runtime.log_text.contains("Loaded manifest"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -843,8 +1285,8 @@ mod tests {
         std::fs::write(&file, "not json").unwrap();
         let mut state = AppState::new_no_backend();
         load_manifest(&mut state, &file.to_string_lossy());
-        assert!(state.manifest.is_none());
-        assert!(state.log_text.contains("invalid manifest"));
+        assert!(state.flash.manifest.is_none());
+        assert!(state.runtime.log_text.contains("invalid manifest"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -866,54 +1308,74 @@ mod tests {
         std::fs::write(&file, json).unwrap();
         let mut state = AppState::new_no_backend();
         load_manifest(&mut state, &file.to_string_lossy());
-        assert!(state.manifest.is_some());
-        assert!(state.selected_image_id.is_none()); // multiple images, no auto-select
+        assert!(state.flash.manifest.is_some());
+        assert!(state.flash.selected_image_id.is_none()); // multiple images, no auto-select
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn refresh_drives_empty() {
         let mut state = AppState::new_no_backend();
-        state.selected_drive = Some(0);
+        state.drive.selected_drive = Some(0);
         refresh_drives(&mut state);
         // On CI there are no optical drives — verify postcondition
         assert!(
-            !state.drives.is_empty() || state.selected_drive.is_none(),
+            !state.drive.drives.is_empty() || state.drive.selected_drive.is_none(),
             "when no drives found, selected_drive must be None"
         );
     }
 
     #[test]
+    fn finalize_drive_selection_selects_first_when_unselected() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = None;
+        finalize_drive_selection(&mut state);
+        assert_eq!(state.drive.selected_drive, Some(0));
+        let status = &state.runtime.status_message;
+        assert!(status.contains("Ready") || status.contains("ready"));
+    }
+
+    #[test]
+    fn finalize_drive_selection_clears_selection_when_empty() {
+        let mut state = AppState::new_no_backend();
+        state.drive.selected_drive = Some(0);
+        finalize_drive_selection(&mut state);
+        assert_eq!(state.drive.selected_drive, None);
+    }
+
+    #[test]
     fn validate_flash_no_drive() {
         let mut state = AppState::new_no_backend();
-        state.selected_drive = None;
+        state.drive.selected_drive = None;
         validate_flash(&mut state);
         // Should not crash, no flash report set
-        assert!(state.flash_report.is_none());
+        assert!(state.flash.flash_report.is_none());
     }
 
     #[test]
     fn validate_flash_no_manifest() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.manifest = None;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.flash.manifest = None;
         validate_flash(&mut state);
-        assert!(state.flash_report.is_none());
-        assert!(state.log_text.contains("manifest"));
+        assert!(state.flash.flash_report.is_none());
+        assert!(state.runtime.log_text.contains("manifest"));
     }
 
     #[test]
     fn validate_flash_no_firmware_data() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.manifest = Some(crate::manifest::FirmwareManifest {
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.flash.manifest = Some(crate::manifest::FirmwareManifest {
             schema_version: 1,
             vendor: "V".into(),
             model: "M".into(),
             revision_match: "*".into(),
             capabilities: vec![],
+            category: None,
             firmware_images: vec![crate::manifest::FirmwareImage {
                 image_id: "main".into(),
                 filename: "fw.bin".into(),
@@ -923,22 +1385,23 @@ mod tests {
                 signature_present: true,
             }],
         });
-        state.firmware_data = None;
+        state.flash.firmware_data = None;
         validate_flash(&mut state);
-        assert!(state.flash_report.is_none());
+        assert!(state.flash.flash_report.is_none());
     }
 
     #[test]
     fn validate_flash_no_image_id() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.manifest = Some(crate::manifest::FirmwareManifest {
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.flash.manifest = Some(crate::manifest::FirmwareManifest {
             schema_version: 1,
             vendor: "V".into(),
             model: "M".into(),
             revision_match: "*".into(),
             capabilities: vec![],
+            category: None,
             firmware_images: vec![crate::manifest::FirmwareImage {
                 image_id: "main".into(),
                 filename: "fw.bin".into(),
@@ -948,11 +1411,11 @@ mod tests {
                 signature_present: true,
             }],
         });
-        state.firmware_data = Some(vec![0u8; 1024]);
-        state.selected_image_id = None;
+        state.flash.firmware_data = Some(vec![0u8; 1024]);
+        state.flash.selected_image_id = None;
         validate_flash(&mut state);
-        assert!(state.flash_report.is_none());
-        assert!(state.log_text.contains("image"));
+        assert!(state.flash.flash_report.is_none());
+        assert!(state.runtime.log_text.contains("image"));
     }
 
     #[test]
@@ -963,16 +1426,17 @@ mod tests {
         std::fs::write(&tool, b"").unwrap();
 
         let mut state = AppState::new_no_backend();
-        state.tool_path = tool.to_string_lossy().to_string();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
-        state.manifest = Some(crate::manifest::FirmwareManifest {
+        state.config.tool_path = tool.to_string_lossy().to_string();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.flash.manifest = Some(crate::manifest::FirmwareManifest {
             schema_version: 1,
             vendor: "HL-DT-ST".into(),
             model: "BU40N".into(),
             revision_match: "1.0*".into(),
             capabilities: vec![],
+            category: None,
             firmware_images: vec![crate::manifest::FirmwareImage {
                 image_id: "main".into(),
                 filename: "fw.bin".into(),
@@ -982,30 +1446,30 @@ mod tests {
                 signature_present: true,
             }],
         });
-        state.firmware_data = Some(vec![0u8; 1024]);
-        state.selected_image_id = Some("main".into());
-        state.confirmation = "FLASH /dev/sr0".into();
+        state.flash.firmware_data = Some(vec![0u8; 1024]);
+        state.flash.selected_image_id = Some("main".into());
+        state.flash.confirmation = "FLASH /dev/sr0".into();
         validate_flash(&mut state);
         // flash_report should be set (even if checksum doesn't match)
-        assert!(state.flash_report.is_some());
+        assert!(state.flash.flash_report.is_some());
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[test]
     fn extract_recovery_token_from_wrong_firmware_empty_path() {
         let mut state = AppState::new_no_backend();
-        state.wrong_firmware_path = String::new();
+        state.flash.wrong_firmware_path = String::new();
         extract_recovery_token_from_wrong_firmware(&mut state);
         // Should not crash, should not log error
-        assert!(state.log_text.is_empty());
+        assert!(state.runtime.log_text.is_empty());
     }
 
     #[test]
     fn extract_recovery_token_from_wrong_firmware_nonexistent() {
         let mut state = AppState::new_no_backend();
-        state.wrong_firmware_path = "/nonexistent/fw.bin".into();
+        state.flash.wrong_firmware_path = "/nonexistent/fw.bin".into();
         extract_recovery_token_from_wrong_firmware(&mut state);
-        assert!(state.log_text.contains("ERROR"));
+        assert!(state.runtime.log_text.contains("ERROR"));
     }
 
     #[test]
@@ -1018,10 +1482,10 @@ mod tests {
         std::fs::write(&file, &data).unwrap();
 
         let mut state = AppState::new_no_backend();
-        state.wrong_firmware_path = file.to_string_lossy().to_string();
+        state.flash.wrong_firmware_path = file.to_string_lossy().to_string();
         extract_recovery_token_from_wrong_firmware(&mut state);
-        assert_eq!(state.recovery_token, "ABCDEFGHIJKLMNOP");
-        assert!(state.log_text.contains("Extracted"));
+        assert_eq!(state.flash.recovery_token, "ABCDEFGHIJKLMNOP");
+        assert!(state.runtime.log_text.contains("Extracted"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1033,40 +1497,40 @@ mod tests {
         std::fs::write(&file, &[0u8; 100]).unwrap();
 
         let mut state = AppState::new_no_backend();
-        state.wrong_firmware_path = file.to_string_lossy().to_string();
+        state.flash.wrong_firmware_path = file.to_string_lossy().to_string();
         extract_recovery_token_from_wrong_firmware(&mut state);
-        assert!(state.log_text.contains("ERROR"));
+        assert!(state.runtime.log_text.contains("ERROR"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn prompt_recovery_wrong_firmware_already_set() {
         let mut state = AppState::new_no_backend();
-        state.wrong_firmware_path = "/some/path.bin".into();
+        state.flash.wrong_firmware_path = "/some/path.bin".into();
         prompt_recovery_wrong_firmware(&mut state, &no_dialog());
         // Should not log anything since path is already set
-        assert!(state.log_text.is_empty());
+        assert!(state.runtime.log_text.is_empty());
     }
 
     #[test]
     fn can_start_read_no_tool_path() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Read;
-        state.tool_path = String::new();
+        state.config.tool_path = String::new();
         assert!(!can_start(&state));
     }
 
     #[test]
     fn can_start_read_invalid_sdf_path() {
         let (mut state, temp_dir) = state_with_valid_paths("invaliddf");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Read;
-        state.sdf_path = "/nonexistent/file.txt".into();
+        state.config.sdf_path = "/nonexistent/file.txt".into();
         assert!(!can_start(&state));
         let _ = std::fs::remove_dir_all(temp_dir);
     }
@@ -1074,7 +1538,7 @@ mod tests {
     #[test]
     fn execute_start_write_no_drive() {
         let mut state = AppState::new_no_backend();
-        state.selected_drive = None;
+        state.drive.selected_drive = None;
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
         // Should not crash
@@ -1083,30 +1547,31 @@ mod tests {
     #[test]
     fn execute_start_write_validation_fails() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Write;
-        state.firmware_data = None; // no firmware → validation fails
+        state.flash.firmware_data = None; // no firmware → validation fails
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
         // Should not crash, flash_report should be None
-        assert!(state.flash_report.is_none());
+        assert!(state.flash.flash_report.is_none());
     }
 
     #[test]
     fn execute_start_write_success_path() {
         let (mut state, temp_dir) = state_with_valid_paths("exwrite");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Write;
-        state.manifest = Some(crate::manifest::FirmwareManifest {
+        state.flash.manifest = Some(crate::manifest::FirmwareManifest {
             schema_version: 1,
             vendor: "HL-DT-ST".into(),
             model: "BU40N".into(),
             revision_match: "1.0*".into(),
             capabilities: vec![],
+            category: None,
             firmware_images: vec![crate::manifest::FirmwareImage {
                 image_id: "main".into(),
                 filename: "fw.bin".into(),
@@ -1116,18 +1581,12 @@ mod tests {
                 signature_present: true,
             }],
         });
-        state.firmware_data = Some(vec![0u8; 1024]);
+        state.flash.firmware_data = Some(vec![0u8; 1024]);
         // Set wrong sha256 so flash_report.would_execute is false
         // (checksum mismatch), which means execute_start returns early.
         // Instead, let's set matching sha256:
-        state.firmware_data = {
-            let data = vec![0u8; 1024];
-            // sha256 of vec![0u8; 1024] is not "abcd1234", so we can't match.
-            // Instead, set firmware_data to None to skip validate_flash success,
-            // and directly set flash_report:
-            None
-        };
-        state.flash_report = Some(crate::flash::FlashReport {
+        state.flash.firmware_data = None;
+        state.flash.flash_report = Some(crate::flash::FlashReport {
             would_execute: true,
             direction: crate::flash::FlashDirection::Upgrade,
             checks: crate::flash::FlashChecks {
@@ -1138,29 +1597,32 @@ mod tests {
                 user_confirmed: true,
             },
             summary: "Flash ready".into(),
+            warnings: vec![],
         });
-        state.firmware_path = "fw.bin".into();
-        state.confirmation = crate::command::required_flash_confirmation(&test_drive().device);
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.confirmation =
+            crate::command::required_flash_confirmation(&test_drive().device);
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
         // Should have called begin_operation
-        assert!(state.busy);
+        assert!(state.runtime.busy);
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[test]
     fn execute_start_recover_success_path() {
         let (mut state, temp_dir) = state_with_valid_paths("exrecover");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Recover;
-        state.firmware_path = "fw.bin".into();
-        state.recovery_token = "ABCDEFGHIJKLMNOP".into();
-        state.confirmation = crate::command::required_flash_confirmation(&test_drive().device);
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.recovery_token = "ABCDEFGHIJKLMNOP".into();
+        state.flash.confirmation =
+            crate::command::required_flash_confirmation(&test_drive().device);
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
-        assert!(state.busy);
+        assert!(state.runtime.busy);
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
@@ -1168,8 +1630,8 @@ mod tests {
     fn execute_start_write_no_drive_with_flash_report() {
         let mut state = AppState::new_no_backend();
         state.operation_mode = OperationMode::Write;
-        state.selected_drive = None;
-        state.flash_report = Some(crate::flash::FlashReport {
+        state.drive.selected_drive = None;
+        state.flash.flash_report = Some(crate::flash::FlashReport {
             would_execute: true,
             direction: crate::flash::FlashDirection::Upgrade,
             checks: crate::flash::FlashChecks {
@@ -1180,21 +1642,22 @@ mod tests {
                 user_confirmed: true,
             },
             summary: "ok".into(),
+            warnings: vec![],
         });
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
         // Returns early at line 180 — no drive selected
-        assert!(!state.busy);
+        assert!(!state.runtime.busy);
     }
 
     #[test]
     fn execute_start_write_plan_fails() {
         let (mut state, temp_dir) = state_with_valid_paths("planfail");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Write;
-        state.flash_report = Some(crate::flash::FlashReport {
+        state.flash.flash_report = Some(crate::flash::FlashReport {
             would_execute: true,
             direction: crate::flash::FlashDirection::Upgrade,
             checks: crate::flash::FlashChecks {
@@ -1205,33 +1668,34 @@ mod tests {
                 user_confirmed: true,
             },
             summary: "ok".into(),
+            warnings: vec![],
         });
-        state.firmware_path = "fw.bin".into();
+        state.flash.firmware_path = "fw.bin".into();
         // Wrong confirmation → plan_command returns ConfirmationMismatch
-        state.confirmation = "WRONG".into();
+        state.flash.confirmation = "WRONG".into();
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
         // plan_command fails → line 199 covered
-        assert!(!state.busy);
-        assert!(state.log_text.contains("ERROR"));
+        assert!(!state.runtime.busy);
+        assert!(state.runtime.log_text.contains("ERROR"));
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[test]
     fn execute_start_recover_plan_fails() {
         let (mut state, temp_dir) = state_with_valid_paths("recplanfail");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Recover;
-        state.firmware_path = "fw.bin".into();
-        state.recovery_token = "ABCDEFGHIJKLMNOP".into();
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.recovery_token = "ABCDEFGHIJKLMNOP".into();
         // Wrong confirmation → plan_command returns ConfirmationMismatch
-        state.confirmation = "WRONG".into();
+        state.flash.confirmation = "WRONG".into();
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
-        assert!(!state.busy);
-        assert!(state.log_text.contains("ERROR"));
+        assert!(!state.runtime.busy);
+        assert!(state.runtime.log_text.contains("ERROR"));
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
@@ -1239,7 +1703,7 @@ mod tests {
     fn execute_start_recover_no_drive() {
         let mut state = AppState::new_no_backend();
         state.operation_mode = OperationMode::Recover;
-        state.selected_drive = None;
+        state.drive.selected_drive = None;
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
         // Should not crash
@@ -1250,15 +1714,15 @@ mod tests {
         // "/" has no parent → if let Some(parent) is false, skips candidates
         let mut state = AppState::new_no_backend();
         load_firmware(&mut state, "/");
-        assert!(state.firmware_candidates.is_empty());
+        assert!(state.flash.firmware_candidates.is_empty());
     }
 
     #[test]
     fn start_disabled_reason_read_empty() {
         let (mut state, temp_dir) = state_with_valid_paths("readempty");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Read;
         let reason = start_disabled_reason(&state);
         // Read mode with valid paths should return empty (can start)
@@ -1272,12 +1736,12 @@ mod tests {
     #[test]
     fn start_disabled_reason_write_with_firmware() {
         let (mut state, temp_dir) = state_with_valid_paths("writeok");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Write;
-        state.firmware_data = Some(vec![0u8; 100]);
-        state.firmware_path = "fw.bin".into();
+        state.flash.firmware_data = Some(vec![0u8; 100]);
+        state.flash.firmware_path = "fw.bin".into();
         let reason = start_disabled_reason(&state);
         // Should return ReasonRunValidation — not empty, but not an error either
         assert!(!reason.is_empty());
@@ -1287,12 +1751,12 @@ mod tests {
     #[test]
     fn start_disabled_reason_recover_with_token() {
         let (mut state, temp_dir) = state_with_valid_paths("recoverok");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Recover;
-        state.recovery_token = "ABCDEFGHIJKLMNOP".into();
-        state.firmware_path = "fw.bin".into();
+        state.flash.recovery_token = "ABCDEFGHIJKLMNOP".into();
+        state.flash.firmware_path = "fw.bin".into();
         let reason = start_disabled_reason(&state);
         // Should return ReasonEnterToken
         assert!(!reason.is_empty());
@@ -1302,13 +1766,13 @@ mod tests {
     #[test]
     fn can_start_write_valid() {
         let (mut state, temp_dir) = state_with_valid_paths("canwrite");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Write;
-        state.firmware_data = Some(vec![0u8; 100]);
-        state.firmware_path = "fw.bin".into();
-        state.flash_report = Some(crate::flash::FlashReport {
+        state.flash.firmware_data = Some(vec![0u8; 100]);
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.flash_report = Some(crate::flash::FlashReport {
             would_execute: true,
             direction: crate::flash::FlashDirection::Upgrade,
             checks: crate::flash::FlashChecks {
@@ -1319,6 +1783,7 @@ mod tests {
                 user_confirmed: true,
             },
             summary: "Flash ready".into(),
+            warnings: vec![],
         });
         assert!(can_start(&state));
         let _ = std::fs::remove_dir_all(temp_dir);
@@ -1327,13 +1792,14 @@ mod tests {
     #[test]
     fn can_start_recover_valid() {
         let (mut state, temp_dir) = state_with_valid_paths("canrecover");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Recover;
-        state.firmware_path = "fw.bin".into();
-        state.recovery_token = "ABCDEFGHIJKLMNOP".into();
-        state.confirmation = crate::command::required_flash_confirmation(&test_drive().device);
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.recovery_token = "ABCDEFGHIJKLMNOP".into();
+        state.flash.confirmation =
+            crate::command::required_flash_confirmation(&test_drive().device);
         assert!(can_start(&state));
         let _ = std::fs::remove_dir_all(temp_dir);
     }
@@ -1341,10 +1807,10 @@ mod tests {
     #[test]
     fn start_disabled_reason_invalid_tool_path() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
-        state.tool_path = "/nonexistent/sdftool".into();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.config.tool_path = "/nonexistent/sdftool".into();
         let reason = start_disabled_reason(&state);
         assert!(reason.contains("Invalid tool path"));
     }
@@ -1352,10 +1818,10 @@ mod tests {
     #[test]
     fn start_disabled_reason_invalid_sdf_path() {
         let (mut state, temp_dir) = state_with_valid_paths("invsdf");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
-        state.sdf_path = "/nonexistent/sdf.bin".into();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.config.sdf_path = "/nonexistent/sdf.bin".into();
         let reason = start_disabled_reason(&state);
         assert!(reason.contains("Invalid sdf"));
         let _ = std::fs::remove_dir_all(temp_dir);
@@ -1364,14 +1830,15 @@ mod tests {
     #[test]
     fn validate_flash_image_not_found() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.manifest = Some(crate::manifest::FirmwareManifest {
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.flash.manifest = Some(crate::manifest::FirmwareManifest {
             schema_version: 1,
             vendor: "V".into(),
             model: "M".into(),
             revision_match: "*".into(),
             capabilities: vec![],
+            category: None,
             firmware_images: vec![crate::manifest::FirmwareImage {
                 image_id: "main".into(),
                 filename: "fw.bin".into(),
@@ -1381,25 +1848,26 @@ mod tests {
                 signature_present: true,
             }],
         });
-        state.firmware_data = Some(vec![0u8; 1024]);
-        state.selected_image_id = Some("nonexistent".into());
+        state.flash.firmware_data = Some(vec![0u8; 1024]);
+        state.flash.selected_image_id = Some("nonexistent".into());
         validate_flash(&mut state);
         // orchestration::validate_flash returns Err → flash_report = None
-        assert!(state.flash_report.is_none());
-        assert!(state.log_text.contains("validation failed"));
+        assert!(state.flash.flash_report.is_none());
+        assert!(state.runtime.log_text.contains("validation failed"));
     }
 
     #[test]
     fn validate_flash_model_mismatch() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.manifest = Some(crate::manifest::FirmwareManifest {
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.flash.manifest = Some(crate::manifest::FirmwareManifest {
             schema_version: 1,
             vendor: "OTHER".into(),
             model: "WRONG".into(),
             revision_match: "*".into(),
             capabilities: vec![],
+            category: None,
             firmware_images: vec![crate::manifest::FirmwareImage {
                 image_id: "main".into(),
                 filename: "fw.bin".into(),
@@ -1409,13 +1877,14 @@ mod tests {
                 signature_present: true,
             }],
         });
-        state.firmware_data = Some(vec![0u8; 1024]);
-        state.selected_image_id = Some("main".into());
-        state.confirmation = "FLASH /dev/sr0".into();
+        state.flash.firmware_data = Some(vec![0u8; 1024]);
+        state.flash.selected_image_id = Some("main".into());
+        state.flash.confirmation = "FLASH /dev/sr0".into();
         validate_flash(&mut state);
-        assert!(state.flash_report.is_some());
-        assert!(!state.flash_report.as_ref().unwrap().would_execute);
+        assert!(state.flash.flash_report.is_some());
+        assert!(!state.flash.flash_report.as_ref().unwrap().would_execute);
         assert!(state
+            .flash
             .flash_report
             .as_ref()
             .unwrap()
@@ -1433,17 +1902,20 @@ mod tests {
 
         let mut state = AppState::new_no_backend();
         load_firmware(&mut state, &dir.join("a.bin").to_string_lossy());
-        assert!(state.firmware_data.is_some());
+        assert!(state.flash.firmware_data.is_some());
         // Should find .bin files but not .txt
         assert!(state
+            .flash
             .firmware_candidates
             .iter()
             .any(|p| p.contains("a.bin")));
         assert!(state
+            .flash
             .firmware_candidates
             .iter()
             .any(|p| p.contains("b.bin")));
         assert!(!state
+            .flash
             .firmware_candidates
             .iter()
             .any(|p| p.contains("c.txt")));
@@ -1453,53 +1925,101 @@ mod tests {
     // --- FileDialog trait tests ---
 
     #[test]
+    fn execute_start_read_no_drive_selected() {
+        let mut state = AppState::new_no_backend();
+        state.operation_mode = OperationMode::Read;
+        let (tx, _rx) = std::sync::mpsc::channel();
+        execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
+        assert!(!state.runtime.busy);
+    }
+
+    #[test]
     fn execute_start_read_no_folder_selected() {
         let (mut state, temp_dir) = state_with_valid_paths("readnofolder");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Read;
         let (tx, _rx) = std::sync::mpsc::channel();
         // Dialog returns no folder → early return
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
-        assert!(!state.busy);
+        assert!(!state.runtime.busy);
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[test]
     fn execute_start_read_with_folder() {
         let (mut state, temp_dir) = state_with_valid_paths("readfolder");
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.drive_mt1959 = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Read;
         let dialog = MockDialog::returning_folder("/tmp/output");
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &dialog, &mock_runner());
         // plan_command should succeed and begin_operation should be called
-        assert!(state.busy);
+        assert!(state.runtime.busy);
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[test]
-    fn browse_firmware_file_no_selection() {
+    fn execute_start_read_plan_fails_logs_error() {
         let mut state = AppState::new_no_backend();
-        browse_firmware_file(&mut state, &no_dialog());
-        // No file selected → nothing changes
-        assert!(state.firmware_data.is_none());
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Read;
+        state.config.tool_path = String::new();
+        let dialog = MockDialog::returning_folder("/tmp/output");
+        let (tx, _rx) = std::sync::mpsc::channel();
+        execute_start(&mut state, &tx, &dialog, &mock_runner());
+        assert!(!state.runtime.busy);
+        assert!(state.runtime.log_text.contains("ERROR"));
     }
 
     #[test]
-    fn browse_firmware_file_with_selection() {
-        let dir = std::env::temp_dir().join("sdf_flash_test_browse");
-        let _ = std::fs::create_dir_all(&dir);
-        let file = dir.join("test.bin");
-        std::fs::write(&file, &[0u8; 10]).unwrap();
-        let mut state = AppState::new_no_backend();
-        let dialog = MockDialog::returning_file(&file.to_string_lossy());
-        browse_firmware_file(&mut state, &dialog);
-        assert!(state.firmware_data.is_some());
-        let _ = std::fs::remove_dir_all(dir);
+    fn execute_start_write_dry_run_only_logs_command() {
+        let (mut state, temp_dir) = state_with_valid_paths("dryrun");
+        let fw_path = temp_dir.join("fw.bin");
+        std::fs::write(&fw_path, vec![0u8; 16]).unwrap();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.flash.dry_run_only = true;
+        state.flash.firmware_path = fw_path.to_string_lossy().into();
+        state.flash.firmware_data = None;
+        state.flash.confirmation =
+            crate::command::required_flash_confirmation(&test_drive().device);
+        state.flash.flash_report = Some(crate::flash::FlashReport {
+            would_execute: true,
+            direction: crate::flash::FlashDirection::Upgrade,
+            checks: crate::flash::FlashChecks {
+                model_match: true,
+                revision_check: true,
+                image_checksum: true,
+                signature_present: true,
+                user_confirmed: true,
+            },
+            summary: "ok".into(),
+            warnings: vec![],
+        });
+        let (tx, _rx) = std::sync::mpsc::channel();
+        execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
+        assert!(!state.runtime.busy);
+        let log = &state.runtime.log_text;
+        assert!(
+            log.contains("Dry-run") || log.contains("command that would run"),
+            "expected dry-run log entry"
+        );
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn mock_runner_run_command_returns_err() {
+        let runner = mock_runner();
+        let result = runner.run_command("prog", &[], None);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1507,8 +2027,8 @@ mod tests {
         let mut state = AppState::new_no_backend();
         prompt_recovery_wrong_firmware(&mut state, &no_dialog());
         // Dialog returns nothing → log message but no token
-        assert!(state.log_text.contains("RECOVER"));
-        assert!(state.wrong_firmware_path.is_empty());
+        assert!(state.runtime.log_text.contains("RECOVER"));
+        assert!(state.flash.wrong_firmware_path.is_empty());
     }
 
     #[test]
@@ -1523,8 +2043,8 @@ mod tests {
         let mut state = AppState::new_no_backend();
         let dialog = MockDialog::returning_file(&file.to_string_lossy());
         prompt_recovery_wrong_firmware(&mut state, &dialog);
-        assert_eq!(state.wrong_firmware_path, file.to_string_lossy());
-        assert_eq!(state.recovery_token, "ABCDEFGHIJKLMNOP");
+        assert_eq!(state.flash.wrong_firmware_path, file.to_string_lossy());
+        assert_eq!(state.flash.recovery_token, "ABCDEFGHIJKLMNOP");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

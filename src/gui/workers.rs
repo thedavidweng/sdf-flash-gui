@@ -1,12 +1,13 @@
-// Worker message types, dispatch, and thread spawning.
-
 use crate::command::{self, Command};
 use crate::drive::Drive;
-use crate::process;
+use crate::i18n::{log_error, t, t_with_args, L10nKey, Language};
+use crate::process::{self, CommandRunOutcome, OperationControl};
 
 use super::process_runner::ProcessRunner;
 
 use super::state::AppState;
+
+use std::sync::Arc;
 
 use eframe::egui;
 use std::sync::mpsc::Sender;
@@ -24,6 +25,7 @@ pub enum WorkerMsg {
         drive_idx: usize,
         mt1959: bool,
         encrypted_firmware: bool,
+        identity: Option<crate::manifest::DriveMatch>,
         error: Option<String>,
     },
     OperationComplete {
@@ -32,6 +34,7 @@ pub enum WorkerMsg {
         progress: f32,
     },
     DrivesListed(Vec<Drive>),
+    StopNeedsForceKill,
 }
 
 /// Whether the user should be notified after processing messages.
@@ -50,39 +53,46 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
             None
         }
         WorkerMsg::Progress(p) => {
-            state.progress_indeterminate = false;
-            state.progress = p;
+            state.runtime.progress_indeterminate = false;
+            state.runtime.progress = p;
             None
         }
         WorkerMsg::Status { message, progress } => {
-            state.status_message = message;
-            state.progress = progress.clamp(0.0, 100.0);
+            state.runtime.status_message = message;
+            state.runtime.progress = progress.clamp(0.0, 100.0);
             None
         }
         WorkerMsg::ProbeComplete {
             drive_idx,
             mt1959,
             encrypted_firmware,
+            identity,
             error,
         } => {
-            if state.selected_drive == Some(drive_idx) {
-                state.drive_probed = error.is_none();
-                state.drive_mt1959 = mt1959;
-                state.drive_encrypted_firmware = encrypted_firmware;
+            if state.drive.selected_drive == Some(drive_idx) {
+                state.drive.drive_probed = error.is_none();
+                state.drive.drive_mt1959 = mt1959;
+                state.drive.drive_encrypted_firmware = encrypted_firmware;
+                state.drive.probe_identity = if error.is_none() { identity } else { None };
                 if error.is_none() {
-                    state.encrypted_write = encrypted_firmware;
+                    state.flash.encrypted_write = encrypted_firmware;
                 }
-                state.last_probed_drive = Some(drive_idx);
+                state.drive.last_probed_drive = Some(drive_idx);
             }
-            state.probing = false;
+            state.finish_probe();
             if let Some(err) = error {
-                state.log(&format!("ERROR: {err}"));
-                state.set_status("Drive probe failed", 0.0);
+                state.log(&err);
+                state.set_status_key(L10nKey::StatusProbeFailed, 0.0);
             } else {
-                state.log(&format!(
-                    "MT1959: {mt1959} | Encrypted FW: {encrypted_firmware}"
+                state.log(&t_with_args(
+                    L10nKey::LogProbeResult,
+                    state.chrome.resolved_lang,
+                    &[
+                        ("mt1959", &mt1959.to_string()),
+                        ("encrypted", &encrypted_firmware.to_string()),
+                    ],
                 ));
-                state.set_status("Ready", 0.0);
+                state.set_status_key(L10nKey::StatusReady, 0.0);
             }
             None
         }
@@ -91,12 +101,18 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
             status,
             progress,
         } => {
-            state.busy = false;
-            state.progress_indeterminate = false;
-            state.set_status(status, progress);
+            let risky_op = matches!(
+                state.operation_mode,
+                super::OperationMode::Write | super::OperationMode::Recover
+            );
             let is_success = success && progress >= 100.0;
+            if !is_success && risky_op {
+                state.chrome.show_flash_failure_dialog = true;
+            }
+            state.finish_operation();
+            state.set_status(status, progress);
             if is_success {
-                state.log("Operation completed successfully.");
+                state.log(t(L10nKey::StatusOpSuccess, state.chrome.resolved_lang));
             }
             Some(if is_success {
                 Attention::Informational
@@ -106,15 +122,23 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
         }
         WorkerMsg::DrivesListed(drives) => {
             let count = drives.len();
-            state.drives = drives;
-            state.last_probed_drive = None;
-            if state.selected_drive.is_none() && count > 0 {
-                state.selected_drive = Some(0);
+            state.drive.drives = drives;
+            state.drive.last_probed_drive = None;
+            if state.drive.selected_drive.is_none() && count > 0 {
+                state.drive.selected_drive = Some(0);
             }
-            state.busy = false;
-            state.progress_indeterminate = false;
-            state.set_status("Ready", 0.0);
-            state.log(&format!("Found {count} drive(s)."));
+            state.finish_operation();
+            let lang = state.chrome.resolved_lang;
+            state.set_status_key(L10nKey::StatusReady, 0.0);
+            state.log(&t_with_args(
+                L10nKey::StatusDrivesFound,
+                lang,
+                &[("count", &count.to_string())],
+            ));
+            None
+        }
+        WorkerMsg::StopNeedsForceKill => {
+            state.runtime.stop_dialog = super::state::StopDialog::ConfirmForceKill;
             None
         }
     }
@@ -137,13 +161,53 @@ pub fn drain_worker_messages(
     (repaint, attention)
 }
 
-/// Drain the worker channel, apply messages, and trigger egui side effects.
+/// Drain the worker channel, apply messages, and optionally trigger egui side effects.
+fn poll_waiting_backend_stop(state: &mut AppState) -> bool {
+    if !state.runtime.waiting_for_backend_stop {
+        return false;
+    }
+    let still_running = state
+        .runtime
+        .active_operation
+        .as_ref()
+        .is_some_and(|control| control.is_child_running());
+    if still_running {
+        return false;
+    }
+    state.log(t(L10nKey::LogOpCancelled, state.chrome.resolved_lang));
+    state.finish_operation();
+    state.set_status_key(L10nKey::StatusOpCancelled, 0.0);
+    true
+}
+
+fn poll_probe_backend_stop(state: &mut AppState) -> bool {
+    if state.runtime.busy || state.runtime.probe_control.is_none() {
+        return false;
+    }
+    let still_running = state
+        .runtime
+        .probe_control
+        .as_ref()
+        .is_some_and(|control| control.is_child_running());
+    if still_running {
+        return false;
+    }
+    state.finish_probe();
+    state.set_status_key(L10nKey::StatusProbeFailed, 0.0);
+    true
+}
+
 pub fn poll_worker(
     state: &mut AppState,
     worker_rx: &std::sync::mpsc::Receiver<WorkerMsg>,
-    ctx: &egui::Context,
+    ctx: Option<&egui::Context>,
 ) {
+    let waiting_repaint = poll_waiting_backend_stop(state) || poll_probe_backend_stop(state);
     let (repaint, attention) = drain_worker_messages(state, worker_rx);
+    let repaint = repaint || waiting_repaint;
+    let Some(ctx) = ctx else {
+        return;
+    };
     if let Some(at) = attention {
         let egui_at = match at {
             Attention::Informational => egui::UserAttentionType::Informational,
@@ -158,63 +222,87 @@ pub fn poll_worker(
 
 pub fn spawn_probe(
     tx: &Sender<WorkerMsg>,
-    state: &AppState,
+    state: &mut AppState,
     drive_idx: usize,
     runner: &std::sync::Arc<dyn ProcessRunner>,
 ) {
-    let Some(drive) = state.drives.get(drive_idx) else {
+    let Some(drive) = state.drive.drives.get(drive_idx) else {
         return;
     };
-    if state.tool_path.is_empty() {
+    if state.config.tool_path.is_empty() {
         let _ = tx.send(WorkerMsg::ProbeComplete {
             drive_idx,
             mt1959: false,
             encrypted_firmware: false,
-            error: Some("Configure backend in Settings".into()),
+            identity: None,
+            error: Some(t(L10nKey::ReasonNoBackend, state.chrome.resolved_lang).into()),
         });
         return;
     }
 
     let tx = tx.clone();
-    let tool_path = state.tool_path.clone();
-    let backend = state.backend;
+    let tool_path = state.config.tool_path.clone();
+    let backend = state.config.backend;
     let device = drive.device.clone();
     let runner = runner.clone();
+    let lang = state.chrome.resolved_lang;
 
     let _ = tx.send(WorkerMsg::Status {
-        message: "Probing drive".into(),
+        message: t(L10nKey::StatusProbing, lang).into(),
         progress: 0.0,
     });
 
-    thread::spawn(move || {
+    let control = Arc::new(OperationControl::new());
+    state.runtime.probe_control = Some(control.clone());
+
+    run_backend_command(move || {
         let cmd = command::plan_drive_info(backend, &tool_path, &device);
         let _ = tx.send(WorkerMsg::Log(format!(
             "> {}",
             process::format_command(&cmd)
         )));
-        match runner.run_command(&cmd.program, &cmd.args) {
-            Ok(out) => {
+        match runner.run_command(&cmd.program, &cmd.args, Some(control.as_ref())) {
+            Ok(CommandRunOutcome::Completed(out)) => {
                 let combined = out.combined();
                 if !combined.is_empty() {
                     let _ = tx.send(WorkerMsg::Log(combined.clone()));
                 }
                 let safety = command::classify_drive_safety(&device, &combined);
+                let identity = if out.success() {
+                    Some(crate::drive::parse_identity_from_info(&device, &combined))
+                } else {
+                    None
+                };
                 let _ = tx.send(WorkerMsg::ProbeComplete {
                     drive_idx,
                     mt1959: safety.mt1959,
                     encrypted_firmware: safety.encrypted_firmware,
+                    identity,
                     error: if out.success() {
                         None
                     } else {
-                        Some("Drive probe failed".into())
+                        Some(t(L10nKey::StatusProbeFailed, lang).into())
                     },
                 });
+            }
+            Ok(CommandRunOutcome::Cancelled) => {
+                let _ = tx.send(WorkerMsg::ProbeComplete {
+                    drive_idx,
+                    mt1959: false,
+                    encrypted_firmware: false,
+                    identity: None,
+                    error: Some(t(L10nKey::StatusProbeFailed, lang).into()),
+                });
+            }
+            Ok(CommandRunOutcome::NeedsForceKill) => {
+                let _ = tx.send(WorkerMsg::StopNeedsForceKill);
             }
             Err(e) => {
                 let _ = tx.send(WorkerMsg::ProbeComplete {
                     drive_idx,
                     mt1959: false,
                     encrypted_firmware: false,
+                    identity: None,
                     error: Some(e),
                 });
             }
@@ -227,6 +315,8 @@ pub fn spawn_streaming_command(
     cmd: Command,
     initial_status: &str,
     runner: &std::sync::Arc<dyn ProcessRunner>,
+    lang: Language,
+    control: Arc<OperationControl>,
 ) {
     let tx = tx.clone();
     let program = cmd.program;
@@ -246,32 +336,48 @@ pub fn spawn_streaming_command(
         })
     )));
 
-    thread::spawn(move || {
-        let result = runner.run_command_streaming(&program, &args, &|line| {
-            let _ = tx.send(WorkerMsg::Log(line.to_string()));
-            if let Some(p) = process::parse_progress_percent(line) {
-                let _ = tx.send(WorkerMsg::Progress(p));
-            }
-        });
+    run_backend_command(move || {
+        let result = runner.run_command_streaming(
+            &program,
+            &args,
+            &|line| {
+                let _ = tx.send(WorkerMsg::Log(line.to_string()));
+                if let Some(p) = process::parse_progress_percent(line) {
+                    let _ = tx.send(WorkerMsg::Progress(p));
+                }
+            },
+            Some(control.as_ref()),
+        );
 
         match result {
-            Ok(out) => {
+            Ok(CommandRunOutcome::Completed(out)) => {
                 let success = out.success();
                 let _ = tx.send(WorkerMsg::OperationComplete {
                     success,
                     status: if success {
-                        "100% Operation finished. Please wait…".into()
+                        t(L10nKey::StatusOpFinished, lang).into()
                     } else {
-                        "Operation failed".into()
+                        t(L10nKey::StatusOpFailed, lang).into()
                     },
                     progress: if success { 100.0 } else { 0.0 },
                 });
             }
-            Err(e) => {
-                let _ = tx.send(WorkerMsg::Log(format!("ERROR: {e}")));
+            Ok(CommandRunOutcome::Cancelled) => {
+                let _ = tx.send(WorkerMsg::Log(t(L10nKey::LogOpCancelled, lang).into()));
                 let _ = tx.send(WorkerMsg::OperationComplete {
                     success: false,
-                    status: "Operation failed".into(),
+                    status: t(L10nKey::StatusOpCancelled, lang).into(),
+                    progress: 0.0,
+                });
+            }
+            Ok(CommandRunOutcome::NeedsForceKill) => {
+                let _ = tx.send(WorkerMsg::StopNeedsForceKill);
+            }
+            Err(e) => {
+                let _ = tx.send(WorkerMsg::Log(log_error(lang, &e)));
+                let _ = tx.send(WorkerMsg::OperationComplete {
+                    success: false,
+                    status: t(L10nKey::StatusOpFailed, lang).into(),
                     progress: 0.0,
                 });
             }
@@ -284,150 +390,68 @@ pub fn spawn_list_drives(
     state: &mut AppState,
     runner: &std::sync::Arc<dyn ProcessRunner>,
 ) {
-    let cmd = command::plan_drive_list(state.backend, &state.tool_path);
-    state.begin_operation("Listing drives");
+    let cmd = command::plan_drive_list(state.config.backend, &state.config.tool_path);
+    let lang = state.chrome.resolved_lang;
+    let control = state.begin_operation(t(L10nKey::StatusListingDrives, lang));
     state.log(&format!("> {}", process::format_command(&cmd)));
 
     let tx = tx.clone();
     let program = cmd.program;
     let args = cmd.args;
     let runner = runner.clone();
-    thread::spawn(move || match runner.run_command(&program, &args) {
-        Ok(out) => {
-            if !out.combined().is_empty() {
-                let _ = tx.send(WorkerMsg::Log(out.combined()));
+    run_backend_command(move || {
+        match runner.run_command(&program, &args, Some(control.as_ref())) {
+            Ok(CommandRunOutcome::Completed(out)) => {
+                if !out.combined().is_empty() {
+                    let _ = tx.send(WorkerMsg::Log(out.combined()));
+                }
+                let drives = crate::drive::parse_drive_list(&out.stdout);
+                let _ = tx.send(WorkerMsg::Log(t_with_args(
+                    L10nKey::LogParsedDrivesFromOutput,
+                    lang,
+                    &[("count", &drives.len().to_string())],
+                )));
+                let _ = tx.send(WorkerMsg::DrivesListed(drives));
             }
-            let drives = parse_drive_list(&out.stdout);
-            let _ = tx.send(WorkerMsg::Log(format!(
-                "Parsed {} drive(s) from output.",
-                drives.len()
-            )));
-            let _ = tx.send(WorkerMsg::DrivesListed(drives));
-        }
-        Err(e) => {
-            let _ = tx.send(WorkerMsg::Log(format!("ERROR: {e}")));
-            let _ = tx.send(WorkerMsg::OperationComplete {
-                success: false,
-                status: "Drive list failed".into(),
-                progress: 0.0,
-            });
+            Ok(CommandRunOutcome::Cancelled) => {
+                let _ = tx.send(WorkerMsg::Log(t(L10nKey::LogOpCancelled, lang).into()));
+                let _ = tx.send(WorkerMsg::OperationComplete {
+                    success: false,
+                    status: t(L10nKey::StatusOpCancelled, lang).into(),
+                    progress: 0.0,
+                });
+            }
+            Ok(CommandRunOutcome::NeedsForceKill) => {
+                let _ = tx.send(WorkerMsg::StopNeedsForceKill);
+            }
+            Err(e) => {
+                let _ = tx.send(WorkerMsg::Log(log_error(lang, &e)));
+                let _ = tx.send(WorkerMsg::OperationComplete {
+                    success: false,
+                    status: t(L10nKey::StatusDriveListFailed, lang).into(),
+                    progress: 0.0,
+                });
+            }
         }
     });
 }
 
-fn parse_drive_list(output: &str) -> Vec<Drive> {
-    let mut drives = Vec::new();
-    for line in output.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix(|c: char| c.is_ascii_digit() || c == ':') {
-            let rest = rest.trim_start_matches(':').trim();
-            if !rest.is_empty() && (rest.starts_with("/dev/") || rest.contains(':')) {
-                let parts: Vec<&str> = rest.split_whitespace().collect();
-                let device = parts.first().unwrap_or(&"").to_string();
-                let vendor = parts.get(1).unwrap_or(&"").to_string();
-                let product = parts.get(2).unwrap_or(&"").to_string();
-                let revision = parts.get(3).unwrap_or(&"").to_string();
-                drives.push(Drive {
-                    device,
-                    vendor,
-                    product,
-                    revision,
-                });
-            }
-        }
-    }
-    drives
+// ponytail: spawn_* share run_backend_command; ProcessRunner kept for test mocks
+
+fn run_backend_command<F>(f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    thread::spawn(f);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn parse_drive_list_four_fields() {
-        // 4-field format: device vendor product revision
-        let output = "0:/dev/sr0 HL-DT-ST BU40N 1.03\n";
-        let drives = parse_drive_list(output);
-        assert_eq!(drives.len(), 1);
-        assert_eq!(drives[0].device, "/dev/sr0");
-        assert_eq!(drives[0].vendor, "HL-DT-ST");
-        assert_eq!(drives[0].product, "BU40N");
-        assert_eq!(drives[0].revision, "1.03");
-    }
-
-    #[test]
-    fn parse_drive_list_five_fields_drops_last() {
-        // 5-field input: device vendor product model revision
-        // NOTE: parse_drive_list only reads parts[0..3], so the 5th field
-        // (firmware revision "1.03") is silently dropped and parts[3] (model
-        // "BU40N") ends up in Drive::revision. This is a known limitation.
-        let output = "0:/dev/sr0 HL-DT-ST BD-RE BU40N 1.03\n";
-        let drives = parse_drive_list(output);
-        assert_eq!(drives.len(), 1);
-        assert_eq!(drives[0].device, "/dev/sr0");
-        assert_eq!(drives[0].vendor, "HL-DT-ST");
-        assert_eq!(drives[0].product, "BD-RE");
-        assert_eq!(drives[0].revision, "BU40N"); // model, not firmware revision
-    }
-
-    #[test]
-    fn parse_drive_list_windows_format() {
-        // Windows format with leading digit index
-        let output = "0:D: HL-DT-ST BD-RE BU40N 1.03\n";
-        let drives = parse_drive_list(output);
-        assert_eq!(drives.len(), 1);
-        assert_eq!(drives[0].device, "D:");
-    }
-
-    #[test]
-    fn parse_drive_list_empty() {
-        let drives = parse_drive_list("");
-        assert!(drives.is_empty());
-    }
-
-    #[test]
-    fn parse_drive_list_no_drives() {
-        let output = "No drives found\n";
-        let drives = parse_drive_list(output);
-        assert!(drives.is_empty());
-    }
-
-    #[test]
-    fn parse_drive_list_multiple() {
-        let output = "0:/dev/sr0 VENDOR1 PRODUCT1 REV1\n1:/dev/sr1 VENDOR2 PRODUCT2 REV2\n";
-        let drives = parse_drive_list(output);
-        assert_eq!(drives.len(), 2);
-        assert_eq!(drives[0].device, "/dev/sr0");
-        assert_eq!(drives[1].device, "/dev/sr1");
-    }
-
-    #[test]
-    fn parse_drive_list_with_colon_prefix() {
-        let output = ":/dev/sr0 VENDOR PRODUCT REV\n";
-        let drives = parse_drive_list(output);
-        assert_eq!(drives.len(), 1);
-    }
-
-    #[test]
-    fn parse_drive_list_whitespace_only() {
-        let output = "   \n  \n  ";
-        let drives = parse_drive_list(output);
-        assert!(drives.is_empty());
-    }
-
-    #[test]
-    fn parse_drive_list_partial_info() {
-        let output = "0:/dev/sr0\n";
-        let drives = parse_drive_list(output);
-        assert_eq!(drives.len(), 1);
-        assert_eq!(drives[0].device, "/dev/sr0");
-        assert!(drives[0].vendor.is_empty());
-    }
-
     // --- drain_worker_messages tests ---
 
     use super::super::state::AppState;
-    use super::super::OperationMode;
 
     fn test_drive() -> crate::drive::Drive {
         crate::drive::Drive {
@@ -457,19 +481,19 @@ mod tests {
         let (repaint, attention) = drain_worker_messages(&mut state, &rx);
         assert!(repaint);
         assert!(attention.is_none());
-        assert!(state.log_text.contains("hello"));
+        assert!(state.runtime.log_text.contains("hello"));
     }
 
     #[test]
     fn drain_progress_message() {
         let mut state = AppState::new_no_backend();
-        state.progress_indeterminate = true;
+        state.runtime.progress_indeterminate = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::Progress(42.0));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
-        assert!(!state.progress_indeterminate);
-        assert!((state.progress - 42.0).abs() < 0.01);
+        assert!(!state.runtime.progress_indeterminate);
+        assert!((state.runtime.progress - 42.0).abs() < 0.01);
     }
 
     #[test]
@@ -482,8 +506,8 @@ mod tests {
         });
         drop(tx);
         drain_worker_messages(&mut state, &rx);
-        assert_eq!(state.status_message, "Working");
-        assert!((state.progress - 50.0).abs() < 0.01);
+        assert_eq!(state.runtime.status_message, "Working");
+        assert!((state.runtime.progress - 50.0).abs() < 0.01);
     }
 
     #[test]
@@ -496,80 +520,83 @@ mod tests {
         });
         drop(tx);
         drain_worker_messages(&mut state, &rx);
-        assert!((state.progress - 100.0).abs() < 0.01);
+        assert!((state.runtime.progress - 100.0).abs() < 0.01);
     }
 
     #[test]
     fn drain_probe_complete_success() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.probing = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.runtime.probing = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::ProbeComplete {
             drive_idx: 0,
             mt1959: true,
             encrypted_firmware: true,
+            identity: None,
             error: None,
         });
         drop(tx);
         let (repaint, attention) = drain_worker_messages(&mut state, &rx);
         assert!(repaint);
         assert!(attention.is_none());
-        assert!(!state.probing);
-        assert!(state.drive_mt1959);
-        assert!(state.drive_encrypted_firmware);
-        assert!(state.drive_probed);
-        assert!(state.encrypted_write);
-        assert!(state.log_text.contains("MT1959: true"));
+        assert!(!state.runtime.probing);
+        assert!(state.drive.drive_mt1959);
+        assert!(state.drive.drive_encrypted_firmware);
+        assert!(state.drive.drive_probed);
+        assert!(state.flash.encrypted_write);
+        assert!(state.runtime.log_text.contains("MT1959: true"));
     }
 
     #[test]
     fn drain_probe_complete_error() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.probing = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.runtime.probing = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::ProbeComplete {
             drive_idx: 0,
             mt1959: false,
             encrypted_firmware: false,
+            identity: None,
             error: Some("probe failed".into()),
         });
         drop(tx);
         drain_worker_messages(&mut state, &rx);
-        assert!(!state.probing);
-        assert!(!state.drive_probed);
-        assert!(state.log_text.contains("ERROR"));
-        assert!(state.status_message.contains("failed"));
+        assert!(!state.runtime.probing);
+        assert!(!state.drive.drive_probed);
+        assert!(state.runtime.log_text.contains("probe failed"));
+        assert!(state.runtime.status_message.contains("failed"));
     }
 
     #[test]
     fn drain_probe_complete_wrong_drive_idx() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
-        state.probing = true;
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.runtime.probing = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::ProbeComplete {
             drive_idx: 1, // different from selected
             mt1959: true,
             encrypted_firmware: true,
+            identity: None,
             error: None,
         });
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         // drive_mt1959 should NOT be updated since drive_idx doesn't match
-        assert!(!state.drive_mt1959);
+        assert!(!state.drive.drive_mt1959);
         // but probing should still be cleared
-        assert!(!state.probing);
+        assert!(!state.runtime.probing);
     }
 
     #[test]
     fn drain_operation_complete_success() {
         let mut state = AppState::new_no_backend();
-        state.busy = true;
+        state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::OperationComplete {
             success: true,
@@ -580,15 +607,15 @@ mod tests {
         let (repaint, attention) = drain_worker_messages(&mut state, &rx);
         assert!(repaint);
         assert_eq!(attention, Some(Attention::Informational));
-        assert!(!state.busy);
-        assert!(!state.progress_indeterminate);
-        assert!(state.log_text.contains("successfully"));
+        assert!(!state.runtime.busy);
+        assert!(!state.runtime.progress_indeterminate);
+        assert!(state.runtime.log_text.contains("successfully"));
     }
 
     #[test]
     fn drain_operation_complete_failure() {
         let mut state = AppState::new_no_backend();
-        state.busy = true;
+        state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::OperationComplete {
             success: false,
@@ -599,14 +626,46 @@ mod tests {
         let (repaint, attention) = drain_worker_messages(&mut state, &rx);
         assert!(repaint);
         assert_eq!(attention, Some(Attention::Critical));
-        assert!(!state.busy);
-        assert!(!state.log_text.contains("successfully"));
+        assert!(!state.runtime.busy);
+        assert!(!state.runtime.log_text.contains("successfully"));
+    }
+
+    #[test]
+    fn drain_write_failure_shows_recovery_dialog() {
+        let mut state = AppState::new_no_backend();
+        state.operation_mode = super::super::OperationMode::Write;
+        state.runtime.busy = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(WorkerMsg::OperationComplete {
+            success: false,
+            status: "Failed".into(),
+            progress: 0.0,
+        });
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert!(state.chrome.show_flash_failure_dialog);
+    }
+
+    #[test]
+    fn drain_read_failure_does_not_show_recovery_dialog() {
+        let mut state = AppState::new_no_backend();
+        state.operation_mode = super::super::OperationMode::Read;
+        state.runtime.busy = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(WorkerMsg::OperationComplete {
+            success: false,
+            status: "Failed".into(),
+            progress: 0.0,
+        });
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert!(!state.chrome.show_flash_failure_dialog);
     }
 
     #[test]
     fn drain_operation_complete_partial_progress() {
         let mut state = AppState::new_no_backend();
-        state.busy = true;
+        state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::OperationComplete {
             success: true,
@@ -622,35 +681,35 @@ mod tests {
     #[test]
     fn drain_drives_listed() {
         let mut state = AppState::new_no_backend();
-        state.busy = true;
+        state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::DrivesListed(vec![test_drive()]));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
-        assert_eq!(state.drives.len(), 1);
-        assert_eq!(state.selected_drive, Some(0));
-        assert!(!state.busy);
-        assert!(!state.progress_indeterminate);
-        assert!(state.log_text.contains("Found 1 drive(s)"));
+        assert_eq!(state.drive.drives.len(), 1);
+        assert_eq!(state.drive.selected_drive, Some(0));
+        assert!(!state.runtime.busy);
+        assert!(!state.runtime.progress_indeterminate);
+        assert!(state.runtime.log_text.contains("1 drive(s)"));
     }
 
     #[test]
     fn drain_drives_listed_empty() {
         let mut state = AppState::new_no_backend();
-        state.selected_drive = Some(0);
+        state.drive.selected_drive = Some(0);
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::DrivesListed(vec![]));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
-        assert!(state.drives.is_empty());
+        assert!(state.drive.drives.is_empty());
         // selected_drive not changed to None by DrivesListed — only set to Some(0) if was None
     }
 
     #[test]
     fn drain_drives_listed_preserves_existing_selection() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.selected_drive = Some(0);
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::DrivesListed(vec![
             test_drive(),
@@ -664,8 +723,8 @@ mod tests {
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         // selected_drive should remain Some(0) since it was already set
-        assert_eq!(state.selected_drive, Some(0));
-        assert_eq!(state.drives.len(), 2);
+        assert_eq!(state.drive.selected_drive, Some(0));
+        assert_eq!(state.drive.drives.len(), 2);
     }
 
     #[test]
@@ -683,17 +742,10 @@ mod tests {
         let (repaint, attention) = drain_worker_messages(&mut state, &rx);
         assert!(repaint);
         assert!(attention.is_none());
-        assert!(state.log_text.contains("line1"));
-        assert!(state.log_text.contains("line2"));
-        assert!((state.progress - 50.0).abs() < 0.01); // last Status wins
-        assert_eq!(state.status_message, "Working");
-    }
-
-    #[test]
-    fn attention_display_debug() {
-        // Verify Attention enum variants
-        assert_eq!(format!("{:?}", Attention::Informational), "Informational");
-        assert_eq!(format!("{:?}", Attention::Critical), "Critical");
+        assert!(state.runtime.log_text.contains("line1"));
+        assert!(state.runtime.log_text.contains("line2"));
+        assert!((state.runtime.progress - 50.0).abs() < 0.01); // last Status wins
+        assert_eq!(state.runtime.status_message, "Working");
     }
 
     // --- ProcessRunner mock and spawn tests ---
@@ -701,23 +753,52 @@ mod tests {
     use super::super::process_runner::ProcessRunner;
     use std::sync::Arc;
 
+    enum MockOutcome {
+        Success,
+        Fail,
+        Cancelled,
+        NeedsForceKill,
+        ProbeFailed,
+    }
+
     struct MockRunner {
         output: String,
-        success: bool,
+        outcome: MockOutcome,
     }
 
     impl MockRunner {
         fn success(output: &str) -> Self {
             Self {
                 output: output.to_string(),
-                success: true,
+                outcome: MockOutcome::Success,
             }
         }
 
         fn failing() -> Self {
             Self {
                 output: String::new(),
-                success: false,
+                outcome: MockOutcome::Fail,
+            }
+        }
+
+        fn cancelled() -> Self {
+            Self {
+                output: String::new(),
+                outcome: MockOutcome::Cancelled,
+            }
+        }
+
+        fn needs_force_kill() -> Self {
+            Self {
+                output: String::new(),
+                outcome: MockOutcome::NeedsForceKill,
+            }
+        }
+
+        fn probe_failed() -> Self {
+            Self {
+                output: "probe failed".into(),
+                outcome: MockOutcome::ProbeFailed,
             }
         }
     }
@@ -727,11 +808,16 @@ mod tests {
             &self,
             _program: &str,
             _args: &[String],
-        ) -> Result<crate::process::CommandOutput, String> {
-            if self.success {
-                Ok(make_output(&self.output))
-            } else {
-                Err("mock command failed".into())
+            _control: Option<&OperationControl>,
+        ) -> Result<CommandRunOutcome, String> {
+            match self.outcome {
+                MockOutcome::Success => Ok(CommandRunOutcome::Completed(make_output(&self.output))),
+                MockOutcome::Cancelled => Ok(CommandRunOutcome::Cancelled),
+                MockOutcome::NeedsForceKill => Ok(CommandRunOutcome::NeedsForceKill),
+                MockOutcome::Fail => Err("mock command failed".into()),
+                MockOutcome::ProbeFailed => Ok(CommandRunOutcome::Completed(make_failing_output(
+                    &self.output,
+                ))),
             }
         }
 
@@ -740,14 +826,21 @@ mod tests {
             _program: &str,
             _args: &[String],
             on_line: &dyn Fn(&str),
-        ) -> Result<crate::process::CommandOutput, String> {
-            if self.success {
-                for line in self.output.lines() {
-                    on_line(line);
+            _control: Option<&OperationControl>,
+        ) -> Result<CommandRunOutcome, String> {
+            match self.outcome {
+                MockOutcome::Success => {
+                    for line in self.output.lines() {
+                        on_line(line);
+                    }
+                    Ok(CommandRunOutcome::Completed(make_output(&self.output)))
                 }
-                Ok(make_output(&self.output))
-            } else {
-                Err("mock streaming failed".into())
+                MockOutcome::Cancelled => Ok(CommandRunOutcome::Cancelled),
+                MockOutcome::NeedsForceKill => Ok(CommandRunOutcome::NeedsForceKill),
+                MockOutcome::Fail => Err("mock streaming failed".into()),
+                MockOutcome::ProbeFailed => Ok(CommandRunOutcome::Completed(make_failing_output(
+                    &self.output,
+                ))),
             }
         }
     }
@@ -762,12 +855,21 @@ mod tests {
         }
     }
 
+    fn make_failing_output(stdout: &str) -> crate::process::CommandOutput {
+        let status = std::process::Command::new("false").status().unwrap();
+        crate::process::CommandOutput {
+            status,
+            stdout: stdout.to_string(),
+            stderr: String::new(),
+        }
+    }
+
     #[test]
     fn spawn_probe_no_drive() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
-        spawn_probe(&tx, &state, 0, &runner);
+        spawn_probe(&tx, &mut state, 0, &runner);
         // No drive at index 0 → early return, no messages
         drop(tx);
         assert!(rx.try_recv().is_err());
@@ -776,10 +878,10 @@ mod tests {
     #[test]
     fn spawn_probe_empty_tool_path() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
+        state.drive.drives.push(test_drive());
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
-        spawn_probe(&tx, &state, 0, &runner);
+        spawn_probe(&tx, &mut state, 0, &runner);
         drop(tx);
         let msg = rx.try_recv().unwrap();
         match msg {
@@ -794,12 +896,12 @@ mod tests {
     #[test]
     fn spawn_probe_success() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.tool_path = "/usr/bin/sdftool".into();
+        state.drive.drives.push(test_drive());
+        state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> =
             Arc::new(MockRunner::success("Vendor: HL-DT-ST\nProduct: BU40N\n"));
-        spawn_probe(&tx, &state, 0, &runner);
+        spawn_probe(&tx, &mut state, 0, &runner);
         // Wait for thread to finish
         std::thread::sleep(std::time::Duration::from_millis(100));
         drop(tx);
@@ -821,11 +923,11 @@ mod tests {
     #[test]
     fn spawn_probe_command_fails() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(test_drive());
-        state.tool_path = "/usr/bin/sdftool".into();
+        state.drive.drives.push(test_drive());
+        state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::failing());
-        spawn_probe(&tx, &state, 0, &runner);
+        spawn_probe(&tx, &mut state, 0, &runner);
         std::thread::sleep(std::time::Duration::from_millis(100));
         drop(tx);
         let mut messages = Vec::new();
@@ -850,7 +952,14 @@ mod tests {
             program: "/bin/echo".into(),
             args: vec![],
         };
-        spawn_streaming_command(&tx, cmd, "Testing", &runner);
+        spawn_streaming_command(
+            &tx,
+            cmd,
+            "Testing",
+            &runner,
+            Language::English,
+            Arc::new(OperationControl::new()),
+        );
         std::thread::sleep(std::time::Duration::from_millis(100));
         drop(tx);
         let mut messages = Vec::new();
@@ -876,7 +985,14 @@ mod tests {
             program: "/bin/false".into(),
             args: vec![],
         };
-        spawn_streaming_command(&tx, cmd, "Testing", &runner);
+        spawn_streaming_command(
+            &tx,
+            cmd,
+            "Testing",
+            &runner,
+            Language::English,
+            Arc::new(OperationControl::new()),
+        );
         std::thread::sleep(std::time::Duration::from_millis(100));
         drop(tx);
         let mut messages = Vec::new();
@@ -899,7 +1015,7 @@ mod tests {
         let runner: Arc<dyn ProcessRunner> =
             Arc::new(MockRunner::success("0:/dev/sr0 HL-DT-ST BU40N 1.03\n"));
         spawn_list_drives(&tx, &mut state, &runner);
-        assert!(state.busy);
+        assert!(state.runtime.busy);
         std::thread::sleep(std::time::Duration::from_millis(100));
         drop(tx);
         let mut messages = Vec::new();
@@ -914,6 +1030,403 @@ mod tests {
             }
             _ => panic!("expected DrivesListed"),
         }
+    }
+
+    #[test]
+    fn drain_stop_needs_force_kill_sets_dialog() {
+        let mut state = AppState::new_no_backend();
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(WorkerMsg::StopNeedsForceKill).unwrap();
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert_eq!(
+            state.runtime.stop_dialog,
+            super::super::state::StopDialog::ConfirmForceKill
+        );
+    }
+
+    #[test]
+    fn spawn_streaming_command_cancelled() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::cancelled());
+        let cmd = crate::command::Command {
+            program: "/bin/echo".into(),
+            args: vec![],
+        };
+        spawn_streaming_command(
+            &tx,
+            cmd,
+            "Testing",
+            &runner,
+            Language::English,
+            Arc::new(OperationControl::new()),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(tx);
+        let mut messages = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            messages.push(msg);
+        }
+        let last = messages.last().unwrap();
+        assert!(matches!(
+            last,
+            WorkerMsg::OperationComplete { success: false, .. }
+        ));
+    }
+
+    #[test]
+    fn spawn_streaming_command_non_success_output() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::probe_failed());
+        let cmd = crate::command::Command {
+            program: "/bin/echo".into(),
+            args: vec![],
+        };
+        spawn_streaming_command(
+            &tx,
+            cmd,
+            "Testing",
+            &runner,
+            Language::English,
+            Arc::new(OperationControl::new()),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(tx);
+        let mut messages = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            messages.push(msg);
+        }
+        assert!(matches!(
+            messages.last(),
+            Some(WorkerMsg::OperationComplete { success: false, .. })
+        ));
+    }
+
+    #[test]
+    fn spawn_streaming_command_needs_force_kill() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::needs_force_kill());
+        let cmd = crate::command::Command {
+            program: "/bin/echo".into(),
+            args: vec![],
+        };
+        spawn_streaming_command(
+            &tx,
+            cmd,
+            "Testing",
+            &runner,
+            Language::English,
+            Arc::new(OperationControl::new()),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(tx);
+        let mut state = AppState::new_no_backend();
+        drain_worker_messages(&mut state, &rx);
+        assert_eq!(
+            state.runtime.stop_dialog,
+            super::super::state::StopDialog::ConfirmForceKill
+        );
+    }
+
+    #[test]
+    fn poll_waiting_backend_stop_finishes_when_child_gone() {
+        let mut state = AppState::new_no_backend();
+        let _ = state.begin_operation("running");
+        state.runtime.waiting_for_backend_stop = true;
+        poll_worker(&mut state, &std::sync::mpsc::channel().1, None);
+        assert!(!state.runtime.busy);
+        assert!(!state.runtime.waiting_for_backend_stop);
+        assert!(state.runtime.active_operation.is_none());
+        assert_eq!(
+            state.runtime.status_message,
+            t(L10nKey::StatusOpCancelled, state.chrome.resolved_lang)
+        );
+    }
+
+    #[test]
+    fn poll_waiting_backend_stop_keeps_busy_while_child_running() {
+        use std::process::Command;
+        use std::time::Duration;
+
+        let child = Command::new("sleep").arg("30").spawn().unwrap();
+        let control = Arc::new(OperationControl::new());
+        control.register_child_for_test(child);
+        let mut state = AppState::new_no_backend();
+        state.runtime.busy = true;
+        state.runtime.active_operation = Some(control.clone());
+        state.runtime.waiting_for_backend_stop = true;
+
+        poll_worker(&mut state, &std::sync::mpsc::channel().1, None);
+        assert!(state.runtime.busy);
+        assert!(state.runtime.waiting_for_backend_stop);
+
+        control.request_force_kill();
+        std::thread::sleep(Duration::from_millis(50));
+        poll_worker(&mut state, &std::sync::mpsc::channel().1, None);
+        assert!(!state.runtime.busy);
+    }
+
+    #[test]
+    fn poll_probe_backend_stop_noop_when_busy() {
+        let mut state = AppState::new_no_backend();
+        let _ = state.begin_operation("running");
+        state.runtime.probe_control = Some(Arc::new(OperationControl::new()));
+        state.runtime.probing = true;
+        assert!(!super::poll_probe_backend_stop(&mut state));
+        assert!(state.runtime.probing);
+    }
+
+    #[test]
+    fn poll_probe_backend_stop_noop_without_probe() {
+        let mut state = AppState::new_no_backend();
+        assert!(!super::poll_probe_backend_stop(&mut state));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn poll_probe_backend_stop_waits_while_child_running() {
+        use std::process::Command;
+        use std::time::Duration;
+
+        let child = Command::new("sleep").arg("30").spawn().unwrap();
+        let control = Arc::new(OperationControl::new());
+        control.register_child_for_test(child);
+        let mut state = AppState::new_no_backend();
+        state.runtime.probe_control = Some(control.clone());
+        state.runtime.probing = true;
+
+        assert!(!super::poll_probe_backend_stop(&mut state));
+        assert!(state.runtime.probing);
+
+        control.request_force_kill();
+        control.reap_registered_child();
+        assert!(super::poll_probe_backend_stop(&mut state));
+        assert!(!state.runtime.probing);
+        assert!(state.runtime.probe_control.is_none());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn poll_probe_backend_stop_finishes_when_child_exited() {
+        use std::process::Command;
+        use std::time::Duration;
+
+        let child = Command::new("true").spawn().unwrap();
+        let control = Arc::new(OperationControl::new());
+        control.register_child_for_test(child);
+        let mut state = AppState::new_no_backend();
+        state.runtime.probe_control = Some(control);
+        state.runtime.probing = true;
+        std::thread::sleep(Duration::from_millis(50));
+
+        assert!(super::poll_probe_backend_stop(&mut state));
+        assert!(!state.runtime.probing);
+        assert!(state.runtime.probe_control.is_none());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn poll_worker_finishes_probe_when_child_exited() {
+        use std::process::Command;
+        use std::time::Duration;
+
+        let child = Command::new("true").spawn().unwrap();
+        let control = Arc::new(OperationControl::new());
+        control.register_child_for_test(child);
+        let mut state = AppState::new_no_backend();
+        state.runtime.probe_control = Some(control);
+        state.runtime.probing = true;
+        std::thread::sleep(Duration::from_millis(50));
+
+        poll_worker(&mut state, &std::sync::mpsc::channel().1, None);
+        assert!(!state.runtime.probing);
+        assert!(state.runtime.probe_control.is_none());
+    }
+
+    #[test]
+    fn poll_worker_without_context_drains_only() {
+        let mut state = AppState::new_no_backend();
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(WorkerMsg::Status {
+            message: "working".into(),
+            progress: 25.0,
+        })
+        .unwrap();
+        drop(tx);
+        poll_worker(&mut state, &rx, None);
+        assert!((state.runtime.progress - 25.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn poll_worker_with_context_drains_messages() {
+        let mut state = AppState::new_no_backend();
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(WorkerMsg::Status {
+            message: "working".into(),
+            progress: 50.0,
+        })
+        .unwrap();
+        drop(tx);
+        let ctx = egui::Context::default();
+        poll_worker(&mut state, &rx, Some(&ctx));
+        assert_eq!(state.runtime.progress, 50.0);
+    }
+
+    #[test]
+    fn poll_worker_with_context_requests_attention_on_success() {
+        let mut state = AppState::new_no_backend();
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(WorkerMsg::OperationComplete {
+            success: true,
+            status: "done".into(),
+            progress: 100.0,
+        })
+        .unwrap();
+        drop(tx);
+        let ctx = egui::Context::default();
+        poll_worker(&mut state, &rx, Some(&ctx));
+        assert_eq!(state.runtime.progress, 100.0);
+    }
+
+    #[test]
+    fn poll_worker_with_context_requests_critical_attention_on_write_failure() {
+        let mut state = AppState::new_no_backend();
+        state.operation_mode = super::super::OperationMode::Write;
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(WorkerMsg::OperationComplete {
+            success: false,
+            status: "failed".into(),
+            progress: 0.0,
+        })
+        .unwrap();
+        drop(tx);
+        let ctx = egui::Context::default();
+        poll_worker(&mut state, &rx, Some(&ctx));
+        assert!(state.chrome.show_flash_failure_dialog);
+    }
+
+    #[test]
+    fn spawn_probe_cancelled() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.config.tool_path = "/usr/bin/sdftool".into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::cancelled());
+        spawn_probe(&tx, &mut state, 0, &runner);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(tx);
+        let mut messages = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            messages.push(msg);
+        }
+        assert!(matches!(
+            messages.last(),
+            Some(WorkerMsg::ProbeComplete { error: Some(_), .. })
+        ));
+    }
+
+    #[test]
+    fn spawn_probe_needs_force_kill() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.config.tool_path = "/usr/bin/sdftool".into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::needs_force_kill());
+        spawn_probe(&tx, &mut state, 0, &runner);
+        assert!(state.runtime.probe_control.is_some());
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert!(state.runtime.probe_control.is_some());
+        assert_eq!(
+            state.runtime.stop_dialog,
+            super::super::state::StopDialog::ConfirmForceKill
+        );
+    }
+
+    #[test]
+    fn spawn_probe_non_success_output() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.config.tool_path = "/usr/bin/sdftool".into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::probe_failed());
+        spawn_probe(&tx, &mut state, 0, &runner);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(tx);
+        let mut messages = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            messages.push(msg);
+        }
+        assert!(matches!(
+            messages.last(),
+            Some(WorkerMsg::ProbeComplete {
+                error: Some(_),
+                identity: None,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn spawn_list_drives_cancelled() {
+        let mut state = AppState::new_no_backend();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::cancelled());
+        spawn_list_drives(&tx, &mut state, &runner);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(tx);
+        let mut messages = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            messages.push(msg);
+        }
+        assert!(matches!(
+            messages.last(),
+            Some(WorkerMsg::OperationComplete { success: false, .. })
+        ));
+    }
+
+    #[test]
+    fn spawn_list_drives_needs_force_kill() {
+        let mut state = AppState::new_no_backend();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::needs_force_kill());
+        spawn_list_drives(&tx, &mut state, &runner);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert_eq!(
+            state.runtime.stop_dialog,
+            super::super::state::StopDialog::ConfirmForceKill
+        );
+    }
+
+    #[test]
+    fn spawn_streaming_command_with_progress_line() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success("PRGV:50,100,0\n"));
+        let cmd = crate::command::Command {
+            program: "/bin/echo".into(),
+            args: vec![],
+        };
+        spawn_streaming_command(
+            &tx,
+            cmd,
+            "Testing",
+            &runner,
+            Language::English,
+            Arc::new(OperationControl::new()),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(tx);
+        let mut saw_progress = false;
+        while let Ok(msg) = rx.try_recv() {
+            if let WorkerMsg::Progress(p) = msg {
+                assert!((p - 50.0).abs() < 0.1);
+                saw_progress = true;
+            }
+        }
+        assert!(saw_progress);
     }
 
     #[test]
