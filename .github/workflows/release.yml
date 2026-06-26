@@ -249,7 +249,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           RELEASE_URL="https://github.com/thedavidweng/sdf-flash-gui/releases/download/${GITHUB_REF_NAME}"
 
-          INTEL_DMG=$(find release-assets -name "*x86_64*dmg" -o -name "*intel*dmg" -o -name "*x86*dmg" | head -1)
+          INTEL_DMG=$(find release-assets -name "*x86_64*dmg" -o -name "*x64*dmg" -o -name "*intel*dmg" -o -name "*x86*dmg" | head -1)
           ARM_DMG=$(find release-assets -name "*aarch64*dmg" -o -name "*arm*dmg" -o -name "*apple-silicon*dmg" | head -1)
 
           if [ -z "$INTEL_DMG" ] || [ -z "$ARM_DMG" ]; then
