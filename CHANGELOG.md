@@ -19,6 +19,8 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - Split fmt/clippy checks and update GitHub Actions
 - **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md
+- Extract Homebrew cask template with quarantine postflight
 ## [0.2.0] - 2026-06-26
 
 ### <!-- 0 -->🚀 Features
