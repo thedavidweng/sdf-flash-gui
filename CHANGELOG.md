@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
+## [Unreleased]
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md for v0.2.0
+- Match x64 DMG filename in homebrew tap release step
 ## [0.2.0] - 2026-06-26
 
 ### <!-- 0 -->🚀 Features
