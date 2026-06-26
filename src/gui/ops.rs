@@ -118,8 +118,7 @@ pub fn confirm_force_kill(state: &mut AppState) {
     }
     state.log(t(L10nKey::LogOpCancelled, state.chrome.resolved_lang));
     if state.runtime.probe_control.is_some() {
-        state.finish_probe();
-        state.set_status_key(L10nKey::StatusProbeFailed, 0.0);
+        state.finish_probe_failure();
     }
     if state.runtime.busy {
         state.finish_operation();
@@ -933,6 +932,29 @@ mod tests {
         assert!(state.runtime.probe_control.is_none());
         assert!(!state.runtime.probing);
         assert!(control.is_force_kill_requested());
+    }
+
+    #[test]
+    fn confirm_force_kill_marks_probe_handled_to_block_auto_reprobe() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.runtime.probing_drive = Some(0);
+        state.runtime.probe_control =
+            Some(std::sync::Arc::new(crate::process::OperationControl::new()));
+        state.runtime.probing = true;
+        state.runtime.stop_dialog = StopDialog::ConfirmForceKill;
+
+        super::confirm_force_kill(&mut state);
+
+        assert_eq!(state.drive.last_probed_drive, Some(0));
+        assert!(!state.drive.drive_probed);
+        assert!(!state.runtime.probing);
+        assert!(state.runtime.probing_drive.is_none());
+        assert_eq!(
+            state.runtime.status_message,
+            t(L10nKey::StatusProbeFailed, state.chrome.resolved_lang)
+        );
     }
 
     #[test]

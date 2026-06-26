@@ -69,16 +69,16 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
             identity,
             error,
         } => {
+            let success = error.is_none();
             if state.drive.selected_drive == Some(drive_idx) {
-                state.drive.drive_probed = error.is_none();
                 state.drive.drive_mt1959 = mt1959;
                 state.drive.drive_encrypted_firmware = encrypted_firmware;
-                state.drive.probe_identity = if error.is_none() { identity } else { None };
-                if error.is_none() {
+                state.drive.probe_identity = if success { identity } else { None };
+                if success {
                     state.flash.encrypted_write = encrypted_firmware;
                 }
-                state.drive.last_probed_drive = Some(drive_idx);
             }
+            state.record_probe_outcome(drive_idx, success);
             state.finish_probe();
             if let Some(err) = error {
                 state.log(&err);
@@ -192,8 +192,7 @@ fn poll_probe_backend_stop(state: &mut AppState) -> bool {
     if still_running {
         return false;
     }
-    state.finish_probe();
-    state.set_status_key(L10nKey::StatusProbeFailed, 0.0);
+    state.finish_probe_failure();
     true
 }
 
@@ -254,6 +253,7 @@ pub fn spawn_probe(
 
     let control = Arc::new(OperationControl::new());
     state.runtime.probe_control = Some(control.clone());
+    state.runtime.probing_drive = Some(drive_idx);
 
     run_backend_command(move || {
         let cmd = command::plan_drive_info(backend, &tool_path, &device);
@@ -1186,12 +1186,14 @@ mod tests {
     #[cfg(unix)]
     fn poll_probe_backend_stop_waits_while_child_running() {
         use std::process::Command;
-        use std::time::Duration;
 
         let child = Command::new("sleep").arg("30").spawn().unwrap();
         let control = Arc::new(OperationControl::new());
         control.register_child_for_test(child);
         let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.runtime.probing_drive = Some(0);
         state.runtime.probe_control = Some(control.clone());
         state.runtime.probing = true;
 
@@ -1203,6 +1205,8 @@ mod tests {
         assert!(super::poll_probe_backend_stop(&mut state));
         assert!(!state.runtime.probing);
         assert!(state.runtime.probe_control.is_none());
+        assert_eq!(state.drive.last_probed_drive, Some(0));
+        assert!(!state.drive.drive_probed);
     }
 
     #[test]
@@ -1215,6 +1219,9 @@ mod tests {
         let control = Arc::new(OperationControl::new());
         control.register_child_for_test(child);
         let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.runtime.probing_drive = Some(0);
         state.runtime.probe_control = Some(control);
         state.runtime.probing = true;
         std::thread::sleep(Duration::from_millis(50));
@@ -1222,6 +1229,7 @@ mod tests {
         assert!(super::poll_probe_backend_stop(&mut state));
         assert!(!state.runtime.probing);
         assert!(state.runtime.probe_control.is_none());
+        assert_eq!(state.drive.last_probed_drive, Some(0));
     }
 
     #[test]

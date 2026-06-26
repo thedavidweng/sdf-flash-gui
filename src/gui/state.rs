@@ -86,6 +86,8 @@ pub struct OperationRuntime {
     pub stop_dialog: StopDialog,
     pub active_operation: Option<Arc<OperationControl>>,
     pub probe_control: Option<Arc<OperationControl>>,
+    /// Drive index for the in-flight auto-probe (if any).
+    pub probing_drive: Option<usize>,
     /// User declined force-kill; keep the UI locked until the backend exits.
     pub waiting_for_backend_stop: bool,
 }
@@ -157,6 +159,7 @@ impl AppState {
                 stop_dialog: StopDialog::None,
                 active_operation: None,
                 probe_control: None,
+                probing_drive: None,
                 waiting_for_backend_stop: false,
             },
             operation_mode: OperationMode::Write,
@@ -237,11 +240,31 @@ impl AppState {
         self.runtime.waiting_for_backend_stop = false;
     }
 
+    /// Record probe results for the selected drive and mark it handled for auto-probe.
+    pub fn record_probe_outcome(&mut self, drive_idx: usize, success: bool) {
+        if self.drive.selected_drive == Some(drive_idx) {
+            self.drive.drive_probed = success;
+            if !success {
+                self.drive.probe_identity = None;
+            }
+            self.drive.last_probed_drive = Some(drive_idx);
+        }
+    }
+
+    pub fn finish_probe_failure(&mut self) {
+        if let Some(drive_idx) = self.runtime.probing_drive.or(self.drive.selected_drive) {
+            self.record_probe_outcome(drive_idx, false);
+        }
+        self.finish_probe();
+        self.set_status_key(L10nKey::StatusProbeFailed, 0.0);
+    }
+
     pub fn finish_probe(&mut self) {
         if let Some(control) = self.runtime.probe_control.take() {
             control.reap_registered_child();
         }
         self.runtime.probing = false;
+        self.runtime.probing_drive = None;
     }
 
     #[cfg(test)]
@@ -332,6 +355,28 @@ mod tests {
         });
         let dm = state.drive_match().unwrap();
         assert_eq!(dm.model, "BD-RE BU40N");
+    }
+
+    #[test]
+    fn finish_probe_failure_marks_drive_handled() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(Drive {
+            device: "/dev/sr0".into(),
+            vendor: "V".into(),
+            product: "P".into(),
+            revision: "R".into(),
+        });
+        state.drive.selected_drive = Some(0);
+        state.runtime.probing_drive = Some(0);
+        state.runtime.probing = true;
+        state.runtime.probe_control = Some(Arc::new(OperationControl::new()));
+
+        state.finish_probe_failure();
+
+        assert_eq!(state.drive.last_probed_drive, Some(0));
+        assert!(!state.drive.drive_probed);
+        assert!(!state.runtime.probing);
+        assert!(state.runtime.probe_control.is_none());
     }
 
     #[test]
