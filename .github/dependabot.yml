@@ -4,6 +4,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    labels:
+      - dependencies
+      - rust
+    commit-message:
+      prefix: build
+      include: scope
     groups:
       egui:
         patterns:
@@ -11,8 +17,20 @@ updates:
           - egui*
       dev-deps:
         dependency-type: development
+    ignore:
+      # egui-phosphor is pinned to egui 0.34; bump manually with eframe upgrades
+      - dependency-name: eframe
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "egui*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: build
+      include: scope

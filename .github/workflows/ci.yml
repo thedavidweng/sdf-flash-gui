@@ -9,7 +9,46 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - run: cargo fmt -- --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
+
+      - run: cargo clippy -- -D warnings
+
+  sdf-parser-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: No unwrap in SDF parser
+        shell: bash
+        run: |
+          count=$(awk '/^#\[cfg\(test\)\]/{exit} {print}' src/sdf.rs | grep -cF '.unwrap(' || true)
+          test "$count" -eq 0
+
   test:
+    needs: [fmt, clippy, sdf-parser-policy]
     strategy:
       fail-fast: false
       matrix:
@@ -26,12 +65,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-          components: clippy, rustfmt, llvm-tools
+          components: llvm-tools
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -44,16 +83,6 @@ jobs:
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
-
-      - run: cargo fmt -- --check
-
-      - run: cargo clippy --target ${{ matrix.target }} -- -D warnings
-
-      - name: No unwrap in SDF parser
-        shell: bash
-        run: |
-          count=$(awk '/^#\[cfg\(test\)\]/{exit} {print}' src/sdf.rs | grep -cF '.unwrap(' || true)
-          test "$count" -eq 0
 
       - name: Run tests with coverage
         if: matrix.os != 'ubuntu-latest'
