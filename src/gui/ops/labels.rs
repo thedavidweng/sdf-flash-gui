@@ -1,0 +1,71 @@
+use super::super::state::AppState;
+use super::super::OperationMode;
+use crate::drive::Drive;
+use crate::flash;
+use crate::i18n::{t, L10nKey};
+
+pub fn drive_label(drive: &Drive) -> String {
+    if drive.vendor.is_empty() {
+        drive.device.clone()
+    } else {
+        format!(
+            "{} {} {} {} {}",
+            drive.device,
+            drive.vendor,
+            drive.product,
+            drive.revision,
+            drive_serial_hint(drive)
+        )
+        .trim()
+        .to_string()
+    }
+}
+
+/// Human-readable flash/write mode for the confirmation summary.
+pub fn flash_mode_label(state: &AppState) -> String {
+    let lang = state.chrome.resolved_lang;
+    match state.operation_mode {
+        OperationMode::Read => t(L10nKey::TabRead, lang).to_string(),
+        OperationMode::Recover => t(L10nKey::FlashModeRecover, lang).to_string(),
+        OperationMode::Write => {
+            if state.flash.include_boot_loader {
+                t(L10nKey::FlashModeBootloader, lang).to_string()
+            } else if state.flash.encrypted_write {
+                t(L10nKey::FlashModeEncrypted, lang).to_string()
+            } else {
+                t(L10nKey::FlashModeStandard, lang).to_string()
+            }
+        }
+    }
+}
+
+/// First 8 hex chars of the loaded firmware SHA-256, or localized N/A.
+pub fn firmware_sha_prefix(state: &AppState) -> String {
+    state
+        .flash
+        .firmware_data
+        .as_ref()
+        .map(|data| flash::sha256_hex(data)[..8].to_string())
+        .unwrap_or_else(|| t(L10nKey::LabelNotAvailable, state.chrome.resolved_lang).to_string())
+}
+
+/// Basename of the selected firmware path, or localized N/A.
+pub fn firmware_basename(state: &AppState) -> String {
+    if state.flash.firmware_path.is_empty() {
+        return t(L10nKey::LabelNotAvailable, state.chrome.resolved_lang).to_string();
+    }
+    std::path::Path::new(&state.flash.firmware_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| state.flash.firmware_path.clone())
+}
+
+pub(crate) fn drive_serial_hint(drive: &Drive) -> String {
+    let label = format!("{}_{}_{}", drive.vendor, drive.product, drive.revision);
+    label
+        .split(['_', '-', ' '])
+        .skip(2)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
