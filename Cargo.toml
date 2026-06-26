@@ -18,6 +18,9 @@ log = "0.4"
 env_logger = "0.11"
 sys-locale = "0.3"
 
+[build-dependencies]
+winres = "0.1"
+
 [profile.release]
 opt-level = "z"
 lto = true
@@ -34,6 +37,7 @@ out-dir = "dist"
 formats = ["appimage", "deb", "dmg", "wix"]
 product-name = "SDF Flash GUI"
 identifier = "com.sdftool.flashgui"
+publisher = "SDFtool Team"
 copyright = "SDFtool Team"
 category = "Utility"
 description = "A cross-platform GUI for flashing optical drives."

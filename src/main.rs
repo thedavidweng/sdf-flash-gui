@@ -107,7 +107,10 @@ fn main() {
 }
 
 fn print_help() {
-    println!("sdf-flash-gui — Cross-platform SDFtool GUI");
+    println!(
+        "{} — Cross-platform SDFtool GUI",
+        sdf_flash_gui::branding::DISPLAY_NAME
+    );
     println!();
     println!("USAGE:");
     println!("  sdf-flash-gui                        Launch GUI");

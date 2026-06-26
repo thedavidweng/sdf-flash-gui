@@ -97,7 +97,7 @@ pub fn run() -> Result<(), eframe::Error> {
         ..Default::default()
     };
     eframe::run_native(
-        "SDF Flash GUI", // window title (OS-level, not translatable)
+        crate::branding::DISPLAY_NAME, // window title (OS-level, not translatable)
         options,
         Box::new(|cc| {
             let mut fonts = egui::FontDefinitions::default();
