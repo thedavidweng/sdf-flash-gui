@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 ## [Unreleased]
 
+### <!-- 1 -->🐛 Bug Fixes
+
+- Set product display name to SDF Flash GUI
+- Unify SDF Flash GUI display name across all platforms
+
 ### <!-- 10 -->💼 Other
 
 - **deps:** Bump env_logger from 0.11.10 to 0.11.11
@@ -21,6 +26,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 - Extract Homebrew cask template with quarantine postflight
+- **changelog:** Sync CHANGELOG.md
 ## [0.2.0] - 2026-06-26
 
 ### <!-- 0 -->🚀 Features
