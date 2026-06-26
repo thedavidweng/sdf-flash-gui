@@ -32,7 +32,7 @@ codegen-units = 16
 [package.metadata.packager]
 out-dir = "dist"
 formats = ["appimage", "deb", "dmg", "wix"]
-product-name = "SDFFlashGUI"
+product-name = "SDF Flash GUI"
 identifier = "com.sdftool.flashgui"
 copyright = "SDFtool Team"
 category = "Utility"
