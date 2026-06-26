@@ -45,8 +45,20 @@ Download the latest installer from [Releases](https://github.com/thedavidweng/sd
 
 ## Requirements
 
-- [MakeMKV](https://www.makemkv.com/) installed on the system
+- [MakeMKV](https://www.makemkv.com/) installed on the system (provides `makemkvcon`) or standalone `sdftool`
 - `sdf.bin` from the SDFtool/MKV firmware pack (optional, for SDF container parsing)
+
+### Platform permissions
+
+| Platform | Notes |
+|----------|-------|
+| **Linux** | Optical drive access often requires membership in the `cdrom` group or running with sufficient permissions to open `/dev/sr*`. |
+| **macOS** | Drive access is usually available to the logged-in user. |
+| **Windows** | Some raw device operations may require running as Administrator. |
+
+## Firmware manifests
+
+Manifest `sha256` fields must be the hash of the **complete firmware file** selected for flashing, not an extracted payload inside a multi-image pack. See `SECURITY.md` for vulnerability reporting.
 
 ## Build
 

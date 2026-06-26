@@ -49,13 +49,19 @@ jobs:
 
       - run: cargo clippy --target ${{ matrix.target }} -- -D warnings
 
+      - name: No unwrap in SDF parser
+        shell: bash
+        run: |
+          count=$(awk '/^#\[cfg\(test\)\]/{exit} {print}' src/sdf.rs | grep -cF '.unwrap(' || true)
+          test "$count" -eq 0
+
       - name: Run tests with coverage
         if: matrix.os != 'ubuntu-latest'
         run: cargo test --target ${{ matrix.target }}
 
       - name: Run tests with coverage (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: cargo llvm-cov --lcov --output-path lcov.info --target ${{ matrix.target }} --ignore-filename-regex '(src/main\.rs|src/gui/mod\.rs|src/drive\.rs|src/gui/file_dialog\.rs|src/gui/process_runner\.rs)'
+        run: cargo llvm-cov --lcov --output-path lcov.info --target ${{ matrix.target }} --ignore-filename-regex '(src/main\.rs|src/gui/mod\.rs|src/gui/views/|src/drive\.rs|src/gui/file_dialog\.rs|src/gui/process_runner\.rs)'
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'

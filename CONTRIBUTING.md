@@ -10,6 +10,14 @@ cargo build --release
 
 ## Before submitting
 
+Install the git hooks once (runs `cargo fmt --check` before each commit):
+
+```bash
+./scripts/install-hooks.sh
+```
+
+Then manually before pushing:
+
 - `cargo fmt`
 - `cargo clippy -- -D warnings`
 - Test on at least one platform (macOS, Linux, or Windows)
