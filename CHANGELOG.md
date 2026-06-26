@@ -4,11 +4,19 @@ All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 ## [Unreleased]
 
+### <!-- 10 -->💼 Other
+
+- **deps:** Bump env_logger from 0.11.10 to 0.11.11
+- **deps:** Bump sha2 from 0.10.9 to 0.11.0
+- **deps:** Bump codecov/codecov-action from 5 to 7
+
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md for v0.2.0
 - Match x64 DMG filename in homebrew tap release step
+- **changelog:** Sync CHANGELOG.md
+- Split fmt/clippy checks and update GitHub Actions
 ## [0.2.0] - 2026-06-26
 
 ### <!-- 0 -->🚀 Features
