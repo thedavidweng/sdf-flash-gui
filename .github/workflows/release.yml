@@ -31,7 +31,7 @@ jobs:
             git cliff --latest --strip header -o RELEASE_BODY.md
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-changelog
           path: |
