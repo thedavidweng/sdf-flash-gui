@@ -10,7 +10,7 @@ Any production code change must include matching test updates in the same commit
 - Bug fixes → add a regression test that fails without the fix.
 - Refactors that move logic → keep or relocate coverage; do not drop it.
 - Security bounds (caps, early returns, error paths) → test each branch explicitly.
-- Process lifecycle changes (`OperationControl`, cancel/force-kill) → test both `active_operation` and `probe_control`, and assert children are reaped via `reap_registered_child()` / `finish_operation()` / `finish_probe()`.
+- Process lifecycle changes (cancel, force-kill, backend exit) → test each exit branch and assert backend children are reaped before handles are dropped.
 
 Do not push and wait for Codecov or CI to discover missing coverage. Run the coverage commands below locally before every push.
 
