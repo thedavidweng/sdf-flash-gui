@@ -251,8 +251,9 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           RELEASE_URL="https://github.com/thedavidweng/sdf-flash-gui/releases/download/${GITHUB_REF_NAME}"
 
-          INTEL_DMG=$(find release-assets -name "*x86_64*dmg" -o -name "*x64*dmg" -o -name "*intel*dmg" -o -name "*x86*dmg" | head -1)
-          ARM_DMG=$(find release-assets -name "*aarch64*dmg" -o -name "*arm*dmg" -o -name "*apple-silicon*dmg" | head -1)
+          # Exclude legacy SDFFlashGUI DMGs if a release is re-tagged with duplicate assets.
+          INTEL_DMG=$(find release-assets -name '*.dmg' ! -name 'SDFFlashGUI*' \( -name '*x86_64*' -o -name '*x64*' -o -name '*intel*' -o -name '*x86*' \) | sort | tail -1)
+          ARM_DMG=$(find release-assets -name '*.dmg' ! -name 'SDFFlashGUI*' \( -name '*aarch64*' -o -name '*arm*' -o -name '*apple-silicon*' \) | sort | tail -1)
 
           if [ -z "$INTEL_DMG" ] || [ -z "$ARM_DMG" ]; then
             echo "::error::Could not find both DMG files. Found:"
