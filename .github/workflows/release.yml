@@ -229,6 +229,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
         with:
           repository: thedavidweng/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -263,36 +265,8 @@ jobs:
           INTEL_FILENAME=$(basename "$INTEL_DMG")
           ARM_FILENAME=$(basename "$ARM_DMG")
 
-          cat > homebrew-tap/Casks/sdf-flash-gui.rb <<RUBY
-          cask "sdf-flash-gui" do
-            version "${VERSION}"
-
-            on_arm do
-              sha256 "${ARM_SHA256}"
-              url "${RELEASE_URL}/${ARM_FILENAME}"
-            end
-            on_intel do
-              sha256 "${INTEL_SHA256}"
-              url "${RELEASE_URL}/${INTEL_FILENAME}"
-            end
-
-            name "SDFFlashGUI"
-            desc "Cross-platform GUI for flashing optical drives"
-            homepage "https://github.com/thedavidweng/sdf-flash-gui"
-
-            livecheck do
-              url :url
-              strategy :github_latest
-            end
-
-            app "SDFFlashGUI.app"
-
-            postflight do
-              system_command "/usr/bin/xattr",
-                             args: ["-rd", "com.apple.quarantine", "#{appdir}/SDFFlashGUI.app"]
-            end
-          end
-          RUBY
+          export VERSION RELEASE_URL ARM_SHA256 INTEL_SHA256 ARM_FILENAME INTEL_FILENAME
+          envsubst < packaging/homebrew/sdf-flash-gui.rb.template > homebrew-tap/Casks/sdf-flash-gui.rb
 
           cd homebrew-tap
           git config user.name "github-actions[bot]"

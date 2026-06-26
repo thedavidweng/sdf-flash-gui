@@ -1,0 +1,28 @@
+cask "sdf-flash-gui" do
+  version "${VERSION}"
+
+  on_arm do
+    sha256 "${ARM_SHA256}"
+    url "${RELEASE_URL}/${ARM_FILENAME}"
+  end
+  on_intel do
+    sha256 "${INTEL_SHA256}"
+    url "${RELEASE_URL}/${INTEL_FILENAME}"
+  end
+
+  name "SDFFlashGUI"
+  desc "Cross-platform GUI for flashing optical drives"
+  homepage "https://github.com/thedavidweng/sdf-flash-gui"
+
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  app "SDFFlashGUI.app"
+
+  postflight do
+    system_command "/usr/bin/xattr",
+                   args: ["-rd", "com.apple.quarantine", "#{appdir}/SDFFlashGUI.app"]
+  end
+end
