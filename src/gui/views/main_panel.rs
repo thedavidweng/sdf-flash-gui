@@ -1,0 +1,885 @@
+use crate::command;
+use crate::flash;
+use crate::gui::file_dialog::{FileDialog, NativeDialog};
+use crate::gui::ops;
+use crate::gui::process_runner;
+use crate::gui::state::{AppState, ThemeChoice};
+use crate::gui::workers::WorkerMsg;
+use crate::i18n::{t, t_with_args, L10nKey, Language};
+
+use eframe::egui;
+use egui_phosphor::regular as icon;
+use std::sync::mpsc;
+
+use super::super::{
+    button_text_size, icon_button, icon_rich, section_heading, OperationMode, GAP_MEDIUM,
+    GAP_SMALL, GAP_TINY,
+};
+
+pub fn show_main_ui(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    frame: &mut eframe::Frame,
+    state: &mut AppState,
+    worker_tx: &mpsc::Sender<WorkerMsg>,
+    runner: &std::sync::Arc<dyn process_runner::ProcessRunner>,
+) {
+    ui.horizontal(|ui| {
+        let refresh_text = t(L10nKey::TooltipRefresh, state.chrome.resolved_lang);
+        let refresh_hint = if cfg!(target_os = "macos") {
+            format!("{refresh_text} (⌘R)")
+        } else {
+            format!("{refresh_text} (Ctrl+R)")
+        };
+        let refresh_resp = ui.add_enabled(
+            !state.runtime.busy && !state.runtime.probing,
+            super::super::toolbar_icon_button(ui, icon::ARROW_CLOCKWISE),
+        );
+        refresh_resp.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                refresh_resp.enabled(),
+                refresh_text,
+            )
+        });
+        if refresh_resp.on_hover_text(refresh_hint).clicked() {
+            ops::refresh_drives(state);
+        }
+        let settings_text = t(L10nKey::TooltipSettings, state.chrome.resolved_lang);
+        let settings_hint = if cfg!(target_os = "macos") {
+            format!("{settings_text} (⌘,)")
+        } else {
+            format!("{settings_text} (Ctrl+,)")
+        };
+        let settings_resp = ui.add(super::super::toolbar_icon_button(ui, icon::GEAR));
+        settings_resp.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                settings_resp.enabled(),
+                settings_text,
+            )
+        });
+        if settings_resp.on_hover_text(settings_hint).clicked() {
+            state.chrome.show_settings = true;
+        }
+        let about_text = t(L10nKey::TooltipAbout, state.chrome.resolved_lang);
+        let about_hint = if cfg!(target_os = "macos") {
+            format!("{about_text} (⌘I)")
+        } else {
+            format!("{about_text} (Ctrl+I)")
+        };
+        let about_resp = ui.add(super::super::toolbar_icon_button(ui, icon::INFO));
+        about_resp.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, about_resp.enabled(), about_text)
+        });
+        if about_resp.on_hover_text(about_hint).clicked() {
+            state.chrome.show_about = true;
+        }
+        let quit_text = t(L10nKey::MenuQuit, state.chrome.resolved_lang);
+        let quit_hint = if cfg!(target_os = "macos") {
+            format!("{quit_text} (⌘Q)")
+        } else {
+            format!("{quit_text} (Alt+F4)")
+        };
+        let quit_resp = ui.add(super::super::toolbar_icon_button(ui, icon::X));
+        quit_resp.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, quit_resp.enabled(), quit_text)
+        });
+        if quit_resp.on_hover_text(quit_hint).clicked() {
+            ops::request_app_quit(ctx, state);
+        }
+        if state.runtime.busy || state.runtime.probing {
+            ui.spinner();
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let lang = state.chrome.resolved_lang;
+            let current = state.chrome.theme;
+            if ui
+                .selectable_label(
+                    current == ThemeChoice::Light,
+                    icon_rich(
+                        ui,
+                        icon::SUN,
+                        t(L10nKey::ThemeLight, lang),
+                        egui::TextStyle::Body,
+                    ),
+                )
+                .clicked()
+            {
+                state.chrome.theme = ThemeChoice::Light;
+                ctx.set_visuals(egui::Visuals::light());
+            }
+            if ui
+                .selectable_label(
+                    current == ThemeChoice::Dark,
+                    icon_rich(
+                        ui,
+                        icon::MOON,
+                        t(L10nKey::ThemeDark, lang),
+                        egui::TextStyle::Body,
+                    ),
+                )
+                .clicked()
+            {
+                state.chrome.theme = ThemeChoice::Dark;
+                ctx.set_visuals(egui::Visuals::dark());
+            }
+            if ui
+                .selectable_label(
+                    current == ThemeChoice::System,
+                    icon_rich(
+                        ui,
+                        icon::DESKTOP,
+                        t(L10nKey::ThemeSystem, lang),
+                        egui::TextStyle::Body,
+                    ),
+                )
+                .clicked()
+            {
+                state.chrome.theme = ThemeChoice::System;
+                ctx.set_visuals(egui::Visuals::dark());
+            }
+        });
+    });
+
+    if !ops::backend_configured(state) {
+        ui.add_space(GAP_SMALL);
+        ui.horizontal(|ui| {
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                icon_rich(
+                    ui,
+                    icon::WARNING,
+                    t(L10nKey::BannerNoBackend, state.chrome.resolved_lang),
+                    egui::TextStyle::Body,
+                ),
+            );
+            if ui
+                .small_button(t(
+                    L10nKey::BtnBannerOpenSettings,
+                    state.chrome.resolved_lang,
+                ))
+                .clicked()
+            {
+                state.chrome.show_settings = true;
+            }
+        });
+    }
+
+    let controls_enabled = !state.runtime.busy && !state.runtime.probing;
+
+    ui.add_enabled_ui(controls_enabled, |ui| {
+        section_heading(
+            ui,
+            icon::HARD_DRIVE,
+            t(L10nKey::TitleDriveProperties, state.chrome.resolved_lang),
+        );
+        ui.add_space(GAP_TINY);
+        ui.label(t(L10nKey::LabelDevice, state.chrome.resolved_lang));
+        let no_drives_msg = t(L10nKey::StatusNoDrives, state.chrome.resolved_lang);
+        let selected_label = state
+            .selected_drive()
+            .map(ops::drive_label)
+            .unwrap_or_else(|| no_drives_msg.to_string());
+        egui::ComboBox::from_id_salt("drive_selector")
+            .selected_text(&selected_label)
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                if state.drive.drives.is_empty() {
+                    ui.label(no_drives_msg);
+                } else {
+                    for (i, drive) in state.drive.drives.iter().enumerate() {
+                        ui.selectable_value(
+                            &mut state.drive.selected_drive,
+                            Some(i),
+                            ops::drive_label(drive),
+                        );
+                    }
+                }
+            });
+        if state.drive.drives.is_empty() {
+            ui.add_space(GAP_TINY);
+            ui.label(
+                egui::RichText::new(t(L10nKey::HelpEmptyDrives, state.chrome.resolved_lang))
+                    .small()
+                    .italics()
+                    .color(ui.visuals().weak_text_color()),
+            );
+        }
+        ui.add_space(GAP_TINY);
+        ui.columns(2, |cols| {
+            cols[0].label(t(L10nKey::LabelMt1959Platform, state.chrome.resolved_lang));
+            status_indicator(
+                &mut cols[1],
+                state.runtime.probing,
+                state.drive.drive_probed,
+                state.drive.drive_mt1959,
+            );
+
+            cols[0].label(t(
+                L10nKey::LabelEncryptedFirmware,
+                state.chrome.resolved_lang,
+            ));
+            status_indicator(
+                &mut cols[1],
+                state.runtime.probing,
+                state.drive.drive_probed,
+                state.drive.drive_encrypted_firmware,
+            );
+        });
+
+        ui.add_space(GAP_MEDIUM);
+
+        section_heading(
+            ui,
+            icon::DISC,
+            t(L10nKey::SectionOperation, state.chrome.resolved_lang),
+        );
+        let prev = state.operation_mode;
+        let mode_label = match state.operation_mode {
+            OperationMode::Read => icon_rich(
+                ui,
+                icon::DOWNLOAD_SIMPLE,
+                t(L10nKey::TabRead, state.chrome.resolved_lang),
+                egui::TextStyle::Body,
+            ),
+            OperationMode::Write => icon_rich(
+                ui,
+                icon::UPLOAD_SIMPLE,
+                t(L10nKey::TabWrite, state.chrome.resolved_lang),
+                egui::TextStyle::Body,
+            ),
+            OperationMode::Recover => icon_rich(
+                ui,
+                icon::FIRST_AID,
+                t(L10nKey::TabRecover, state.chrome.resolved_lang),
+                egui::TextStyle::Body,
+            )
+            .color(ui.visuals().error_fg_color),
+        };
+        egui::ComboBox::from_id_salt("operation_mode")
+            .selected_text(mode_label)
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    &mut state.operation_mode,
+                    OperationMode::Read,
+                    icon_rich(
+                        ui,
+                        icon::DOWNLOAD_SIMPLE,
+                        t(L10nKey::TabRead, state.chrome.resolved_lang),
+                        egui::TextStyle::Body,
+                    ),
+                );
+                ui.selectable_value(
+                    &mut state.operation_mode,
+                    OperationMode::Write,
+                    icon_rich(
+                        ui,
+                        icon::UPLOAD_SIMPLE,
+                        t(L10nKey::TabWrite, state.chrome.resolved_lang),
+                        egui::TextStyle::Body,
+                    ),
+                );
+                ui.selectable_value(
+                    &mut state.operation_mode,
+                    OperationMode::Recover,
+                    icon_rich(
+                        ui,
+                        icon::FIRST_AID,
+                        t(L10nKey::TabRecover, state.chrome.resolved_lang),
+                        egui::TextStyle::Body,
+                    )
+                    .color(ui.visuals().error_fg_color),
+                );
+            });
+
+        if state.operation_mode != prev {
+            ops::on_operation_mode_changed(state, state.operation_mode);
+        }
+
+        let write_mode = state.operation_mode == OperationMode::Write;
+        if write_mode {
+            ui.add_space(GAP_TINY);
+            ui.checkbox(
+                &mut state.flash.include_boot_loader,
+                t(L10nKey::OptionBootloader, state.chrome.resolved_lang),
+            );
+            ui.checkbox(
+                &mut state.flash.encrypted_write,
+                t(L10nKey::OptionEncrypted, state.chrome.resolved_lang),
+            );
+            if state.flash.encrypted_write && state.flash.include_boot_loader {
+                ui.colored_label(
+                    ui.visuals().error_fg_color,
+                    t(L10nKey::WarnCannotCombine, state.chrome.resolved_lang),
+                );
+            }
+            ui.add_space(GAP_TINY);
+            ui.checkbox(
+                &mut state.flash.dry_run_only,
+                t(L10nKey::OptionDryRunOnly, state.chrome.resolved_lang),
+            );
+        }
+
+        if state.operation_mode != OperationMode::Read {
+            ui.add_space(GAP_SMALL);
+            show_firmware_selector(ui, state, &NativeDialog);
+        }
+
+        show_mode_specific_options(ui, state, &NativeDialog);
+    });
+
+    ui.add_space(GAP_MEDIUM);
+
+    section_heading(
+        ui,
+        icon::PULSE,
+        t(L10nKey::SectionStatus, state.chrome.resolved_lang),
+    );
+    ui.add_space(GAP_TINY);
+    if state.runtime.busy {
+        if matches!(
+            state.operation_mode,
+            OperationMode::Write | OperationMode::Recover
+        ) {
+            ui.label(
+                egui::RichText::new(t(L10nKey::HintFlashNoCancel, state.chrome.resolved_lang))
+                    .small()
+                    .color(ui.visuals().warn_fg_color),
+            );
+            ui.add_space(GAP_TINY);
+        }
+        let status = format!("{}…", state.runtime.status_message.trim_end_matches('…'));
+        if state.runtime.progress_indeterminate && state.runtime.progress <= 0.0 {
+            ui.add(egui::ProgressBar::new(0.0).animate(true).text(status));
+        } else {
+            ui.add(
+                egui::ProgressBar::new(state.runtime.progress / 100.0)
+                    .show_percentage()
+                    .text(status),
+            );
+        }
+    } else {
+        ui.add(
+            egui::ProgressBar::new(0.0)
+                .fill(egui::Color32::TRANSPARENT)
+                .text(t(L10nKey::StatusReadyText, state.chrome.resolved_lang)),
+        );
+    }
+
+    ui.add_space(GAP_SMALL);
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let _ = frame;
+            if state.runtime.busy {
+                let stop_text = t(L10nKey::TooltipStop, state.chrome.resolved_lang);
+                if ui
+                    .add(icon_button(
+                        ui,
+                        icon::STOP,
+                        t(L10nKey::BtnStop, state.chrome.resolved_lang),
+                    ))
+                    .on_hover_text(stop_text)
+                    .clicked()
+                {
+                    ops::request_stop(state);
+                }
+            } else {
+                let start_enabled = ops::can_start(state);
+                let start_text = t(L10nKey::TooltipStartEnabled, state.chrome.resolved_lang);
+                let start_hint = if cfg!(target_os = "macos") {
+                    format!("{start_text} (Enter / ⌘Enter)")
+                } else {
+                    format!("{start_text} (Enter / Ctrl+Enter)")
+                };
+                let hover = if !start_enabled {
+                    ops::start_disabled_reason(state)
+                } else {
+                    start_hint
+                };
+
+                ui.add_enabled_ui(start_enabled, |ui| {
+                    if ui
+                        .add(icon_button(
+                            ui,
+                            icon::PLAY,
+                            t(L10nKey::BtnStart, state.chrome.resolved_lang),
+                        ))
+                        .on_disabled_hover_text(hover)
+                        .clicked()
+                    {
+                        ops::execute_start(state, worker_tx, &NativeDialog, runner);
+                    }
+                });
+            }
+        });
+    });
+
+    ui.add_space(GAP_TINY);
+    let log_height = ui.available_height() - 20.0;
+    let log_height = log_height.max(40.0);
+
+    egui::ScrollArea::vertical()
+        .stick_to_bottom(true)
+        .max_height(log_height)
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            if state.runtime.log_text.is_empty() {
+                ui.weak(t(L10nKey::LogReady, state.chrome.resolved_lang));
+            } else {
+                ui.label(
+                    egui::RichText::new(&state.runtime.log_text)
+                        .monospace()
+                        .size(11.0),
+                );
+            }
+        });
+
+    let drive_count = state.drive.drives.len();
+    let status_text = if drive_count == 0 {
+        t(L10nKey::StatusNoDrivesFound, state.chrome.resolved_lang).to_string()
+    } else {
+        t_with_args(
+            L10nKey::StatusDrivesFound,
+            state.chrome.resolved_lang,
+            &[("count", &drive_count.to_string())],
+        )
+    };
+    ui.label(
+        icon_rich(ui, icon::HARD_DRIVES, &status_text, egui::TextStyle::Body)
+            .small()
+            .weak(),
+    );
+}
+
+fn status_indicator(ui: &mut egui::Ui, probing: bool, probed: bool, ok: bool) {
+    let size = button_text_size(ui);
+    if probing {
+        ui.add(egui::Spinner::new());
+    } else if !probed {
+        ui.weak("…");
+    } else if ok {
+        ui.colored_label(
+            ui.visuals().hyperlink_color,
+            egui::RichText::new(icon::CHECK_CIRCLE).size(size),
+        );
+    } else {
+        ui.colored_label(
+            ui.visuals().error_fg_color,
+            egui::RichText::new(icon::X_CIRCLE).size(size),
+        );
+    }
+}
+
+fn show_firmware_selector(ui: &mut egui::Ui, state: &mut AppState, dialog: &impl FileDialog) {
+    let firmware_img_text = t(L10nKey::SectionFirmwareImage, state.chrome.resolved_lang);
+
+    ui.label(icon_rich(
+        ui,
+        icon::FLOPPY_DISK,
+        &format!("{firmware_img_text}:"),
+        egui::TextStyle::Body,
+    ));
+    let path_before = state.flash.firmware_path.clone();
+    let _ = file_picker(
+        ui,
+        &mut state.flash.firmware_path,
+        "Firmware",
+        &["bin"],
+        state.chrome.resolved_lang,
+        dialog,
+    );
+    if state.flash.firmware_path != path_before {
+        if state.flash.firmware_path.is_empty() {
+            state.flash.firmware_data = None;
+            state.flash.firmware_picker_items.clear();
+        } else {
+            let path = state.flash.firmware_path.clone();
+            ops::load_firmware(state, &path);
+        }
+    }
+
+    if state.flash.firmware_picker_items.len() > 1 {
+        ui.add_space(GAP_TINY);
+        let current_name = std::path::Path::new(&state.flash.firmware_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        let mut picked: Option<String> = None;
+        egui::ComboBox::from_id_salt("firmware_picker")
+            .selected_text(&current_name)
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                for (name, path) in &state.flash.firmware_picker_items {
+                    if ui
+                        .selectable_label(state.flash.firmware_path == *path, name)
+                        .clicked()
+                    {
+                        picked = Some(path.clone());
+                    }
+                }
+            });
+        if let Some(path) = picked {
+            state.flash.firmware_path = path.clone();
+            ops::load_firmware(state, &path);
+        }
+    }
+
+    if !state.flash.firmware_path.is_empty() && state.flash.firmware_data.is_none() {
+        ui.add_space(GAP_TINY);
+        ui.colored_label(
+            ui.visuals().error_fg_color,
+            t(L10nKey::WarnFirmwareLoadFailed, state.chrome.resolved_lang),
+        );
+    }
+}
+
+fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState, dialog: &impl FileDialog) {
+    match state.operation_mode {
+        OperationMode::Read => {}
+        OperationMode::Write => {
+            ui.add_space(GAP_SMALL);
+            ui.label(icon_rich(
+                ui,
+                icon::FILE,
+                t(L10nKey::SectionManifest, state.chrome.resolved_lang),
+                egui::TextStyle::Body,
+            ));
+            if file_picker(
+                ui,
+                &mut state.flash.manifest_path,
+                "JSON",
+                &["json"],
+                state.chrome.resolved_lang,
+                dialog,
+            ) && !state.flash.manifest_path.is_empty()
+            {
+                let path = state.flash.manifest_path.clone();
+                ops::load_manifest(state, &path);
+            }
+
+            if let Some(manifest) = &state.flash.manifest {
+                if manifest.firmware_images.len() > 1 {
+                    ui.add_space(GAP_TINY);
+                    ui.label(t(L10nKey::LabelImageId, state.chrome.resolved_lang));
+                    let select_img_text =
+                        format!("{}…", t(L10nKey::LabelImageId, state.chrome.resolved_lang));
+                    egui::ComboBox::from_id_salt("image_selector")
+                        .selected_text(
+                            state
+                                .flash
+                                .selected_image_id
+                                .as_deref()
+                                .unwrap_or(&select_img_text),
+                        )
+                        .width(ui.available_width())
+                        .show_ui(ui, |ui| {
+                            for img in &manifest.firmware_images {
+                                let label = format!(
+                                    "{} · {} ({})",
+                                    img.image_id, img.target_version, img.filename
+                                );
+                                ui.selectable_value(
+                                    &mut state.flash.selected_image_id,
+                                    Some(img.image_id.clone()),
+                                    label,
+                                );
+                            }
+                        });
+                }
+            }
+
+            if let Some(drive) = state.selected_drive() {
+                let required = command::required_flash_confirmation(&drive.device);
+                ui.add_space(GAP_SMALL);
+                show_confirmation_summary(ui, state, drive);
+                ui.label(t_with_args(
+                    L10nKey::LabelTypeToConfirm,
+                    state.chrome.resolved_lang,
+                    &[("required", &required)],
+                ));
+                ui.add(
+                    egui::TextEdit::singleline(&mut state.flash.confirmation)
+                        .desired_width(ui.available_width()),
+                );
+            }
+
+            ui.add_space(GAP_SMALL);
+            let can_validate =
+                state.flash.firmware_data.is_some() && state.flash.manifest.is_some();
+            if ui
+                .add_enabled(
+                    can_validate,
+                    icon_button(
+                        ui,
+                        icon::SHIELD_CHECK,
+                        t(L10nKey::BtnValidateFlashPlan, state.chrome.resolved_lang),
+                    ),
+                )
+                .clicked()
+            {
+                ops::validate_flash(state);
+            }
+
+            if let Some(report) = &state.flash.flash_report {
+                ui.separator();
+                let color = if report.would_execute {
+                    ui.visuals().hyperlink_color
+                } else {
+                    ui.visuals().error_fg_color
+                };
+                ui.colored_label(color, &report.summary);
+                let dir_text = match report.direction {
+                    flash::FlashDirection::Upgrade => {
+                        t(L10nKey::DirUpgrade, state.chrome.resolved_lang)
+                    }
+                    flash::FlashDirection::Downgrade => {
+                        t(L10nKey::DirDowngrade, state.chrome.resolved_lang)
+                    }
+                    flash::FlashDirection::Same => {
+                        t(L10nKey::DirSameVersion, state.chrome.resolved_lang)
+                    }
+                };
+                ui.label(
+                    egui::RichText::new(dir_text)
+                        .small()
+                        .color(ui.visuals().weak_text_color()),
+                );
+                ui.columns(2, |cols| {
+                    let lang = state.chrome.resolved_lang;
+                    let checks = [
+                        (t(L10nKey::CheckModelMatch, lang), report.checks.model_match),
+                        (
+                            t(L10nKey::CheckRevisionCheck, lang),
+                            report.checks.revision_check,
+                        ),
+                        (
+                            t(L10nKey::CheckImageChecksum, lang),
+                            report.checks.image_checksum,
+                        ),
+                        (
+                            t(L10nKey::CheckSignaturePresent, lang),
+                            report.checks.signature_present,
+                        ),
+                        (
+                            t(L10nKey::CheckUserConfirmed, lang),
+                            report.checks.user_confirmed,
+                        ),
+                    ];
+                    let check_size = button_text_size(&cols[0]);
+                    for (label, pass) in checks {
+                        if pass {
+                            cols[0].colored_label(
+                                cols[0].visuals().hyperlink_color,
+                                egui::RichText::new(icon::CHECK).size(check_size),
+                            );
+                        } else {
+                            cols[0].colored_label(
+                                cols[0].visuals().error_fg_color,
+                                egui::RichText::new(icon::X).size(check_size),
+                            );
+                        }
+                        cols[1].label(label);
+                    }
+                });
+
+                if !report.warnings.is_empty() {
+                    ui.add_space(GAP_SMALL);
+                    let warn_color = egui::Color32::from_rgb(255, 180, 0);
+                    ui.colored_label(
+                        warn_color,
+                        icon_rich(
+                            ui,
+                            icon::WARNING,
+                            &t_with_args(
+                                L10nKey::WarnWarningCount,
+                                state.chrome.resolved_lang,
+                                &[("count", &report.warnings.len().to_string())],
+                            ),
+                            egui::TextStyle::Body,
+                        ),
+                    );
+                    for w in &report.warnings {
+                        ui.colored_label(warn_color, format!("  • {w}"));
+                    }
+                    ui.add_space(GAP_TINY);
+                    ui.label(
+                        egui::RichText::new(t(
+                            L10nKey::WarnReviewAdvice,
+                            state.chrome.resolved_lang,
+                        ))
+                        .small()
+                        .italics(),
+                    );
+                }
+            }
+        }
+        OperationMode::Recover => {
+            ui.add_space(GAP_SMALL);
+            ui.horizontal(|ui| {
+                ui.label(icon_rich(
+                    ui,
+                    icon::KEY,
+                    t(L10nKey::LabelToken, state.chrome.resolved_lang),
+                    egui::TextStyle::Body,
+                ));
+                let available_width = ui.available_width() - 40.0;
+                ui.add(
+                    egui::TextEdit::singleline(&mut state.flash.recovery_token)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(available_width),
+                );
+                let token_color = if state.flash.recovery_token.len() == 16 {
+                    ui.visuals().hyperlink_color
+                } else {
+                    ui.visuals().weak_text_color()
+                };
+                ui.label(
+                    egui::RichText::new(t_with_args(
+                        L10nKey::LabelTokenLength,
+                        state.chrome.resolved_lang,
+                        &[("current", &state.flash.recovery_token.len().to_string())],
+                    ))
+                    .small()
+                    .monospace()
+                    .color(token_color),
+                );
+            });
+
+            ui.add_space(GAP_TINY);
+            ui.label(t(L10nKey::LabelWrongFw, state.chrome.resolved_lang));
+            if file_picker(
+                ui,
+                &mut state.flash.wrong_firmware_path,
+                "Firmware",
+                &["bin"],
+                state.chrome.resolved_lang,
+                dialog,
+            ) && !state.flash.wrong_firmware_path.is_empty()
+            {
+                ops::extract_recovery_token_from_wrong_firmware(state);
+            }
+            ui.add_space(GAP_SMALL);
+            if ui
+                .add(icon_button(
+                    ui,
+                    icon::EXPORT,
+                    t(L10nKey::BtnExtract, state.chrome.resolved_lang),
+                ))
+                .clicked()
+            {
+                ops::extract_recovery_token_from_wrong_firmware(state);
+            }
+
+            if let Some(drive) = state.selected_drive() {
+                let required = command::required_flash_confirmation(&drive.device);
+                ui.add_space(GAP_SMALL);
+                show_confirmation_summary(ui, state, drive);
+                ui.label(t_with_args(
+                    L10nKey::LabelTypeToConfirm,
+                    state.chrome.resolved_lang,
+                    &[("required", &required)],
+                ));
+                ui.add(
+                    egui::TextEdit::singleline(&mut state.flash.confirmation)
+                        .desired_width(ui.available_width()),
+                );
+            }
+        }
+    }
+}
+
+fn show_confirmation_summary(ui: &mut egui::Ui, state: &AppState, drive: &crate::drive::Drive) {
+    let lang = state.chrome.resolved_lang;
+    ui.label(
+        egui::RichText::new(t(L10nKey::LabelFlashSummaryTitle, lang))
+            .strong()
+            .color(ui.visuals().warn_fg_color),
+    );
+    ui.add_space(GAP_TINY);
+    let label = ops::drive_label(drive);
+    ui.label(t_with_args(
+        L10nKey::LabelFlashSummaryDrive,
+        lang,
+        &[("label", &label), ("device", &drive.device)],
+    ));
+    ui.label(t_with_args(
+        L10nKey::LabelFlashSummaryFirmware,
+        lang,
+        &[
+            ("file", &ops::firmware_basename(state)),
+            ("hash", &ops::firmware_sha_prefix(state)),
+        ],
+    ));
+    ui.label(t_with_args(
+        L10nKey::LabelFlashSummaryMode,
+        lang,
+        &[("mode", &ops::flash_mode_label(state))],
+    ));
+    if state.operation_mode == OperationMode::Write {
+        ui.add_space(GAP_TINY);
+        ui.label(
+            egui::RichText::new(t(L10nKey::WarnSignaturePresenceOnly, lang))
+                .small()
+                .italics()
+                .color(ui.visuals().weak_text_color()),
+        );
+    }
+}
+
+/// Renders a TextEdit + Browse button row. Returns `true` if the path changed.
+pub(crate) fn file_picker(
+    ui: &mut egui::Ui,
+    path: &mut String,
+    filter_name: &str,
+    extensions: &[&str],
+    lang: Language,
+    dialog: &impl FileDialog,
+) -> bool {
+    let initial_dir = std::path::Path::new(path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| p.to_path_buf());
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add(icon_button(
+                    ui,
+                    icon::FOLDER_OPEN,
+                    t(L10nKey::BtnBrowse, lang),
+                ))
+                .clicked()
+            {
+                if let Some(file) = dialog.pick_file_with_title(
+                    filter_name,
+                    filter_name,
+                    extensions,
+                    initial_dir.as_deref(),
+                ) {
+                    *path = file.to_string_lossy().to_string();
+                    changed = true;
+                }
+            }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                let before = path.clone();
+                let path_hint = if path.is_empty() {
+                    String::new()
+                } else {
+                    path.clone()
+                };
+                let edit = egui::TextEdit::singleline(path).desired_width(ui.available_width());
+                let resp = ui.add(edit);
+                if !path_hint.is_empty() {
+                    resp.on_hover_text(&path_hint);
+                }
+                if *path != before {
+                    changed = true;
+                }
+            });
+        });
+    });
+    changed
+}

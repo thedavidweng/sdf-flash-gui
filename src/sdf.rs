@@ -1,7 +1,4 @@
-// SDF0 container parser.
-//
-// Parses SDF0 binary headers and metadata from optical drive firmware
-// containers. The payload is always reported as opaque/encrypted.
+// The payload is always reported as opaque/encrypted.
 
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
@@ -68,12 +65,57 @@ pub enum SdfError {
 
     #[error("invalid UTF-8 in metadata string: {0}")]
     InvalidString(#[from] std::string::FromUtf8Error),
+
+    #[error("header_size {size} exceeds maximum {max}")]
+    HeaderTooLarge { size: u32, max: u32 },
+
+    #[error("header_size {0} is smaller than the minimum {SDF0_MIN_HEADER_SIZE}")]
+    HeaderTooSmall(u32),
+
+    #[error("metadata table exceeds maximum size of {max} bytes")]
+    MetadataTooLarge { max: usize },
+
+    #[error("payload_offset {offset} is before end of header ({header})")]
+    InvalidPayloadOffset { offset: u32, header: u32 },
+
+    #[error("table_offset {table} is before header_size ({header})")]
+    InvalidTableOffset { table: u32, header: u32 },
 }
 
 const SDF0_MIN_HEADER_SIZE: usize = 24;
+const SDF0_MAX_HEADER_SIZE: u32 = 1024 * 1024;
+const SDF0_MAX_METADATA_SIZE: usize = 1024 * 1024;
+
+fn bytes4(buf: &[u8], offset: usize) -> Result<[u8; 4], SdfError> {
+    buf.get(offset..offset + 4)
+        .and_then(|slice| slice.try_into().ok())
+        .ok_or(SdfError::DataTooShort {
+            needed: offset + 4,
+            have: buf.len(),
+        })
+}
+
+fn le_u32(buf: &[u8], offset: usize) -> Result<u32, SdfError> {
+    Ok(u32::from_le_bytes(bytes4(buf, offset)?))
+}
+
+fn skip_bytes<R: Read>(reader: &mut R, nbytes: usize) -> Result<(), SdfError> {
+    if nbytes == 0 {
+        return Ok(());
+    }
+    const CHUNK: usize = 8192;
+    let mut buf = [0u8; CHUNK];
+    let mut remaining = nbytes;
+    while remaining > 0 {
+        let take = remaining.min(CHUNK);
+        reader.read_exact(&mut buf[..take])?;
+        remaining -= take;
+    }
+    Ok(())
+}
 
 pub fn parse_sdf0<R: Read>(reader: &mut R) -> Result<SdfContainer, SdfError> {
-    let mut header_buf = vec![0u8; SDF0_MIN_HEADER_SIZE];
+    let mut header_buf = [0u8; SDF0_MIN_HEADER_SIZE];
     reader
         .read_exact(&mut header_buf)
         .map_err(|e| match e.kind() {
@@ -84,7 +126,7 @@ pub fn parse_sdf0<R: Read>(reader: &mut R) -> Result<SdfContainer, SdfError> {
             _ => SdfError::Io(e),
         })?;
 
-    let magic: [u8; 4] = [header_buf[0], header_buf[1], header_buf[2], header_buf[3]];
+    let magic = bytes4(&header_buf, 0)?;
     if magic != *SDF0_MAGIC {
         return Err(SdfError::InvalidMagic {
             expected: *SDF0_MAGIC,
@@ -92,24 +134,69 @@ pub fn parse_sdf0<R: Read>(reader: &mut R) -> Result<SdfContainer, SdfError> {
         });
     }
 
-    let version = u32::from_le_bytes(header_buf[4..8].try_into().unwrap());
-    let header_size = u32::from_le_bytes(header_buf[8..12].try_into().unwrap());
-    let table_offset = u32::from_le_bytes(header_buf[12..16].try_into().unwrap());
-    let flags = u32::from_le_bytes(header_buf[16..20].try_into().unwrap());
-    let payload_offset = u32::from_le_bytes(header_buf[20..24].try_into().unwrap());
+    let version = le_u32(&header_buf, 4)?;
+    let header_size = le_u32(&header_buf, 8)?;
+    let table_offset = le_u32(&header_buf, 12)?;
+    let flags = le_u32(&header_buf, 16)?;
+    let payload_offset = le_u32(&header_buf, 20)?;
 
     if version == 0 {
         return Err(SdfError::InvalidVersion(version));
     }
 
-    if header_size as usize > SDF0_MIN_HEADER_SIZE {
-        let remaining = header_size as usize - SDF0_MIN_HEADER_SIZE;
-        let mut skip_buf = vec![0u8; remaining];
-        reader.read_exact(&mut skip_buf)?;
+    if header_size < SDF0_MIN_HEADER_SIZE as u32 {
+        return Err(SdfError::HeaderTooSmall(header_size));
+    }
+    if header_size > SDF0_MAX_HEADER_SIZE {
+        return Err(SdfError::HeaderTooLarge {
+            size: header_size,
+            max: SDF0_MAX_HEADER_SIZE,
+        });
     }
 
-    let mut table_buf = Vec::new();
-    reader.read_to_end(&mut table_buf)?;
+    if header_size as usize > SDF0_MIN_HEADER_SIZE {
+        let remaining = header_size as usize - SDF0_MIN_HEADER_SIZE;
+        skip_bytes(reader, remaining)?;
+    }
+
+    if payload_offset < header_size {
+        return Err(SdfError::InvalidPayloadOffset {
+            offset: payload_offset,
+            header: header_size,
+        });
+    }
+
+    let metadata_start = if table_offset == 0 {
+        header_size
+    } else {
+        table_offset
+    };
+    if metadata_start < header_size {
+        return Err(SdfError::InvalidTableOffset {
+            table: table_offset,
+            header: header_size,
+        });
+    }
+    if metadata_start > payload_offset {
+        return Err(SdfError::InvalidPayloadOffset {
+            offset: payload_offset,
+            header: metadata_start,
+        });
+    }
+
+    let region_size = (payload_offset - header_size) as usize;
+    if region_size > SDF0_MAX_METADATA_SIZE {
+        return Err(SdfError::MetadataTooLarge {
+            max: SDF0_MAX_METADATA_SIZE,
+        });
+    }
+
+    if metadata_start > header_size {
+        let gap = (metadata_start - header_size) as usize;
+        skip_bytes(reader, gap)?;
+    }
+
+    let table_buf = read_metadata_table(reader, payload_offset - metadata_start)?;
 
     let metadata = if table_buf.len() > 4 {
         parse_metadata_table(&table_buf)?
@@ -139,6 +226,21 @@ pub fn parse_sdf0<R: Read>(reader: &mut R) -> Result<SdfContainer, SdfError> {
     })
 }
 
+fn read_metadata_table<R: Read>(reader: &mut R, size: u32) -> Result<Vec<u8>, SdfError> {
+    let size = size as usize;
+    if size > SDF0_MAX_METADATA_SIZE {
+        return Err(SdfError::MetadataTooLarge {
+            max: SDF0_MAX_METADATA_SIZE,
+        });
+    }
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    let mut table_buf = vec![0u8; size];
+    reader.read_exact(&mut table_buf)?;
+    Ok(table_buf)
+}
+
 fn parse_metadata_table(buf: &[u8]) -> Result<SdfMetadata, SdfError> {
     let mut metadata = SdfMetadata::default();
     let mut pos = 0;
@@ -148,7 +250,13 @@ fn parse_metadata_table(buf: &[u8]) -> Result<SdfMetadata, SdfError> {
             Some(p) => pos + p,
             None => break,
         };
-        let key = String::from_utf8(buf[pos..key_end].to_vec())?;
+        let key = match String::from_utf8(buf[pos..key_end].to_vec()) {
+            Ok(key) => key,
+            Err(_) => break,
+        };
+        if key.is_empty() {
+            break;
+        }
         pos = key_end + 1;
 
         if pos >= buf.len() {
@@ -159,7 +267,10 @@ fn parse_metadata_table(buf: &[u8]) -> Result<SdfMetadata, SdfError> {
             Some(p) => pos + p,
             None => break,
         };
-        let value = String::from_utf8(buf[pos..val_end].to_vec())?;
+        let value = match String::from_utf8(buf[pos..val_end].to_vec()) {
+            Ok(value) => value,
+            Err(_) => break,
+        };
         pos = val_end + 1;
 
         match key.as_str() {
@@ -177,6 +288,94 @@ fn parse_metadata_table(buf: &[u8]) -> Result<SdfMetadata, SdfError> {
     }
 
     Ok(metadata)
+}
+
+/// CLI text output for `sdf-info`.
+pub fn format_container_cli(container: &SdfContainer, file: &str) -> String {
+    let mut out = format!("SDF0 Container: {file}\n");
+    out.push_str(&format!("  Version:        {}\n", container.header.version));
+    out.push_str(&format!(
+        "  Header size:    {}\n",
+        container.header.header_size
+    ));
+    out.push_str(&format!(
+        "  Table offset:   {}\n",
+        container.header.table_offset
+    ));
+    out.push_str(&format!(
+        "  Flags:          0x{:08x}\n",
+        container.header.flags
+    ));
+    out.push_str(&format!("  Payload offset: {}\n", container.payload.offset));
+    out.push_str(&format!(
+        "  Encrypted:      {}\n",
+        container.payload.encrypted
+    ));
+    out.push_str(&format!(
+        "  Compressed:     {}\n",
+        container.payload.compressed
+    ));
+    if let Some(v) = &container.metadata.vendor {
+        out.push_str(&format!("  Vendor:         {v}\n"));
+    }
+    if let Some(m) = &container.metadata.model {
+        out.push_str(&format!("  Model:          {m}\n"));
+    }
+    if let Some(fw) = &container.metadata.firmware_version {
+        out.push_str(&format!("  Firmware:       {fw}\n"));
+    }
+    for (k, v) in &container.metadata.extra {
+        out.push_str(&format!("  {k}: {v}\n"));
+    }
+    out
+}
+
+/// Localized log text for GUI settings parse button.
+pub fn format_container_log(container: &SdfContainer, lang: crate::i18n::Language) -> String {
+    use crate::i18n::{t_with_args, L10nKey};
+    let mut info = t_with_args(
+        L10nKey::LogSdfHeader,
+        lang,
+        &[
+            ("version", &container.header.version.to_string()),
+            ("header_size", &container.header.header_size.to_string()),
+            ("offset", &container.payload.offset.to_string()),
+        ],
+    );
+    if let Some(v) = &container.metadata.vendor {
+        info.push('\n');
+        info.push_str(&t_with_args(L10nKey::LogSdfVendor, lang, &[("vendor", v)]));
+    }
+    if let Some(m) = &container.metadata.model {
+        info.push('\n');
+        info.push_str(&t_with_args(L10nKey::LogSdfModel, lang, &[("model", m)]));
+    }
+    if let Some(fw) = &container.metadata.firmware_version {
+        info.push('\n');
+        info.push_str(&t_with_args(
+            L10nKey::LogSdfFirmware,
+            lang,
+            &[("firmware", fw)],
+        ));
+    }
+    info.push('\n');
+    info.push_str(&t_with_args(
+        L10nKey::LogSdfFlags,
+        lang,
+        &[
+            ("encrypted", &container.payload.encrypted.to_string()),
+            ("compressed", &container.payload.compressed.to_string()),
+        ],
+    ));
+    for (k, v) in &container.metadata.extra {
+        info.push('\n');
+        info.push_str(&t_with_args(
+            L10nKey::LogSdfExtraField,
+            lang,
+            &[("key", k), ("value", v)],
+        ));
+    }
+    info
 }
 
 #[cfg(test)]
@@ -201,9 +400,25 @@ mod tests {
         buf
     }
 
+    fn build_sdf0_with_metadata(
+        version: u32,
+        flags: u32,
+        metadata: &[u8],
+        extra_payload: usize,
+    ) -> Vec<u8> {
+        let header_size = 24u32;
+        let payload_offset = header_size + metadata.len() as u32;
+        let mut data = build_sdf0_header(version, header_size, header_size, flags, payload_offset);
+        data.extend_from_slice(metadata);
+        if extra_payload > 0 {
+            data.extend(vec![0u8; extra_payload]);
+        }
+        data
+    }
+
     #[test]
     fn parse_valid_sdf0_header() {
-        let data = build_sdf0_header(1, 24, 0, 0x01, 48);
+        let data = build_sdf0_header(1, 24, 0, 0x01, 24);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).expect("should parse");
         assert_eq!(container.header.version, 1);
@@ -212,8 +427,7 @@ mod tests {
 
     #[test]
     fn parse_sdf0_with_metadata() {
-        let mut data = build_sdf0_header(2, 24, 24, 0x00, 56);
-        data.extend_from_slice(b"Vendor\0TestVendor\0Model\0BD-RW\0");
+        let data = build_sdf0_with_metadata(2, 0x00, b"Vendor\0TestVendor\0Model\0BD-RW\0", 0);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).expect("should parse");
         assert_eq!(container.metadata.vendor.as_deref(), Some("TestVendor"));
@@ -273,8 +487,7 @@ mod tests {
 
     #[test]
     fn parse_sdf0_metadata_with_capabilities() {
-        let mut data = build_sdf0_header(1, 24, 24, 0x00, 64);
-        data.extend_from_slice(b"Vendor\0LG\0Capabilities\0enc,boot\0");
+        let data = build_sdf0_with_metadata(1, 0x00, b"Vendor\0LG\0Capabilities\0enc,boot\0", 0);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         assert_eq!(container.metadata.vendor.as_deref(), Some("LG"));
@@ -283,8 +496,7 @@ mod tests {
 
     #[test]
     fn parse_sdf0_metadata_fwver() {
-        let mut data = build_sdf0_header(1, 24, 24, 0x00, 60);
-        data.extend_from_slice(b"FirmwareVersion\01.04\0");
+        let data = build_sdf0_with_metadata(1, 0x00, b"FirmwareVersion\01.04\0", 0);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         assert_eq!(container.metadata.firmware_version.as_deref(), Some("1.04"));
@@ -293,7 +505,8 @@ mod tests {
     #[test]
     fn parse_sdf0_empty_metadata() {
         // Table area is <= 4 bytes, so metadata defaults
-        let data = build_sdf0_header(1, 24, 0, 0x00, 28);
+        let mut data = build_sdf0_header(1, 24, 0, 0x00, 28);
+        data.extend_from_slice(&[0u8; 4]);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         assert!(container.metadata.vendor.is_none());
@@ -302,8 +515,7 @@ mod tests {
 
     #[test]
     fn parse_sdf0_model_key() {
-        let mut data = build_sdf0_header(1, 24, 24, 0x00, 56);
-        data.extend_from_slice(b"Model\0BU40N\0");
+        let data = build_sdf0_with_metadata(1, 0x00, b"Model\0BU40N\0", 0);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         assert_eq!(container.metadata.model.as_deref(), Some("BU40N"));
@@ -311,8 +523,7 @@ mod tests {
 
     #[test]
     fn parse_sdf0_model_lowercase() {
-        let mut data = build_sdf0_header(1, 24, 24, 0x00, 56);
-        data.extend_from_slice(b"model\0BU40N\0");
+        let data = build_sdf0_with_metadata(1, 0x00, b"model\0BU40N\0", 0);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         assert_eq!(container.metadata.model.as_deref(), Some("BU40N"));
@@ -320,8 +531,7 @@ mod tests {
 
     #[test]
     fn parse_sdf0_fwver_key() {
-        let mut data = build_sdf0_header(1, 24, 24, 0x00, 60);
-        data.extend_from_slice(b"FWVer\01.04\0");
+        let data = build_sdf0_with_metadata(1, 0x00, b"FWVer\01.04\0", 0);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         assert_eq!(container.metadata.firmware_version.as_deref(), Some("1.04"));
@@ -329,21 +539,18 @@ mod tests {
 
     #[test]
     fn parse_sdf0_unknown_key_in_extra() {
-        let mut data = build_sdf0_header(1, 24, 24, 0x00, 60);
-        data.extend_from_slice(b"CustomKey\0CustomVal\0");
+        let data = build_sdf0_with_metadata(1, 0x00, b"CustomKey\0CustomVal\0", 0);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         assert_eq!(container.metadata.extra.len(), 1);
         assert_eq!(container.metadata.extra[0].0, "CustomKey");
         assert_eq!(container.metadata.extra[0].1, "CustomVal");
-        // Unknown keys don't map to known fields
         assert!(container.metadata.vendor.is_none());
     }
 
     #[test]
     fn parse_sdf0_known_and_unknown_keys() {
-        let mut data = build_sdf0_header(1, 24, 24, 0x00, 80);
-        data.extend_from_slice(b"Vendor\0LG\0Custom\0Val\0Model\0BU40N\0");
+        let data = build_sdf0_with_metadata(1, 0x00, b"Vendor\0LG\0Custom\0Val\0Model\0BU40N\0", 0);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         assert_eq!(container.metadata.vendor.as_deref(), Some("LG"));
@@ -354,8 +561,7 @@ mod tests {
     #[test]
     fn parse_sdf0_truncated_metadata() {
         // Metadata table with truncated key (no null terminator)
-        let mut data = build_sdf0_header(1, 24, 24, 0x00, 30);
-        data.extend_from_slice(b"Ven"); // truncated, no null
+        let data = build_sdf0_with_metadata(1, 0x00, b"Ven", 0);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         // Should not crash, metadata should be empty or partial
@@ -365,8 +571,7 @@ mod tests {
     #[test]
     fn parse_sdf0_truncated_value() {
         // Key present but value truncated
-        let mut data = build_sdf0_header(1, 24, 24, 0x00, 32);
-        data.extend_from_slice(b"Vendor\0LG"); // no null terminator for value
+        let data = build_sdf0_with_metadata(1, 0x00, b"Vendor\0LG", 0);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         // Should not crash
@@ -374,19 +579,124 @@ mod tests {
     }
 
     #[test]
+    fn parse_sdf0_rejects_oversized_header_size() {
+        let data = build_sdf0_header(1, SDF0_MAX_HEADER_SIZE + 1, 0, 0x00, 24);
+        let mut cursor = Cursor::new(&data);
+        let err = parse_sdf0(&mut cursor).unwrap_err();
+        assert!(matches!(
+            err,
+            SdfError::HeaderTooLarge {
+                size,
+                max
+            } if size == SDF0_MAX_HEADER_SIZE + 1 && max == SDF0_MAX_HEADER_SIZE
+        ));
+    }
+
+    #[test]
+    fn parse_sdf0_rejects_header_size_smaller_than_minimum() {
+        let data = build_sdf0_header(1, 16, 0, 0x00, 24);
+        let mut cursor = Cursor::new(&data);
+        let err = parse_sdf0(&mut cursor).unwrap_err();
+        assert!(matches!(err, SdfError::HeaderTooSmall(16)));
+    }
+
+    #[test]
+    fn parse_sdf0_rejects_oversized_metadata_table() {
+        let metadata_bytes = SDF0_MAX_METADATA_SIZE + 1;
+        let payload_offset = 24 + metadata_bytes as u32;
+        let mut data = build_sdf0_header(1, 24, 24, 0x00, payload_offset);
+        data.extend(vec![0u8; metadata_bytes]);
+        let mut cursor = Cursor::new(&data);
+        let err = parse_sdf0(&mut cursor).unwrap_err();
+        assert!(matches!(
+            err,
+            SdfError::MetadataTooLarge { max } if max == SDF0_MAX_METADATA_SIZE
+        ));
+    }
+
+    #[test]
+    fn parse_sdf0_rejects_oversized_padding_before_metadata() {
+        let header_size = 24u32;
+        let table_offset = header_size + SDF0_MAX_METADATA_SIZE as u32;
+        let payload_offset = table_offset + 4;
+        let data = build_sdf0_header(1, header_size, table_offset, 0x00, payload_offset);
+        let err = parse_sdf0(&mut Cursor::new(&data)).unwrap_err();
+        assert!(matches!(
+            err,
+            SdfError::MetadataTooLarge { max } if max == SDF0_MAX_METADATA_SIZE
+        ));
+    }
+
+    #[test]
+    fn skip_bytes_zero_is_noop() {
+        let mut cursor = Cursor::new(&[] as &[u8]);
+        skip_bytes(&mut cursor, 0).expect("zero-byte skip");
+    }
+
+    #[test]
+    fn skip_bytes_reads_large_gap_in_chunks() {
+        let padding = vec![0xBBu8; 10_000];
+        let mut cursor = Cursor::new(padding.as_slice());
+        skip_bytes(&mut cursor, padding.len()).expect("chunked skip");
+        assert_eq!(cursor.position(), padding.len() as u64);
+    }
+
+    #[test]
+    fn read_metadata_table_rejects_oversized_buffer() {
+        let mut cursor = Cursor::new(&[] as &[u8]);
+        let err = read_metadata_table(&mut cursor, SDF0_MAX_METADATA_SIZE as u32 + 1).unwrap_err();
+        assert!(matches!(
+            err,
+            SdfError::MetadataTooLarge { max } if max == SDF0_MAX_METADATA_SIZE
+        ));
+    }
+
+    #[test]
+    fn parse_sdf0_ignores_large_payload_after_metadata() {
+        let data = build_sdf0_with_metadata(
+            1,
+            0x00,
+            b"Vendor\0TestVendor\0Model\0TestModel\0",
+            2 * 1024 * 1024,
+        );
+        let mut cursor = Cursor::new(&data);
+        let container =
+            parse_sdf0(&mut cursor).expect("should parse metadata without reading payload");
+        assert_eq!(container.metadata.vendor.as_deref(), Some("TestVendor"));
+        assert_eq!(container.metadata.model.as_deref(), Some("TestModel"));
+    }
+
+    #[test]
+    fn parse_sdf0_padded_metadata_region_with_table_gap() {
+        let metadata = b"Vendor\0TestVendor\0Model\0TestModel\0";
+        let header_size = 24u32;
+        let table_offset = 32u32;
+        let payload_offset = 128u32;
+        let mut data = build_sdf0_header(1, header_size, table_offset, 0x00, payload_offset);
+        data.extend_from_slice(&[0x00; 8]);
+        data.extend_from_slice(metadata);
+        data.resize(payload_offset as usize, 0xAA);
+        data.extend(vec![0u8; 64]);
+        let mut cursor = Cursor::new(&data);
+        let container = parse_sdf0(&mut cursor).expect("should parse padded metadata");
+        assert_eq!(container.metadata.vendor.as_deref(), Some("TestVendor"));
+        assert_eq!(container.metadata.model.as_deref(), Some("TestModel"));
+    }
+
+    #[test]
     fn parse_sdf0_larger_header() {
         // header_size > 24 means there's extra header data to skip
-        let mut data = build_sdf0_header(1, 32, 32, 0x00, 64);
-        // 8 bytes of extra header padding
+        let metadata = b"Vendor\0Test\0";
+        let header_size = 32u32;
+        let payload_offset = header_size + metadata.len() as u32;
+        let mut data = build_sdf0_header(1, header_size, header_size, 0x00, payload_offset);
         data.extend_from_slice(&[0xAA; 8]);
-        // metadata table
-        data.extend_from_slice(b"Vendor\0Test\0");
+        data.extend_from_slice(metadata);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         assert_eq!(container.metadata.vendor.as_deref(), Some("Test"));
     }
 
-    /// A reader that returns a non-EOF IO error on the first read.
     struct FailingReader;
 
     impl Read for FailingReader {
@@ -431,6 +741,105 @@ mod tests {
         let data = build_sdf0_header(1, 24, 0, 0x00, 24);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
+        assert!(container.metadata.vendor.is_none());
+    }
+
+    #[test]
+    fn parse_sdf0_rejects_payload_offset_before_header() {
+        let data = build_sdf0_header(1, 24, 24, 0x00, 20);
+        let err = parse_sdf0(&mut Cursor::new(&data)).unwrap_err();
+        assert!(matches!(
+            err,
+            SdfError::InvalidPayloadOffset {
+                offset: 20,
+                header: 24
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_sdf0_rejects_metadata_start_after_payload() {
+        let data = build_sdf0_header(1, 24, 28, 0x00, 26);
+        let err = parse_sdf0(&mut Cursor::new(&data)).unwrap_err();
+        assert!(matches!(
+            err,
+            SdfError::InvalidPayloadOffset {
+                offset: 26,
+                header: 28
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_sdf0_invalid_table_offset_before_header() {
+        let data = build_sdf0_header(1, 24, 16, 0x00, 24);
+        let mut cursor = Cursor::new(&data);
+        let err = parse_sdf0(&mut cursor).unwrap_err();
+        assert!(matches!(
+            err,
+            SdfError::InvalidTableOffset {
+                table: 16,
+                header: 24
+            }
+        ));
+    }
+
+    #[test]
+    fn format_container_cli_includes_metadata() {
+        let data = build_sdf0_with_metadata(
+            1,
+            0x01,
+            b"Vendor\0LG\0Model\0BU40N\0FirmwareVersion\01.04\0CustomKey\0CustomVal\0",
+            0,
+        );
+        let container = parse_sdf0(&mut Cursor::new(&data)).unwrap();
+        let text = format_container_cli(&container, "fw.bin");
+        assert!(text.contains("fw.bin"));
+        assert!(text.contains("Vendor:         LG"));
+        assert!(text.contains("Model:          BU40N"));
+        assert!(text.contains("Firmware:       1.04"));
+        assert!(text.contains("CustomKey: CustomVal"));
+        assert!(text.contains("Encrypted:      true"));
+    }
+
+    #[test]
+    fn format_container_log_includes_localized_metadata() {
+        let data = build_sdf0_with_metadata(
+            1,
+            0x00,
+            b"Vendor\0LG\0Model\0BU40N\0FirmwareVersion\01.04\0",
+            0,
+        );
+        let container = parse_sdf0(&mut Cursor::new(&data)).unwrap();
+        let text = format_container_log(&container, crate::i18n::Language::German);
+        assert!(text.contains("LG"));
+        assert!(text.contains("BU40N"));
+        assert!(text.contains("1.04"));
+    }
+
+    #[test]
+    fn parse_sdf0_metadata_invalid_utf8_key() {
+        let mut metadata = vec![0xFF, 0xFE, 0x00, b'L', b'G', 0x00];
+        metadata.extend_from_slice(b"Vendor\0LG\0");
+        let data = build_sdf0_with_metadata(1, 0x00, &metadata, 0);
+        let container = parse_sdf0(&mut Cursor::new(&data)).unwrap();
+        assert!(container.metadata.vendor.is_none());
+    }
+
+    #[test]
+    fn parse_sdf0_metadata_empty_key_stops_parsing() {
+        let data = build_sdf0_with_metadata(1, 0x00, b"\0Vendor\0LG\0", 0);
+        let container = parse_sdf0(&mut Cursor::new(&data)).unwrap();
+        assert!(container.metadata.vendor.is_none());
+    }
+
+    #[test]
+    fn parse_sdf0_metadata_invalid_utf8_value() {
+        let mut metadata = b"Vendor\0".to_vec();
+        metadata.extend_from_slice(&[0xFF, 0xFE]);
+        metadata.push(0x00);
+        let data = build_sdf0_with_metadata(1, 0x00, &metadata, 0);
+        let container = parse_sdf0(&mut Cursor::new(&data)).unwrap();
         assert!(container.metadata.vendor.is_none());
     }
 

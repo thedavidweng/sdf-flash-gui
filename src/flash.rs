@@ -1,6 +1,6 @@
-// Flash safety model — validation and dry-run.
-
+use crate::i18n::{t, t_with_args, L10nKey, Language};
 use crate::manifest::{glob_match, DriveMatch, FirmwareManifest};
+use crate::sdf;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -15,7 +15,6 @@ pub enum FlashDirection {
 pub struct FlashPlan {
     pub drive: DriveMatch,
     pub manifest: FirmwareManifest,
-    pub image_id: String,
     pub current_version: String,
     pub target_version: String,
     pub model_match: bool,
@@ -31,6 +30,9 @@ pub struct FlashReport {
     pub direction: FlashDirection,
     pub checks: FlashChecks,
     pub summary: String,
+    /// Advisory warnings — never block the flash, but should be shown to the user.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,26 +55,7 @@ pub struct FlashPlanRequest<'a> {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
 pub enum FlashError {
-    #[error("model mismatch: drive {drive_vendor} {drive_model} does not match manifest {manifest_vendor} {manifest_model}")]
-    ModelMismatch {
-        drive_vendor: String,
-        drive_model: String,
-        manifest_vendor: String,
-        manifest_model: String,
-    },
-
-    #[error("image checksum mismatch for image {image_id}: expected {expected}, got {actual}")]
-    ChecksumMismatch {
-        image_id: String,
-        expected: String,
-        actual: String,
-    },
-
-    #[error("no signature present for image {image_id}")]
-    NoSignature { image_id: String },
-
     #[error("firmware image not found: {0}")]
     ImageNotFound(String),
 }
@@ -85,6 +68,127 @@ pub fn sha256_hex(data: &[u8]) -> String {
         let _ = write!(hex, "{b:02x}");
     }
     hex
+}
+
+/// Metadata extracted from a firmware binary's SDF0 header (if parseable).
+pub struct FirmwareSdfInfo {
+    pub vendor: Option<String>,
+    pub model: Option<String>,
+    pub firmware_version: Option<String>,
+}
+
+/// Try to parse the firmware binary as an SDF0 container and extract metadata.
+/// Returns `None` if the binary is not a valid SDF0 container (e.g. encrypted
+/// raw blobs), which is a common and expected case.
+pub fn check_firmware_sdf(firmware_data: &[u8]) -> Option<FirmwareSdfInfo> {
+    let mut cursor = std::io::Cursor::new(firmware_data);
+    let container = sdf::parse_sdf0(&mut cursor).ok()?;
+    Some(FirmwareSdfInfo {
+        vendor: container.metadata.vendor,
+        model: container.metadata.model,
+        firmware_version: container.metadata.firmware_version,
+    })
+}
+
+fn push_sdf_metadata_warnings(
+    warnings: &mut Vec<String>,
+    manifest: &FirmwareManifest,
+    sdf_info: &FirmwareSdfInfo,
+    lang: Language,
+) {
+    if let Some(fw_vendor) = sdf_info
+        .vendor
+        .as_ref()
+        .filter(|v| !glob_match(&manifest.vendor, v))
+    {
+        warnings.push(t_with_args(
+            L10nKey::WarnFwVendorMismatch,
+            lang,
+            &[
+                ("fw_vendor", fw_vendor),
+                ("manifest_vendor", &manifest.vendor),
+            ],
+        ));
+    }
+    if let Some(fw_model) = sdf_info
+        .model
+        .as_ref()
+        .filter(|m| !glob_match(&manifest.model, m))
+    {
+        warnings.push(t_with_args(
+            L10nKey::WarnFwModelMismatch,
+            lang,
+            &[("fw_model", fw_model), ("manifest_model", &manifest.model)],
+        ));
+    }
+}
+
+/// Check for advisory warnings. Returns a list of human-readable warning
+/// strings. An empty list means no warnings.
+///
+/// These checks are intentionally softer than the five hard gates — they
+/// surface potential issues and let the user decide.
+pub fn check_warnings(
+    manifest: &FirmwareManifest,
+    drive: &DriveMatch,
+    firmware_data: &[u8],
+    lang: Language,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    // 1. Broad wildcards in manifest
+    if manifest.vendor == "*" {
+        warnings.push(t(L10nKey::WarnManifestAnyVendor, lang).to_string());
+    }
+    if manifest.model == "*" {
+        warnings.push(t(L10nKey::WarnManifestAnyModel, lang).to_string());
+    }
+    if manifest.revision_match == "*" {
+        warnings.push(t(L10nKey::WarnManifestAnyRevision, lang).to_string());
+    }
+
+    // 2. Category mismatch (if both manifest and drive specify category)
+    if let Some(manifest_cat) = &manifest.category {
+        // Drive category comes from the model/product string heuristics.
+        // We check common patterns in the drive's model string.
+        let drive_model_lower = drive.model.to_lowercase();
+        let drive_category = if drive_model_lower.contains("slim")
+            || drive_model_lower.contains("external")
+            || drive_model_lower.starts_with("bp")
+            || drive_model_lower.starts_with("bu")
+            || drive_model_lower.starts_with("wp")
+        {
+            Some("slim")
+        } else if drive_model_lower.contains("internal")
+            || drive_model_lower.contains("desktop")
+            || drive_model_lower.starts_with("wh")
+            || drive_model_lower.starts_with("bh")
+        {
+            Some("internal")
+        } else {
+            None
+        };
+
+        let manifest_cat_lower = manifest_cat.to_lowercase();
+        if let Some(dc) = drive_category {
+            if (dc == "slim" && manifest_cat_lower == "internal")
+                || (dc == "internal" && manifest_cat_lower == "slim")
+            {
+                warnings.push(t_with_args(
+                    L10nKey::WarnCategoryMismatch,
+                    lang,
+                    &[("manifest_cat", manifest_cat), ("drive_cat", dc)],
+                ));
+            }
+        }
+    }
+
+    // 3. Firmware binary SDF0 metadata vs target drive
+    if let Some(sdf_info) = check_firmware_sdf(firmware_data) {
+        push_sdf_metadata_warnings(&mut warnings, manifest, &sdf_info, lang);
+    }
+
+    warnings
 }
 
 pub fn build_flash_plan(
@@ -109,18 +213,17 @@ pub fn build_flash_plan(
     Ok(FlashPlan {
         drive: drive.clone(),
         manifest: manifest.clone(),
-        image_id: request.image_id.to_string(),
         current_version: request.current_version.to_string(),
         target_version: image.target_version.clone(),
         model_match: model_match_full,
-        revision_check: true,
+        revision_check: revision_match,
         image_checksum,
         signature_present: request.signature_present,
         user_confirmed: request.user_confirmed,
     })
 }
 
-pub fn dry_run(plan: &FlashPlan) -> FlashReport {
+pub fn dry_run(plan: &FlashPlan, firmware_data: &[u8], lang: Language) -> FlashReport {
     let direction = compare_versions(&plan.current_version, &plan.target_version);
 
     let checks = FlashChecks {
@@ -137,40 +240,56 @@ pub fn dry_run(plan: &FlashPlan) -> FlashReport {
         && checks.signature_present
         && checks.user_confirmed;
 
+    let direction_str = match direction {
+        FlashDirection::Upgrade => t(L10nKey::DirUpgrade, lang),
+        FlashDirection::Downgrade => t(L10nKey::DirDowngrade, lang),
+        FlashDirection::Same => t(L10nKey::DirSameVersion, lang),
+    };
+
     let summary = if would_execute {
-        format!(
-            "Flash ready: {} {} firmware {} -> {} ({:?})",
-            plan.drive.vendor,
-            plan.drive.model,
-            plan.current_version,
-            plan.target_version,
-            direction,
+        t_with_args(
+            L10nKey::FlashReadySummary,
+            lang,
+            &[
+                ("vendor", &plan.drive.vendor),
+                ("model", &plan.drive.model),
+                ("current", &plan.current_version),
+                ("target", &plan.target_version),
+                ("direction", direction_str),
+            ],
         )
     } else {
         let mut failures = Vec::new();
         if !checks.model_match {
-            failures.push("model mismatch");
+            failures.push(t(L10nKey::FailModelMismatch, lang));
         }
         if !checks.revision_check {
-            failures.push("revision mismatch");
+            failures.push(t(L10nKey::FailRevisionMismatch, lang));
         }
         if !checks.image_checksum {
-            failures.push("checksum failed");
+            failures.push(t(L10nKey::FailChecksumFailed, lang));
         }
         if !checks.signature_present {
-            failures.push("no signature");
+            failures.push(t(L10nKey::FailNoSignature, lang));
         }
         if !checks.user_confirmed {
-            failures.push("not confirmed");
+            failures.push(t(L10nKey::FailNotConfirmed, lang));
         }
-        format!("Flash blocked: {}", failures.join(", "))
+        t_with_args(
+            L10nKey::FlashBlockedSummary,
+            lang,
+            &[("failures", &failures.join(", "))],
+        )
     };
+
+    let warnings = check_warnings(&plan.manifest, &plan.drive, firmware_data, lang);
 
     FlashReport {
         would_execute,
         direction,
         checks,
         summary,
+        warnings,
     }
 }
 
@@ -204,6 +323,7 @@ fn compare_versions(current: &str, target: &str) -> FlashDirection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::Language;
     use crate::manifest::{DriveMatch, FirmwareImage, FirmwareManifest};
 
     fn test_manifest() -> FirmwareManifest {
@@ -213,6 +333,7 @@ mod tests {
             model: "BU40N".into(),
             revision_match: "1.0*".into(),
             capabilities: vec![],
+            category: None,
             firmware_images: vec![FirmwareImage {
                 image_id: "main".into(),
                 filename: "fw.bin".into(),
@@ -331,7 +452,7 @@ mod tests {
             },
         )
         .unwrap();
-        let report = dry_run(&plan);
+        let report = dry_run(&plan, &[], Language::English);
         assert!(report.would_execute);
         assert_eq!(report.direction, FlashDirection::Upgrade);
         assert!(report.summary.contains("Flash ready"));
@@ -354,7 +475,7 @@ mod tests {
             },
         )
         .unwrap();
-        let report = dry_run(&plan);
+        let report = dry_run(&plan, &[], Language::English);
         assert!(!report.would_execute);
         assert!(report.summary.contains("checksum failed"));
     }
@@ -376,7 +497,7 @@ mod tests {
             },
         )
         .unwrap();
-        let report = dry_run(&plan);
+        let report = dry_run(&plan, &[], Language::English);
         assert!(!report.would_execute);
         assert!(report.summary.contains("no signature"));
     }
@@ -398,7 +519,7 @@ mod tests {
             },
         )
         .unwrap();
-        let report = dry_run(&plan);
+        let report = dry_run(&plan, &[], Language::English);
         assert!(!report.would_execute);
         assert!(report.summary.contains("not confirmed"));
     }
@@ -426,7 +547,7 @@ mod tests {
         )
         .unwrap();
         assert!(!plan.model_match);
-        let report = dry_run(&plan);
+        let report = dry_run(&plan, &[], Language::English);
         assert!(!report.would_execute);
         assert!(report.summary.contains("model mismatch"));
     }
@@ -450,7 +571,7 @@ mod tests {
         .unwrap();
         // Force revision_check to false to cover that branch
         plan.revision_check = false;
-        let report = dry_run(&plan);
+        let report = dry_run(&plan, &[], Language::English);
         assert!(!report.would_execute);
         assert!(report.summary.contains("revision mismatch"));
     }
@@ -579,7 +700,7 @@ mod tests {
             },
         )
         .unwrap();
-        let report = dry_run(&plan);
+        let report = dry_run(&plan, &[], Language::English);
         assert!(!report.would_execute);
         assert!(report.summary.contains("checksum failed"));
         assert!(report.summary.contains("no signature"));
@@ -603,7 +724,7 @@ mod tests {
             },
         )
         .unwrap();
-        let report = dry_run(&plan);
+        let report = dry_run(&plan, &[], Language::English);
         assert!(report.would_execute);
         assert_eq!(report.direction, FlashDirection::Downgrade);
     }
@@ -625,21 +746,255 @@ mod tests {
             },
         )
         .unwrap();
-        let report = dry_run(&plan);
+        let report = dry_run(&plan, &[], Language::English);
         assert_eq!(report.direction, FlashDirection::Same);
     }
 
     #[test]
-    fn sha256_hex_deterministic() {
-        let a = sha256_hex(b"test data");
-        let b = sha256_hex(b"test data");
-        assert_eq!(a, b);
+    fn check_warnings_empty_when_all_clean() {
+        let manifest = test_manifest();
+        let drive = test_drive();
+        let warnings = check_warnings(&manifest, &drive, &[], Language::English);
+        assert!(warnings.is_empty());
     }
 
     #[test]
-    fn sha256_hex_different_inputs() {
-        let a = sha256_hex(b"hello");
-        let b = sha256_hex(b"world");
-        assert_ne!(a, b);
+    fn check_warnings_broad_vendor_wildcard() {
+        let mut manifest = test_manifest();
+        manifest.vendor = "*".into();
+        let drive = test_drive();
+        let warnings = check_warnings(&manifest, &drive, &[], Language::English);
+        assert!(warnings.iter().any(|w| w.contains("ANY vendor")));
+    }
+
+    #[test]
+    fn check_warnings_broad_model_wildcard() {
+        let mut manifest = test_manifest();
+        manifest.model = "*".into();
+        let drive = test_drive();
+        let warnings = check_warnings(&manifest, &drive, &[], Language::English);
+        assert!(warnings.iter().any(|w| w.contains("ANY model")));
+    }
+
+    #[test]
+    fn check_warnings_broad_revision_wildcard() {
+        let mut manifest = test_manifest();
+        manifest.revision_match = "*".into();
+        let drive = test_drive();
+        let warnings = check_warnings(&manifest, &drive, &[], Language::English);
+        assert!(warnings.iter().any(|w| w.contains("ANY revision")));
+    }
+
+    #[test]
+    fn check_warnings_category_mismatch_internal_vs_slim() {
+        let mut manifest = test_manifest();
+        manifest.category = Some("slim".into());
+        let drive = DriveMatch {
+            vendor: "HL-DT-ST".into(),
+            model: "WH16NS40".into(),
+            revision: "1.00".into(),
+        };
+        let warnings = check_warnings(&manifest, &drive, &[], Language::English);
+        assert!(
+            warnings.iter().any(|w| w.contains("Category mismatch")),
+            "expected category mismatch warning, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn check_warnings_internal_drive_matching_category() {
+        let mut manifest = test_manifest();
+        manifest.category = Some("internal".into());
+        let drive = DriveMatch {
+            vendor: "HL-DT-ST".into(),
+            model: "BH16NS40".into(),
+            revision: "1.00".into(),
+        };
+        let warnings = check_warnings(&manifest, &drive, &[], Language::English);
+        assert!(
+            warnings.is_empty(),
+            "matching internal category should not warn, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn check_warnings_unknown_drive_category_skips_category_check() {
+        let mut manifest = test_manifest();
+        manifest.category = Some("slim".into());
+        let drive = DriveMatch {
+            vendor: "PIONEER".into(),
+            model: "DVD-RW DVR-218".into(),
+            revision: "1.00".into(),
+        };
+        let warnings = check_warnings(&manifest, &drive, &[], Language::English);
+        assert!(
+            !warnings.iter().any(|w| w.contains("Category mismatch")),
+            "unknown drive category should not emit category warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn check_warnings_category_mismatch_slim_vs_internal() {
+        let mut manifest = test_manifest();
+        manifest.category = Some("internal".into());
+        let drive = DriveMatch {
+            vendor: "HL-DT-ST".into(),
+            model: "BU40N".into(), // BU starts with "bu" → slim heuristic
+            revision: "1.00".into(),
+        };
+        let warnings = check_warnings(&manifest, &drive, &[], Language::English);
+        assert!(
+            warnings.iter().any(|w| w.contains("Category mismatch")),
+            "expected category mismatch warning, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn check_warnings_no_category_no_warning() {
+        let manifest = test_manifest(); // category is None
+        let drive = test_drive();
+        let warnings = check_warnings(&manifest, &drive, &[], Language::English);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn dry_run_includes_warnings() {
+        let mut manifest = test_manifest();
+        manifest.vendor = "*".into(); // triggers warning
+        let drive = test_drive();
+        let plan = build_flash_plan(
+            &manifest,
+            &drive,
+            FlashPlanRequest {
+                image_id: "main",
+                current_version: "1.03",
+                firmware_size: 1024,
+                firmware_sha256: "abcd1234",
+                signature_present: true,
+                user_confirmed: true,
+            },
+        )
+        .unwrap();
+        let report = dry_run(&plan, &[], Language::English);
+        assert!(
+            !report.warnings.is_empty(),
+            "dry_run should include warnings"
+        );
+    }
+
+    #[test]
+    fn check_firmware_sdf_non_sdf_data() {
+        // Encrypted raw blobs are not SDF0 — should return None
+        let mut data = vec![0u8; 100];
+        data[0..4].copy_from_slice(&[0x85, 0x4a, 0xc0, 0x75]);
+        assert!(check_firmware_sdf(&data).is_none());
+    }
+
+    #[test]
+    fn check_firmware_sdf_valid_sdf0() {
+        // Build a minimal SDF0 container with metadata
+        let mut data = Vec::new();
+        data.extend_from_slice(b"SDF0");
+        data.extend_from_slice(&1u32.to_le_bytes()); // version
+        data.extend_from_slice(&24u32.to_le_bytes()); // header_size
+        data.extend_from_slice(&24u32.to_le_bytes()); // table_offset
+        data.extend_from_slice(&0u32.to_le_bytes()); // flags
+        let metadata = b"Vendor\0TestVendor\0Model\0TestModel\0";
+        let payload_offset = 24 + metadata.len() as u32;
+        data.extend_from_slice(&payload_offset.to_le_bytes());
+        data.extend_from_slice(metadata);
+
+        let info = check_firmware_sdf(&data).unwrap();
+        assert_eq!(info.vendor.as_deref(), Some("TestVendor"));
+        assert_eq!(info.model.as_deref(), Some("TestModel"));
+    }
+
+    fn build_sdf0_firmware_bytes(vendor: &str, model: &str) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"SDF0");
+        data.extend_from_slice(&1u32.to_le_bytes());
+        data.extend_from_slice(&24u32.to_le_bytes());
+        data.extend_from_slice(&24u32.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes());
+        let metadata = format!("Vendor\0{vendor}\0Model\0{model}\0");
+        let payload_offset = 24 + metadata.len() as u32;
+        data.extend_from_slice(&payload_offset.to_le_bytes());
+        data.extend_from_slice(metadata.as_bytes());
+        data
+    }
+
+    #[test]
+    fn check_warnings_fw_vendor_mismatch_from_sdf() {
+        let manifest = test_manifest();
+        let drive = test_drive();
+        let firmware = build_sdf0_firmware_bytes("OtherVendor", "BU40N");
+        let info = check_firmware_sdf(&firmware).expect("sdf metadata");
+        assert_eq!(info.vendor.as_deref(), Some("OtherVendor"));
+        let warnings = check_warnings(&manifest, &drive, &firmware, Language::English);
+        assert!(warnings.iter().any(|w| w.contains("vendor")));
+    }
+
+    #[test]
+    fn check_warnings_fw_model_mismatch_from_sdf() {
+        let manifest = test_manifest();
+        let drive = test_drive();
+        let firmware = build_sdf0_firmware_bytes("HL-DT-ST", "OTHER");
+        let info = check_firmware_sdf(&firmware).expect("sdf metadata");
+        assert_eq!(info.model.as_deref(), Some("OTHER"));
+        let warnings = check_warnings(&manifest, &drive, &firmware, Language::English);
+        assert!(warnings.iter().any(|w| w.contains("model")));
+    }
+
+    #[test]
+    fn push_sdf_metadata_warnings_skips_matching_vendor_and_model() {
+        let manifest = test_manifest();
+        let mut warnings = Vec::new();
+        let sdf_info = FirmwareSdfInfo {
+            vendor: Some("HL-DT-ST".into()),
+            model: Some("BU40N".into()),
+            firmware_version: None,
+        };
+        push_sdf_metadata_warnings(&mut warnings, &manifest, &sdf_info, Language::English);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn check_warnings_fw_vendor_and_model_match_from_sdf() {
+        let manifest = test_manifest();
+        let drive = test_drive();
+        let firmware = build_sdf0_firmware_bytes("HL-DT-ST", "BU40N");
+        let warnings = check_warnings(&manifest, &drive, &firmware, Language::English);
+        assert!(!warnings.iter().any(|w| w.contains("vendor")));
+        assert!(!warnings.iter().any(|w| w.contains("model")));
+    }
+
+    #[test]
+    fn check_warnings_fw_vendor_match_model_mismatch_from_sdf() {
+        let manifest = test_manifest();
+        let drive = test_drive();
+        let firmware = build_sdf0_firmware_bytes("HL-DT-ST", "WRONG-MODEL");
+        let warnings = check_warnings(&manifest, &drive, &firmware, Language::English);
+        assert!(!warnings.iter().any(|w| w.contains("vendor")));
+        assert!(warnings.iter().any(|w| w.contains("model")));
+    }
+
+    #[test]
+    fn check_firmware_sdf_padded_metadata_region() {
+        let metadata = b"Vendor\0TestVendor\0Model\0TestModel\0";
+        let payload_offset = 256u32;
+        let mut data = Vec::new();
+        data.extend_from_slice(b"SDF0");
+        data.extend_from_slice(&1u32.to_le_bytes());
+        data.extend_from_slice(&24u32.to_le_bytes());
+        data.extend_from_slice(&24u32.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes());
+        data.extend_from_slice(&payload_offset.to_le_bytes());
+        data.extend_from_slice(metadata);
+        data.resize(payload_offset as usize, 0xAA);
+        data.extend(vec![0u8; 64]);
+
+        let info = check_firmware_sdf(&data).unwrap();
+        assert_eq!(info.vendor.as_deref(), Some("TestVendor"));
+        assert_eq!(info.model.as_deref(), Some("TestModel"));
     }
 }

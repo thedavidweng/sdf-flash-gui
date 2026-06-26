@@ -1,6 +1,3 @@
-// SDFtool command planning.
-//
-// Builds safe `program + args` command structures for sdftool/makemkvcon.
 // Intentionally uses structured args instead of shell strings so paths with
 // spaces cannot change the drive, operation, or firmware arguments.
 
@@ -13,7 +10,6 @@ pub enum Backend {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum Operation {
     Read {
         output_dir: String,
@@ -48,7 +44,6 @@ pub struct Command {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
     pub command: Command,
-    pub required_confirmation: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,7 +187,6 @@ pub fn plan_command(request: PlanRequest) -> Result<Plan, PlanError> {
             program: tool_path.into(),
             args,
         },
-        required_confirmation,
     })
 }
 
@@ -377,7 +371,6 @@ mod tests {
             plan.command.args,
             ["-d", "H:", "dump", "auto", "-o", "/tmp/out"]
         );
-        assert!(plan.required_confirmation.is_none());
     }
 
     #[test]

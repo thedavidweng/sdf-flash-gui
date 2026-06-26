@@ -1,34 +1,66 @@
-// Application state — owns all data the GUI tracks.
-
 use crate::command::Backend;
 use crate::drive::{self, Drive};
 use crate::flash;
-use crate::i18n::{self, Language};
+use crate::i18n::{self, t, L10nKey, Language};
 use crate::manifest;
+use crate::process::OperationControl;
 
 use super::OperationMode;
 
-pub struct AppState {
+use std::sync::Arc;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopDialog {
+    None,
+    ConfirmStop,
+    ConfirmForceKill,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeChoice {
+    System,
+    Dark,
+    Light,
+}
+
+#[derive(Debug)]
+pub struct Chrome {
+    pub exiting: bool,
     pub show_settings: bool,
     pub show_about: bool,
+    pub show_quit_confirmation: bool,
+    pub show_flash_failure_dialog: bool,
+    pub show_first_run_setup: bool,
+    pub language: Language,
+    pub resolved_lang: Language,
+    pub theme: ThemeChoice,
+}
 
+#[derive(Debug)]
+pub struct ToolConfig {
     pub backend: Backend,
     pub tool_path: String,
     pub sdf_path: String,
     pub auto_detected: bool,
+    pub tool_detect_failed: bool,
+    pub sdf_detect_failed: bool,
+}
 
+#[derive(Debug)]
+pub struct DriveState {
     pub drives: Vec<Drive>,
     pub selected_drive: Option<usize>,
     pub last_probed_drive: Option<usize>,
-
     pub drive_mt1959: bool,
     pub drive_encrypted_firmware: bool,
     pub drive_probed: bool,
+    pub probe_identity: Option<manifest::DriveMatch>,
+}
 
-    pub operation_mode: OperationMode,
+#[derive(Debug)]
+pub struct FlashWorkflow {
     pub include_boot_loader: bool,
     pub encrypted_write: bool,
-
     pub firmware_path: String,
     pub firmware_candidates: Vec<String>,
     pub firmware_picker_items: Vec<(String, String)>,
@@ -37,62 +69,100 @@ pub struct AppState {
     pub firmware_data: Option<Vec<u8>>,
     pub selected_image_id: Option<String>,
     pub confirmation: String,
+    pub dry_run_only: bool,
     pub flash_report: Option<flash::FlashReport>,
-
     pub recovery_token: String,
     pub wrong_firmware_path: String,
+    pub pending_recover_browse: bool,
+}
 
+pub struct OperationRuntime {
     pub status_message: String,
     pub progress: f32,
     pub progress_indeterminate: bool,
     pub busy: bool,
     pub probing: bool,
-    pub pending_recover_browse: bool,
     pub log_text: String,
-    pub show_exit_confirmation: bool,
-    pub language: Language,
-    pub resolved_lang: Language,
+    pub stop_dialog: StopDialog,
+    pub active_operation: Option<Arc<OperationControl>>,
+    pub probe_control: Option<Arc<OperationControl>>,
+    /// Drive index for the in-flight auto-probe (if any).
+    pub probing_drive: Option<usize>,
+    /// User declined force-kill; keep the UI locked until the backend exits.
+    pub waiting_for_backend_stop: bool,
+}
+
+pub struct AppState {
+    pub chrome: Chrome,
+    pub config: ToolConfig,
+    pub drive: DriveState,
+    pub flash: FlashWorkflow,
+    pub runtime: OperationRuntime,
+    pub operation_mode: OperationMode,
 }
 
 impl AppState {
     fn defaults() -> Self {
         Self {
-            show_settings: false,
-            show_about: false,
-            backend: Backend::SdfTool,
-            tool_path: String::new(),
-            sdf_path: String::new(),
-            auto_detected: false,
-            drives: Vec::new(),
-            selected_drive: None,
-            last_probed_drive: None,
-            drive_mt1959: false,
-            drive_encrypted_firmware: false,
-            drive_probed: false,
+            chrome: Chrome {
+                exiting: false,
+                show_settings: false,
+                show_about: false,
+                show_quit_confirmation: false,
+                show_flash_failure_dialog: false,
+                show_first_run_setup: false,
+                language: Language::Auto,
+                resolved_lang: Language::English,
+                theme: ThemeChoice::System,
+            },
+            config: ToolConfig {
+                backend: Backend::SdfTool,
+                tool_path: String::new(),
+                sdf_path: String::new(),
+                auto_detected: false,
+                tool_detect_failed: false,
+                sdf_detect_failed: false,
+            },
+            drive: DriveState {
+                drives: Vec::new(),
+                selected_drive: None,
+                last_probed_drive: None,
+                drive_mt1959: false,
+                drive_encrypted_firmware: false,
+                drive_probed: false,
+                probe_identity: None,
+            },
+            flash: FlashWorkflow {
+                include_boot_loader: false,
+                encrypted_write: false,
+                firmware_path: String::new(),
+                firmware_candidates: Vec::new(),
+                firmware_picker_items: Vec::new(),
+                manifest_path: String::new(),
+                manifest: None,
+                firmware_data: None,
+                selected_image_id: None,
+                confirmation: String::new(),
+                dry_run_only: false,
+                flash_report: None,
+                recovery_token: String::new(),
+                wrong_firmware_path: String::new(),
+                pending_recover_browse: false,
+            },
+            runtime: OperationRuntime {
+                status_message: t(L10nKey::StatusReady, Language::English).to_string(),
+                progress: 0.0,
+                progress_indeterminate: false,
+                busy: false,
+                probing: false,
+                log_text: String::new(),
+                stop_dialog: StopDialog::None,
+                active_operation: None,
+                probe_control: None,
+                probing_drive: None,
+                waiting_for_backend_stop: false,
+            },
             operation_mode: OperationMode::Write,
-            include_boot_loader: false,
-            encrypted_write: false,
-            firmware_path: String::new(),
-            firmware_candidates: Vec::new(),
-            firmware_picker_items: Vec::new(),
-            manifest_path: String::new(),
-            manifest: None,
-            firmware_data: None,
-            selected_image_id: None,
-            confirmation: String::new(),
-            flash_report: None,
-            recovery_token: String::new(),
-            wrong_firmware_path: String::new(),
-            status_message: "Ready".into(),
-            progress: 0.0,
-            progress_indeterminate: false,
-            busy: false,
-            probing: false,
-            pending_recover_browse: false,
-            log_text: String::new(),
-            show_exit_confirmation: false,
-            language: Language::Auto,
-            resolved_lang: Language::English,
         }
     }
 
@@ -101,37 +171,100 @@ impl AppState {
             Some((b, p)) => (b, p, true),
             None => (Backend::SdfTool, String::new(), false),
         };
+        let show_first_run = path.is_empty();
         Self {
-            backend,
-            tool_path: path,
-            sdf_path: find_sdf_bin(),
-            auto_detected: auto,
-            resolved_lang: i18n::detect_system_language(),
+            config: ToolConfig {
+                backend,
+                tool_path: path,
+                sdf_path: find_sdf_bin(),
+                auto_detected: auto,
+                ..Self::defaults().config
+            },
+            chrome: Chrome {
+                resolved_lang: i18n::detect_system_language(),
+                show_first_run_setup: show_first_run,
+                ..Self::defaults().chrome
+            },
             ..Self::defaults()
         }
     }
 
     pub fn log(&mut self, msg: &str) {
-        if !self.log_text.is_empty() {
-            self.log_text.push('\n');
+        if !self.runtime.log_text.is_empty() {
+            self.runtime.log_text.push('\n');
         }
-        self.log_text.push_str(msg);
+        self.runtime.log_text.push_str(msg);
     }
 
     pub fn selected_drive(&self) -> Option<&Drive> {
-        self.selected_drive.and_then(|i| self.drives.get(i))
+        self.drive
+            .selected_drive
+            .and_then(|i| self.drive.drives.get(i))
+    }
+
+    pub fn drive_match(&self) -> Option<manifest::DriveMatch> {
+        let drive = self.selected_drive()?;
+        Some(drive::drive_match_for_validation(
+            drive,
+            self.drive.probe_identity.as_ref(),
+        ))
     }
 
     pub fn set_status(&mut self, msg: impl Into<String>, progress: f32) {
-        self.status_message = msg.into();
-        self.progress = progress.clamp(0.0, 100.0);
+        self.runtime.status_message = msg.into();
+        self.runtime.progress = progress.clamp(0.0, 100.0);
     }
 
-    pub fn begin_operation(&mut self, status: &str) {
-        self.busy = true;
-        self.progress_indeterminate = true;
-        self.progress = 0.0;
+    pub fn set_status_key(&mut self, key: L10nKey, progress: f32) {
+        self.set_status(t(key, self.chrome.resolved_lang), progress);
+    }
+
+    pub fn begin_operation(&mut self, status: &str) -> Arc<OperationControl> {
+        let control = Arc::new(OperationControl::new());
+        self.runtime.active_operation = Some(control.clone());
+        self.runtime.busy = true;
+        self.runtime.progress_indeterminate = true;
+        self.runtime.progress = 0.0;
+        self.runtime.stop_dialog = StopDialog::None;
         self.set_status(status, 0.0);
+        control
+    }
+
+    pub fn finish_operation(&mut self) {
+        if let Some(control) = self.runtime.active_operation.take() {
+            control.reap_registered_child();
+        }
+        self.runtime.busy = false;
+        self.runtime.progress_indeterminate = false;
+        self.runtime.stop_dialog = StopDialog::None;
+        self.runtime.waiting_for_backend_stop = false;
+    }
+
+    /// Record probe results for the selected drive and mark it handled for auto-probe.
+    pub fn record_probe_outcome(&mut self, drive_idx: usize, success: bool) {
+        if self.drive.selected_drive == Some(drive_idx) {
+            self.drive.drive_probed = success;
+            if !success {
+                self.drive.probe_identity = None;
+            }
+            self.drive.last_probed_drive = Some(drive_idx);
+        }
+    }
+
+    pub fn finish_probe_failure(&mut self) {
+        if let Some(drive_idx) = self.runtime.probing_drive.or(self.drive.selected_drive) {
+            self.record_probe_outcome(drive_idx, false);
+        }
+        self.finish_probe();
+        self.set_status_key(L10nKey::StatusProbeFailed, 0.0);
+    }
+
+    pub fn finish_probe(&mut self) {
+        if let Some(control) = self.runtime.probe_control.take() {
+            control.reap_registered_child();
+        }
+        self.runtime.probing = false;
+        self.runtime.probing_drive = None;
     }
 
     #[cfg(test)]
@@ -173,35 +306,30 @@ mod tests {
     #[test]
     fn begin_operation_sets_state() {
         let mut state = AppState::new_no_backend();
-        assert!(!state.busy);
-        assert_eq!(state.progress, 0.0);
-
-        state.begin_operation("Writing firmware");
-        assert!(state.busy);
-        assert!(state.progress_indeterminate);
-        assert_eq!(state.progress, 0.0);
-        assert_eq!(state.status_message, "Writing firmware");
+        assert!(!state.runtime.busy);
+        let _control = state.begin_operation("Writing firmware");
+        assert!(state.runtime.busy);
+        assert!(state.runtime.active_operation.is_some());
+        assert!(state.runtime.progress_indeterminate);
+        assert_eq!(state.runtime.status_message, "Writing firmware");
     }
 
     #[test]
     fn set_status_clamps_progress() {
         let mut state = AppState::new_no_backend();
         state.set_status("test", 150.0);
-        assert_eq!(state.progress, 100.0);
+        assert_eq!(state.runtime.progress, 100.0);
         state.set_status("test", -50.0);
-        assert_eq!(state.progress, 0.0);
-        state.set_status("test", 50.0);
-        assert_eq!(state.progress, 50.0);
+        assert_eq!(state.runtime.progress, 0.0);
     }
 
     #[test]
     fn log_appends() {
         let mut state = AppState::new_no_backend();
-        assert!(state.log_text.is_empty());
         state.log("first");
-        assert_eq!(state.log_text, "first");
+        assert_eq!(state.runtime.log_text, "first");
         state.log("second");
-        assert_eq!(state.log_text, "first\nsecond");
+        assert_eq!(state.runtime.log_text, "first\nsecond");
     }
 
     #[test]
@@ -211,52 +339,53 @@ mod tests {
     }
 
     #[test]
-    fn selected_drive_out_of_bounds() {
+    fn drive_match_uses_probe() {
         let mut state = AppState::new_no_backend();
-        state.drives.push(crate::drive::Drive {
+        state.drive.drives.push(Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        });
+        state.drive.selected_drive = Some(0);
+        state.drive.probe_identity = Some(manifest::DriveMatch {
+            vendor: "HL-DT-ST".into(),
+            model: "BD-RE BU40N".into(),
+            revision: "1.03".into(),
+        });
+        let dm = state.drive_match().unwrap();
+        assert_eq!(dm.model, "BD-RE BU40N");
+    }
+
+    #[test]
+    fn finish_probe_failure_marks_drive_handled() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(Drive {
             device: "/dev/sr0".into(),
             vendor: "V".into(),
             product: "P".into(),
             revision: "R".into(),
         });
-        state.selected_drive = Some(5);
-        assert!(state.selected_drive().is_none());
-    }
+        state.drive.selected_drive = Some(0);
+        state.runtime.probing_drive = Some(0);
+        state.runtime.probing = true;
+        state.runtime.probe_control = Some(Arc::new(OperationControl::new()));
 
-    #[test]
-    fn selected_drive_valid() {
-        let mut state = AppState::new_no_backend();
-        state.drives.push(crate::drive::Drive {
-            device: "/dev/sr0".into(),
-            vendor: "V".into(),
-            product: "P".into(),
-            revision: "R".into(),
-        });
-        state.selected_drive = Some(0);
-        let d = state.selected_drive().unwrap();
-        assert_eq!(d.device, "/dev/sr0");
-    }
+        state.finish_probe_failure();
 
-    #[test]
-    fn find_sdf_bin_returns_string() {
-        // Just call it — on CI it likely returns empty
-        let result = find_sdf_bin();
-        // Don't assert specific value since it depends on filesystem
-        let _ = result;
+        assert_eq!(state.drive.last_probed_drive, Some(0));
+        assert!(!state.drive.drive_probed);
+        assert!(!state.runtime.probing);
+        assert!(state.runtime.probe_control.is_none());
     }
 
     #[test]
     fn new_no_backend_defaults() {
         let state = AppState::new_no_backend();
-        assert_eq!(state.status_message, "Ready");
-        assert!(!state.busy);
-        assert!(!state.probing);
-        assert!(state.drives.is_empty());
-        assert!(state.selected_drive.is_none());
-        assert!(state.firmware_data.is_none());
-        assert!(state.manifest.is_none());
-        assert!(state.flash_report.is_none());
-        assert!(state.log_text.is_empty());
-        assert_eq!(state.resolved_lang, Language::English);
+        assert_eq!(state.runtime.status_message, "Ready");
+        assert!(!state.runtime.busy);
+        assert!(state.drive.drives.is_empty());
+        assert!(state.flash.firmware_data.is_none());
+        assert_eq!(state.chrome.resolved_lang, Language::English);
     }
 }

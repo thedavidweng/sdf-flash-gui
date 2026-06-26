@@ -1,11 +1,5 @@
-// Optical drive enumeration — cross-platform.
-
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
-//
-// macOS:  IOKit (via core-foundation-sys raw bindings)
-// Linux:  sysfs (/dev/sr* + /sys/block/sr*/device/)
-// Windows: drive letters + IOCTL
 
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +21,114 @@ impl From<&Drive> for manifest::DriveMatch {
             revision: d.revision.clone(),
         }
     }
+}
+
+/// Parse drive identity from sdftool `--info` output for manifest matching.
+pub fn parse_identity_from_info(device: &str, info_output: &str) -> manifest::DriveMatch {
+    let mut vendor = String::new();
+    let mut model = String::new();
+    let mut revision = String::new();
+
+    for line in info_output.lines() {
+        let line = line.trim();
+        if let Some(val) = line
+            .strip_prefix("Vendor:")
+            .or_else(|| line.strip_prefix("vendor:"))
+        {
+            vendor = val.trim().to_string();
+        } else if let Some(val) = line
+            .strip_prefix("Product:")
+            .or_else(|| line.strip_prefix("product:"))
+            .or_else(|| line.strip_prefix("Model:"))
+            .or_else(|| line.strip_prefix("model:"))
+        {
+            model = val.trim().to_string();
+        } else if let Some(val) = line
+            .strip_prefix("Revision:")
+            .or_else(|| line.strip_prefix("revision:"))
+            .or_else(|| line.strip_prefix("Firmware:"))
+            .or_else(|| line.strip_prefix("firmware:"))
+        {
+            revision = val.trim().to_string();
+        }
+    }
+
+    if vendor.is_empty() && model.is_empty() {
+        if let Some((v, m)) = device.split_once('_') {
+            if !v.is_empty() {
+                vendor = v.to_string();
+            }
+            if !m.is_empty() {
+                model = m.to_string();
+            }
+        }
+    }
+
+    manifest::DriveMatch {
+        vendor,
+        model,
+        revision,
+    }
+}
+
+/// DriveMatch for manifest gates: probe identity wins when present.
+pub fn drive_match_for_validation(
+    drive: &Drive,
+    probe_identity: Option<&manifest::DriveMatch>,
+) -> manifest::DriveMatch {
+    let base: manifest::DriveMatch = drive.into();
+    let Some(probe) = probe_identity else {
+        return base;
+    };
+    manifest::DriveMatch {
+        vendor: if probe.vendor.is_empty() {
+            base.vendor
+        } else {
+            probe.vendor.clone()
+        },
+        model: if probe.model.is_empty() {
+            base.model
+        } else {
+            probe.model.clone()
+        },
+        revision: if probe.revision.is_empty() {
+            base.revision
+        } else {
+            probe.revision.clone()
+        },
+    }
+}
+
+/// Parse `sdftool -l` stdout into drives.
+pub fn parse_drive_list(output: &str) -> Vec<Drive> {
+    let mut drives = Vec::new();
+    for line in output.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix(|c: char| c.is_ascii_digit() || c == ':') {
+            let rest = rest.trim_start_matches(':').trim();
+            if !rest.is_empty() && (rest.starts_with("/dev/") || rest.contains(':')) {
+                let parts: Vec<&str> = rest.split_whitespace().collect();
+                if parts.is_empty() {
+                    continue;
+                }
+                let device = parts[0].to_string();
+                let vendor = parts.get(1).copied().unwrap_or("").to_string();
+                let (product, revision) = match parts.len() {
+                    n if n >= 5 => (parts[2..n - 1].join(" "), parts[n - 1].to_string()),
+                    4 => (parts[2].to_string(), parts[3].to_string()),
+                    3 => (parts[2].to_string(), String::new()),
+                    _ => (String::new(), String::new()),
+                };
+                drives.push(Drive {
+                    device,
+                    vendor,
+                    product,
+                    revision,
+                });
+            }
+        }
+    }
+    drives
 }
 
 /// Enumerate all optical drives on the system.
@@ -453,25 +555,38 @@ mod tests {
     }
 
     #[test]
-    fn find_backend_returns_option() {
-        // On CI, this may return None (no sdftool/makemkvcon installed)
-        // The important thing is it doesn't crash
-        let result = find_backend();
-        if let Some((backend, path)) = result {
-            assert!(!path.is_empty());
-            match backend {
-                crate::command::Backend::SdfTool | crate::command::Backend::MakeMkvCon => {}
-            }
-        }
+    fn parse_drive_list_four_fields() {
+        let output = "0:/dev/sr0 HL-DT-ST BU40N 1.03\n";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/dev/sr0");
+        assert_eq!(drives[0].product, "BU40N");
+        assert_eq!(drives[0].revision, "1.03");
     }
 
     #[test]
-    fn enumerate_drives_returns_vec() {
-        // On CI, this returns an empty vec (no optical drives)
-        let drives = enumerate_drives();
-        // Just verify it doesn't crash
-        for d in &drives {
-            assert!(!d.device.is_empty());
-        }
+    fn parse_drive_list_five_fields() {
+        let output = "0:/dev/sr0 HL-DT-ST BD-RE BU40N 1.03\n";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].product, "BD-RE BU40N");
+        assert_eq!(drives[0].revision, "1.03");
+    }
+
+    #[test]
+    fn drive_match_prefers_probe() {
+        let drive = Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        };
+        let probe = manifest::DriveMatch {
+            vendor: "HL-DT-ST".into(),
+            model: "BD-RE BU40N".into(),
+            revision: "1.03".into(),
+        };
+        let dm = drive_match_for_validation(&drive, Some(&probe));
+        assert_eq!(dm.model, "BD-RE BU40N");
     }
 }

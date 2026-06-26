@@ -1,5 +1,3 @@
-// Firmware manifest parser + drive matching.
-
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
@@ -13,6 +11,10 @@ pub struct FirmwareManifest {
     pub revision_match: String,
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// Optional drive category hint (e.g. "internal", "slim").
+    /// Used for warnings only — never blocks a flash operation.
+    #[serde(default)]
+    pub category: Option<String>,
     pub firmware_images: Vec<FirmwareImage>,
 }
 
@@ -22,6 +24,8 @@ pub struct FirmwareImage {
     pub filename: String,
     pub target_version: String,
     pub size: u64,
+    /// SHA-256 hex digest of the **entire firmware file** on disk (not an extracted sub-image payload).
+    /// Multi-image packs must hash the full `.bin` file that will be passed to the backend.
     pub sha256: String,
     #[serde(default)]
     pub signature_present: bool,
@@ -233,5 +237,33 @@ mod tests {
         assert_eq!(dm.vendor, "HL-DT-ST");
         assert_eq!(dm.model, "BU40N");
         assert_eq!(dm.revision, "1.03");
+    }
+
+    #[test]
+    fn parse_manifest_category_optional() {
+        // Old manifests without "category" should parse with category = None
+        let json = r#"{
+            "schema_version": 1,
+            "vendor": "V",
+            "model": "M",
+            "revision_match": "*",
+            "firmware_images": []
+        }"#;
+        let manifest = parse_manifest(json.as_bytes()).unwrap();
+        assert!(manifest.category.is_none());
+    }
+
+    #[test]
+    fn parse_manifest_category_present() {
+        let json = r#"{
+            "schema_version": 1,
+            "vendor": "V",
+            "model": "M",
+            "revision_match": "*",
+            "category": "internal",
+            "firmware_images": []
+        }"#;
+        let manifest = parse_manifest(json.as_bytes()).unwrap();
+        assert_eq!(manifest.category.as_deref(), Some("internal"));
     }
 }

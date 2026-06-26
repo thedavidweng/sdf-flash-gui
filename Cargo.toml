@@ -1,14 +1,15 @@
 [package]
 name = "sdf-flash-gui"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "GPL-2.0-or-later"
 description = "Cross-platform SDFtool GUI — drive firmware dump/flash for MT1959 optical drives"
 
 
 [dependencies]
-eframe = { version = "0.31", default-features = false, features = ["default", "glow"] }
-rfd = "0.15"
+eframe = { version = "0.34", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
+egui-phosphor = "0.12"
+rfd = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -33,7 +34,6 @@ out-dir = "dist"
 formats = ["appimage", "deb", "dmg", "wix"]
 product-name = "SDFFlashGUI"
 identifier = "com.sdftool.flashgui"
-version = "0.1.0"
 copyright = "SDFtool Team"
 category = "Utility"
 description = "A cross-platform GUI for flashing optical drives."
