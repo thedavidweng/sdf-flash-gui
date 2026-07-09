@@ -4,6 +4,10 @@ All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 ## [Unreleased]
 
+### <!-- 0 -->🚀 Features
+
+- Detect LibreDrive support from sdftool --info output
+
 ### <!-- 1 -->🐛 Bug Fixes
 
 - Auto-detect respects user-selected backend
@@ -16,6 +20,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md for v0.3.0
+- **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 ## [0.3.0] - 2026-07-09
 
