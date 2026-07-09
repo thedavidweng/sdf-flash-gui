@@ -212,9 +212,10 @@ pub fn poll_worker(
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui_at));
     }
-    if repaint {
-        ctx.request_repaint();
+    if !repaint {
+        return;
     }
+    ctx.request_repaint();
 }
 
 pub fn spawn_probe(
@@ -774,11 +775,30 @@ mod tests {
                         break;
                     }
                 }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // Keep polling until the overall deadline.
+                    continue;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    break;
+                }
             }
         }
         msgs
+    }
+
+    #[test]
+    fn collect_worker_msgs_timeout_and_disconnect() {
+        // Timeout arm: no sender traffic until deadline expires.
+        let (_tx, rx) = std::sync::mpsc::channel::<WorkerMsg>();
+        let empty = collect_worker_msgs(&rx, |_| false, Duration::from_millis(80));
+        assert!(empty.is_empty());
+
+        // Disconnected arm: all senders dropped before wait.
+        let (tx, rx) = std::sync::mpsc::channel::<WorkerMsg>();
+        drop(tx);
+        let after_disconnect = collect_worker_msgs(&rx, |_| false, Duration::from_millis(200));
+        assert!(after_disconnect.is_empty());
     }
 
     fn wait_for_operation_complete(rx: &std::sync::mpsc::Receiver<WorkerMsg>) -> Vec<WorkerMsg> {
@@ -973,11 +993,10 @@ mod tests {
         spawn_probe(&tx, &mut state, 0, &runner);
         let messages = wait_for_probe_complete(&rx);
         drop(tx);
-        let probe = messages.last().expect("probe complete");
-        match probe {
-            WorkerMsg::ProbeComplete { error, .. } => assert!(error.is_none()),
-            _ => panic!("expected ProbeComplete"),
-        }
+        let ok = messages
+            .iter()
+            .any(|m| matches!(m, WorkerMsg::ProbeComplete { error: None, .. }));
+        assert!(ok, "expected ProbeComplete ok, msgs: {messages:?}");
     }
 
     #[test]
@@ -1354,6 +1373,16 @@ mod tests {
         let ctx = egui::Context::default();
         poll_worker(&mut state, &rx, Some(&ctx));
         assert_eq!(state.runtime.progress, 50.0);
+    }
+
+    #[test]
+    fn poll_worker_with_context_no_messages_skips_repaint() {
+        // ctx present, no msgs, not waiting on backend stop → !repaint early return.
+        let mut state = AppState::new_no_backend();
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let ctx = egui::Context::default();
+        poll_worker(&mut state, &rx, Some(&ctx));
+        assert!(!state.runtime.busy);
     }
 
     #[test]

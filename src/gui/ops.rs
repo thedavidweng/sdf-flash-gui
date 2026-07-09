@@ -316,7 +316,8 @@ pub fn validate_flash(state: &mut AppState) {
                 state.flash.flash_report = None;
                 if prepared.would_execute {
                     state.log(t(L10nKey::StatusReady, lang));
-                } else if state.flash.manifest.is_none() {
+                }
+                if !prepared.would_execute && state.flash.manifest.is_none() {
                     state.log(t(L10nKey::LogErrLoadManifestBeforeValidate, lang));
                 }
             }
@@ -451,10 +452,13 @@ fn finalize_drive_selection(state: &mut AppState) {
     if state.drive.drives.is_empty() {
         state.drive.selected_drive = None;
         state.set_status_key(L10nKey::StatusNoDrives, 0.0);
-    } else if state.drive.selected_drive.is_none() {
-        state.drive.selected_drive = Some(0);
-        state.set_status_key(L10nKey::StatusReady, 0.0);
+        return;
     }
+    if state.drive.selected_drive.is_some() {
+        return;
+    }
+    state.drive.selected_drive = Some(0);
+    state.set_status_key(L10nKey::StatusReady, 0.0);
 }
 
 pub fn refresh_drives(state: &mut AppState) {
@@ -1390,7 +1394,7 @@ mod tests {
         finalize_drive_selection(&mut state);
         assert_eq!(state.drive.selected_drive, Some(0));
         let status = &state.runtime.status_message;
-        assert!(status.contains("Ready") || status.contains("ready"));
+        assert!(status.to_lowercase().contains("ready"), "status: {status}");
     }
 
     #[test]
@@ -2016,9 +2020,14 @@ mod tests {
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
         assert!(!state.runtime.busy);
+        // log_error prefixes ERROR; body includes mode-conflict text.
         assert!(
-            state.runtime.log_text.contains("ERROR")
-                || state.runtime.log_text.contains("cannot be combined"),
+            state.runtime.log_text.contains("ERROR"),
+            "log: {}",
+            state.runtime.log_text
+        );
+        assert!(
+            state.runtime.log_text.contains("cannot be combined"),
             "log: {}",
             state.runtime.log_text
         );
@@ -2128,11 +2137,9 @@ mod tests {
         state.flash.selected_image_id = Some("nonexistent".into());
         validate_flash(&mut state);
         assert!(state.flash.flash_report.is_none());
-        assert!(!state.runtime.log_text.is_empty());
+        // ImageNotFound is surfaced via the localized validation-failed path.
         assert!(
-            state.runtime.log_text.to_lowercase().contains("image")
-                || state.runtime.log_text.to_lowercase().contains("validation")
-                || state.runtime.log_text.to_lowercase().contains("not found"),
+            state.runtime.log_text.to_lowercase().contains("validation"),
             "log: {}",
             state.runtime.log_text
         );
@@ -2281,10 +2288,19 @@ mod tests {
         assert!(!state.runtime.busy);
         let log = &state.runtime.log_text;
         assert!(
-            log.contains("Dry-run") || log.contains("command that would run"),
+            log.contains("Dry-run"),
             "expected dry-run log entry, log: {log}"
         );
         let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn finalize_drive_selection_keeps_existing_selection() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        finalize_drive_selection(&mut state);
+        assert_eq!(state.drive.selected_drive, Some(0));
     }
 
     #[test]
