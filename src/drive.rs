@@ -3,8 +3,6 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::manifest;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Drive {
     pub device: String,
@@ -13,9 +11,20 @@ pub struct Drive {
     pub revision: String,
 }
 
-impl From<&Drive> for manifest::DriveMatch {
+/// Drive identity (vendor / model / revision) used for validation.
+///
+/// Replaces the former `manifest::DriveMatch` — a standalone struct with the
+/// same fields so probe/identity logic is independent of the manifest system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DriveIdentity {
+    pub vendor: String,
+    pub model: String,
+    pub revision: String,
+}
+
+impl From<&Drive> for DriveIdentity {
     fn from(d: &Drive) -> Self {
-        manifest::DriveMatch {
+        DriveIdentity {
             vendor: d.vendor.clone(),
             model: d.product.clone(),
             revision: d.revision.clone(),
@@ -23,8 +32,8 @@ impl From<&Drive> for manifest::DriveMatch {
     }
 }
 
-/// Parse drive identity from sdftool `--info` output for manifest matching.
-pub fn parse_identity_from_info(device: &str, info_output: &str) -> manifest::DriveMatch {
+/// Parse drive identity from sdftool `--info` output.
+pub fn parse_identity_from_info(device: &str, info_output: &str) -> DriveIdentity {
     let mut vendor = String::new();
     let mut model = String::new();
     let mut revision = String::new();
@@ -64,23 +73,23 @@ pub fn parse_identity_from_info(device: &str, info_output: &str) -> manifest::Dr
         }
     }
 
-    manifest::DriveMatch {
+    DriveIdentity {
         vendor,
         model,
         revision,
     }
 }
 
-/// DriveMatch for manifest gates: probe identity wins when present.
+/// DriveIdentity for validation gates: probe identity wins when present.
 pub fn drive_match_for_validation(
     drive: &Drive,
-    probe_identity: Option<&manifest::DriveMatch>,
-) -> manifest::DriveMatch {
-    let base: manifest::DriveMatch = drive.into();
+    probe_identity: Option<&DriveIdentity>,
+) -> DriveIdentity {
+    let base: DriveIdentity = drive.into();
     let Some(probe) = probe_identity else {
         return base;
     };
-    manifest::DriveMatch {
+    DriveIdentity {
         vendor: if probe.vendor.is_empty() {
             base.vendor
         } else {
@@ -524,7 +533,7 @@ mod tests {
             product: "BU40N".into(),
             revision: "1.03".into(),
         };
-        let dm: manifest::DriveMatch = (&drive).into();
+        let dm: DriveIdentity = (&drive).into();
         assert_eq!(dm.vendor, "HL-DT-ST");
         assert_eq!(dm.model, "BU40N");
         assert_eq!(dm.revision, "1.03");
@@ -538,7 +547,7 @@ mod tests {
             product: String::new(),
             revision: String::new(),
         };
-        let dm: manifest::DriveMatch = (&drive).into();
+        let dm: DriveIdentity = (&drive).into();
         assert!(dm.vendor.is_empty());
         assert!(dm.model.is_empty());
         assert!(dm.revision.is_empty());
@@ -608,7 +617,7 @@ mod tests {
             product: "BU40N".into(),
             revision: "1.03".into(),
         };
-        let probe = manifest::DriveMatch {
+        let probe = DriveIdentity {
             vendor: "HL-DT-ST".into(),
             model: "BD-RE BU40N".into(),
             revision: "1.03".into(),

@@ -1,8 +1,6 @@
 use crate::command::Backend;
 use crate::drive::{self, Drive};
-use crate::flash;
 use crate::i18n::{self, t, L10nKey, Language};
-use crate::manifest;
 use crate::process::OperationControl;
 
 use super::OperationMode;
@@ -54,7 +52,6 @@ pub struct DriveState {
     pub drive_mt1959: bool,
     pub drive_encrypted_firmware: bool,
     pub drive_probed: bool,
-    pub probe_identity: Option<manifest::DriveMatch>,
 }
 
 #[derive(Debug)]
@@ -64,13 +61,9 @@ pub struct FlashWorkflow {
     pub firmware_path: String,
     pub firmware_candidates: Vec<String>,
     pub firmware_picker_items: Vec<(String, String)>,
-    pub manifest_path: String,
-    pub manifest: Option<manifest::FirmwareManifest>,
     pub firmware_data: Option<Vec<u8>>,
-    pub selected_image_id: Option<String>,
     pub confirmation: String,
     pub dry_run_only: bool,
-    pub flash_report: Option<flash::FlashReport>,
     pub recovery_token: String,
     pub wrong_firmware_path: String,
     pub pending_recover_browse: bool,
@@ -130,7 +123,6 @@ impl AppState {
                 drive_mt1959: false,
                 drive_encrypted_firmware: false,
                 drive_probed: false,
-                probe_identity: None,
             },
             flash: FlashWorkflow {
                 include_boot_loader: false,
@@ -138,13 +130,9 @@ impl AppState {
                 firmware_path: String::new(),
                 firmware_candidates: Vec::new(),
                 firmware_picker_items: Vec::new(),
-                manifest_path: String::new(),
-                manifest: None,
                 firmware_data: None,
-                selected_image_id: None,
                 confirmation: String::new(),
                 dry_run_only: false,
-                flash_report: None,
                 recovery_token: String::new(),
                 wrong_firmware_path: String::new(),
                 pending_recover_browse: false,
@@ -202,14 +190,6 @@ impl AppState {
             .and_then(|i| self.drive.drives.get(i))
     }
 
-    pub fn drive_match(&self) -> Option<manifest::DriveMatch> {
-        let drive = self.selected_drive()?;
-        Some(drive::drive_match_for_validation(
-            drive,
-            self.drive.probe_identity.as_ref(),
-        ))
-    }
-
     pub fn set_status(&mut self, msg: impl Into<String>, progress: f32) {
         self.runtime.status_message = msg.into();
         self.runtime.progress = progress.clamp(0.0, 100.0);
@@ -244,9 +224,6 @@ impl AppState {
     pub fn record_probe_outcome(&mut self, drive_idx: usize, success: bool) {
         if self.drive.selected_drive == Some(drive_idx) {
             self.drive.drive_probed = success;
-            if !success {
-                self.drive.probe_identity = None;
-            }
             self.drive.last_probed_drive = Some(drive_idx);
         }
     }
@@ -315,25 +292,6 @@ mod tests {
     fn selected_drive_none_when_empty() {
         let state = AppState::new_no_backend();
         assert!(state.selected_drive().is_none());
-    }
-
-    #[test]
-    fn drive_match_uses_probe() {
-        let mut state = AppState::new_no_backend();
-        state.drive.drives.push(Drive {
-            device: "/dev/sr0".into(),
-            vendor: "HL-DT-ST".into(),
-            product: "BU40N".into(),
-            revision: "1.03".into(),
-        });
-        state.drive.selected_drive = Some(0);
-        state.drive.probe_identity = Some(manifest::DriveMatch {
-            vendor: "HL-DT-ST".into(),
-            model: "BD-RE BU40N".into(),
-            revision: "1.03".into(),
-        });
-        let dm = state.drive_match().unwrap();
-        assert_eq!(dm.model, "BD-RE BU40N");
     }
 
     #[test]

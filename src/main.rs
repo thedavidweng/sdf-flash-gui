@@ -2,7 +2,6 @@
 
 use sdf_flash_gui::command;
 use sdf_flash_gui::drive;
-use sdf_flash_gui::manifest;
 use sdf_flash_gui::orchestration;
 use sdf_flash_gui::sdf;
 
@@ -58,14 +57,6 @@ fn main() {
                     firmware: args
                         .iter()
                         .position(|a| a == "-i")
-                        .and_then(|i| args.get(i + 1)),
-                    manifest_path: args
-                        .iter()
-                        .position(|a| a == "--manifest")
-                        .and_then(|i| args.get(i + 1)),
-                    image_id: args
-                        .iter()
-                        .position(|a| a == "--image-id")
                         .and_then(|i| args.get(i + 1)),
                     sdf_path: args
                         .iter()
@@ -125,7 +116,6 @@ fn print_help() {
     println!("OPTIONS:");
     println!("  -i <file>          Firmware image path");
     println!("  -o <dir>           Output directory");
-    println!("  --manifest <file>  Firmware manifest JSON");
     println!("  --confirm          Confirm flash operation");
     println!("  --file <file>      SDF0 container path");
     println!();
@@ -137,8 +127,6 @@ fn print_flash_help() {
     println!();
     println!("OPTIONS:");
     println!("  -i <file>                  Firmware image path (required)");
-    println!("  --manifest <file>          Firmware manifest JSON");
-    println!("  --image-id <id>            Image ID for multi-image manifests");
     println!("  --sdf <file>               Path to sdf.bin (auto-detected if omitted)");
     println!("  --encrypted                Use encrypted rawflash mode");
     println!("  --include-boot-loader      Use full boot-loader rawflash mode");
@@ -239,8 +227,6 @@ fn cmd_dump(device: &str, output_dir: &str) {
 
 struct FlashArgs<'a> {
     firmware: Option<&'a String>,
-    manifest_path: Option<&'a String>,
-    image_id: Option<&'a String>,
     sdf_path: Option<&'a String>,
     encrypted: bool,
     include_boot_loader: bool,
@@ -259,31 +245,6 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
         }
     };
 
-    let firmware_data = match std::fs::read(firmware) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("ERROR: cannot read firmware: {e}");
-            std::process::exit(1);
-        }
-    };
-
-    let manifest = args.manifest_path.map(|mp| {
-        let data = match std::fs::read(mp) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("ERROR: cannot read manifest: {e}");
-                std::process::exit(1);
-            }
-        };
-        match manifest::parse_manifest(&data) {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("ERROR: invalid manifest: {e}");
-                std::process::exit(1);
-            }
-        }
-    });
-
     let (backend, path) = find_backend();
     let sdf_path_owned;
     let sdf_path = match args.sdf_path.map(String::as_str) {
@@ -299,10 +260,6 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
         sdf_path,
         device,
         firmware_path: firmware,
-        firmware_data: &firmware_data,
-        manifest: manifest.as_ref(),
-        manifest_path: args.manifest_path.map(String::as_str),
-        image_id: args.image_id.map(String::as_str),
         encrypted: args.encrypted,
         include_boot_loader: args.include_boot_loader,
         recover: args.recover,
@@ -313,7 +270,6 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
         } else {
             orchestration::FlashConfirm::None
         },
-        lang: sdf_flash_gui::i18n::Language::English,
     }) {
         Ok(s) => s,
         Err(e) => {
@@ -322,29 +278,9 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
         }
     };
 
-    for w in &session.no_manifest_warnings {
-        eprintln!("WARNING: {w}");
-    }
-
-    if let Some(report) = &session.report {
-        for w in &report.warnings {
-            eprintln!("WARNING: {w}");
-        }
-        println!("{}", report.summary);
-        if !session.would_execute {
-            if !args.confirm {
-                println!("Add --confirm to proceed.");
-            }
-            std::process::exit(1);
-        }
-    } else if !args.confirm {
-        eprintln!("Add --confirm to proceed without manifest validation.");
-        std::process::exit(1);
-    }
-
     if !args.confirm {
         println!("Dry-run complete. Add --confirm to proceed.");
-        return;
+        std::process::exit(1);
     }
 
     match session.execute() {
