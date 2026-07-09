@@ -60,17 +60,6 @@ pub fn classify_drive(model: &str) -> DriveFormFactor {
     DriveFormFactor::Unknown
 }
 
-/// Classify firmware from its filename or SDF0 metadata model.
-pub fn classify_firmware(filename: &str, sdf_model: Option<&str>) -> DriveFormFactor {
-    if let Some(model) = sdf_model {
-        let ff = classify_drive(model);
-        if ff != DriveFormFactor::Unknown {
-            return ff;
-        }
-    }
-    classify_drive(filename)
-}
-
 /// Check if a drive model needs two-step flashing.
 pub fn needs_two_step_flash(model: &str) -> bool {
     model.contains("BP50NB40") || model.contains("WP50NB40") || model.contains("BP55EB40")
@@ -123,59 +112,6 @@ mod tests {
     fn classify_drive_slim_checked_before_desktop() {
         // Shorter slim names should not be confused with desktop names.
         assert_eq!(classify_drive("BU40N"), DriveFormFactor::Slim);
-    }
-
-    #[test]
-    fn classify_firmware_with_sdf_metadata() {
-        assert_eq!(
-            classify_firmware("fw.bin", Some("BU40N")),
-            DriveFormFactor::Slim
-        );
-        assert_eq!(
-            classify_firmware("fw.bin", Some("WH16NS60")),
-            DriveFormFactor::Desktop
-        );
-    }
-
-    #[test]
-    fn classify_firmware_sdf_metadata_takes_priority() {
-        // SDF0 metadata is more reliable than filename.
-        assert_eq!(
-            classify_firmware("DE_LG_BP50NB40-NB50_1.03_MK.bin", Some("WH16NS60")),
-            DriveFormFactor::Desktop
-        );
-    }
-
-    #[test]
-    fn classify_firmware_falls_back_to_filename() {
-        assert_eq!(
-            classify_firmware("HL-DT-ST_BW-16D1HT_3.02.bin", None),
-            DriveFormFactor::Desktop
-        );
-        assert_eq!(
-            classify_firmware("BU40N_1.03.bin", None),
-            DriveFormFactor::Slim
-        );
-    }
-
-    #[test]
-    fn classify_firmware_unknown_both() {
-        assert_eq!(
-            classify_firmware("random.bin", None),
-            DriveFormFactor::Unknown
-        );
-        assert_eq!(
-            classify_firmware("random.bin", Some("UNKNOWN")),
-            DriveFormFactor::Unknown
-        );
-    }
-
-    #[test]
-    fn classify_firmware_sdf_unknown_falls_back_to_filename() {
-        assert_eq!(
-            classify_firmware("BW-16D1HT_fw.bin", Some("UNKNOWN")),
-            DriveFormFactor::Desktop
-        );
     }
 
     #[test]

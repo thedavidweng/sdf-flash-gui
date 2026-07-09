@@ -50,6 +50,7 @@ pub struct Plan {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DriveSafety {
     pub mt1959: bool,
+    #[serde(default)]
     pub mt1939: bool,
     pub encrypted_firmware: bool,
     pub firmware_date_prefix: Option<u32>,
@@ -797,5 +798,16 @@ mod tests {
     #[test]
     fn extract_firmware_date_prefix_short_segment() {
         assert_eq!(extract_firmware_date_prefix("BU40N_12"), None);
+    }
+
+    #[test]
+    fn drive_safety_deserialize_without_mt1939_field() {
+        // JSON serialized before mt1939 was added should still deserialize
+        // thanks to #[serde(default)] on the mt1939 field.
+        let json = r#"{"mt1959":true,"encrypted_firmware":false,"firmware_date_prefix":null,"mtk_mode":null}"#;
+        let safety: DriveSafety = serde_json::from_str(json).unwrap();
+        assert!(safety.mt1959);
+        assert!(!safety.mt1939); // defaults to false
+        assert!(!safety.encrypted_firmware);
     }
 }
