@@ -446,29 +446,45 @@ pub fn execute_start(
     }
 }
 
-fn finalize_drive_selection(state: &mut AppState) {
+/// Replace the drive list and re-select by path / identity (stable after re-enum).
+pub fn apply_drive_list(state: &mut AppState, drives: Vec<drive::Drive>) {
+    let previous = state
+        .drive
+        .selected_drive
+        .and_then(|i| state.drive.drives.get(i))
+        .cloned();
+    let prev_idx = state.drive.selected_drive;
+    let old_device = previous.as_ref().map(|d| d.device.clone());
+    state.drive.drives = drives;
+    state.drive.selected_drive =
+        drive::resolve_selection(&state.drive.drives, previous.as_ref(), prev_idx);
+    // Invalidate probe cache when the selected device path changed or vanished.
+    let new_device = state
+        .drive
+        .selected_drive
+        .and_then(|i| state.drive.drives.get(i))
+        .map(|d| d.device.clone());
+    if old_device != new_device {
+        state.drive.last_probed_drive = None;
+        state.drive.drive_probed = false;
+    }
     if state.drive.drives.is_empty() {
-        state.drive.selected_drive = None;
         state.set_status_key(L10nKey::StatusNoDrives, 0.0);
-        return;
+    } else {
+        state.set_status_key(L10nKey::StatusReady, 0.0);
     }
-    if state.drive.selected_drive.is_some() {
-        return;
-    }
-    state.drive.selected_drive = Some(0);
-    state.set_status_key(L10nKey::StatusReady, 0.0);
 }
 
 pub fn refresh_drives(state: &mut AppState) {
     let lang = state.chrome.resolved_lang;
-    state.drive.drives = drive::enumerate_drives();
-    state.drive.last_probed_drive = None;
+    let drives = drive::enumerate_drives();
+    let count = drives.len();
+    apply_drive_list(state, drives);
     state.log(&t_with_args(
         L10nKey::StatusDrivesFound,
         lang,
-        &[("count", &state.drive.drives.len().to_string())],
+        &[("count", &count.to_string())],
     ));
-    finalize_drive_selection(state);
 }
 
 /// Display label for a firmware candidate path (basename, or full path as fallback).
@@ -682,6 +698,7 @@ mod tests {
             vendor: "HL-DT-ST".into(),
             product: "BU40N".into(),
             revision: "1.03".into(),
+            ..Default::default()
         }
     }
 
@@ -852,30 +869,30 @@ mod tests {
             vendor: String::new(),
             product: String::new(),
             revision: String::new(),
+            ..Default::default()
         };
         let label = drive_label(&d);
         assert_eq!(label, "/dev/sr0");
     }
 
     #[test]
-    fn drive_serial_hint_basic() {
-        let d = test_drive();
-        let hint = labels::drive_serial_hint(&d);
-        // "HL-DT-ST_BU40N_1.03" split by ['_', '-', ' '] → ["HL", "DT", "ST", "BU40N", "1.03"]
-        // skip 2 → "ST BU40N 1.03"
-        assert_eq!(hint, "ST BU40N 1.03");
+    fn drive_label_includes_serial_when_present() {
+        let mut d = test_drive();
+        d.serial = "MODJ9TK3546".into();
+        let label = drive_label(&d);
+        assert!(label.contains("MODJ9TK3546"), "label={label}");
     }
 
     #[test]
-    fn drive_serial_hint_longer() {
+    fn drive_label_without_serial_omits_extra_token() {
         let d = Drive {
             device: "/dev/sr0".into(),
             vendor: "VENDOR".into(),
             product: "PRODUCT".into(),
             revision: "REV".into(),
+            ..Default::default()
         };
-        let hint = labels::drive_serial_hint(&d);
-        assert_eq!(hint, "REV");
+        assert_eq!(drive_label(&d), "/dev/sr0 VENDOR PRODUCT REV");
     }
 
     #[test]
@@ -1355,22 +1372,48 @@ mod tests {
     }
 
     #[test]
-    fn finalize_drive_selection_selects_first_when_unselected() {
+    fn apply_drive_list_selects_first_when_unselected() {
         let mut state = AppState::new_no_backend();
-        state.drive.drives.push(test_drive());
         state.drive.selected_drive = None;
-        finalize_drive_selection(&mut state);
+        apply_drive_list(&mut state, vec![test_drive()]);
         assert_eq!(state.drive.selected_drive, Some(0));
         let status = &state.runtime.status_message;
         assert!(status.to_lowercase().contains("ready"), "status: {status}");
     }
 
     #[test]
-    fn finalize_drive_selection_clears_selection_when_empty() {
+    fn apply_drive_list_clears_selection_when_empty() {
         let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
         state.drive.selected_drive = Some(0);
-        finalize_drive_selection(&mut state);
+        apply_drive_list(&mut state, vec![]);
         assert_eq!(state.drive.selected_drive, None);
+        assert!(state.drive.drives.is_empty());
+    }
+
+    #[test]
+    fn apply_drive_list_reselects_by_identity() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(crate::drive::Drive {
+            device: "/dev/sg1".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+            ..Default::default()
+        });
+        state.drive.selected_drive = Some(0);
+        apply_drive_list(
+            &mut state,
+            vec![crate::drive::Drive {
+                device: "/dev/sg9".into(),
+                vendor: "HL-DT-ST".into(),
+                product: "BU40N".into(),
+                revision: "1.03".into(),
+                ..Default::default()
+            }],
+        );
+        assert_eq!(state.drive.selected_drive, Some(0));
+        assert_eq!(state.drive.drives[0].device, "/dev/sg9");
     }
 
     #[test]
@@ -1916,11 +1959,12 @@ mod tests {
     }
 
     #[test]
-    fn finalize_drive_selection_keeps_existing_selection() {
+    fn apply_drive_list_keeps_existing_selection() {
         let mut state = AppState::new_no_backend();
-        state.drive.drives.push(test_drive());
+        let d = test_drive();
+        state.drive.drives.push(d.clone());
         state.drive.selected_drive = Some(0);
-        finalize_drive_selection(&mut state);
+        apply_drive_list(&mut state, vec![d]);
         assert_eq!(state.drive.selected_drive, Some(0));
     }
 
@@ -2117,6 +2161,7 @@ mod tests {
             vendor: "HL-DT-ST".into(),
             product: "BU40N".into(),
             revision: "1.03".into(),
+            ..Default::default()
         });
         state.drive.selected_drive = Some(0);
         state.drive.drive_mt1959 = true;
@@ -2137,6 +2182,7 @@ mod tests {
             vendor: "HL-DT-ST".into(),
             product: "BU40N".into(),
             revision: "1.03".into(),
+            ..Default::default()
         });
         state.drive.selected_drive = Some(0);
         state.drive.drive_mt1959 = true;
@@ -2165,6 +2211,7 @@ mod tests {
             vendor: "HL-DT-ST".into(),
             product: "BU40N".into(),
             revision: "1.03".into(),
+            ..Default::default()
         });
         state.drive.selected_drive = Some(0);
         state.drive.drive_mt1959 = true;
@@ -2186,6 +2233,7 @@ mod tests {
             vendor: "HL-DT-ST".into(),
             product: "BU40N".into(),
             revision: "1.03".into(),
+            ..Default::default()
         });
         state.drive.selected_drive = Some(0);
         state.drive.drive_mt1959 = true;
@@ -2207,6 +2255,7 @@ mod tests {
             vendor: "HL-DT-ST".into(),
             product: "BU40N".into(),
             revision: "1.03".into(),
+            ..Default::default()
         });
         state.drive.selected_drive = Some(0);
         state.drive.drive_mt1959 = true;
@@ -2228,6 +2277,7 @@ mod tests {
             vendor: "HL-DT-ST".into(),
             product: "BU40N".into(),
             revision: "1.03".into(),
+            ..Default::default()
         });
         state.drive.selected_drive = Some(0);
         state.drive.drive_mt1959 = true;

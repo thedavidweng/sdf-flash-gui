@@ -8,16 +8,20 @@ pub fn drive_label(drive: &Drive) -> String {
     if drive.vendor.is_empty() {
         drive.device.clone()
     } else {
-        format!(
-            "{} {} {} {} {}",
-            drive.device,
-            drive.vendor,
-            drive.product,
-            drive.revision,
-            drive_serial_hint(drive)
-        )
-        .trim()
-        .to_string()
+        let mut parts = vec![
+            drive.device.as_str(),
+            drive.vendor.as_str(),
+            drive.product.as_str(),
+            drive.revision.as_str(),
+        ];
+        if !drive.serial.is_empty() {
+            parts.push(drive.serial.as_str());
+        }
+        parts
+            .into_iter()
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -59,13 +63,4 @@ pub fn firmware_basename(state: &AppState) -> String {
         .and_then(|n| n.to_str())
         .map(str::to_string)
         .unwrap_or_else(|| state.flash.firmware_path.clone())
-}
-
-pub(crate) fn drive_serial_hint(drive: &Drive) -> String {
-    let label = format!("{}_{}_{}", drive.vendor, drive.product, drive.revision);
-    label
-        .split(['_', '-', ' '])
-        .skip(2)
-        .collect::<Vec<_>>()
-        .join(" ")
 }

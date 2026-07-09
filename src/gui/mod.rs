@@ -12,9 +12,6 @@ mod workers;
 
 pub use crate::drive::find_sdf_bin;
 
-use crate::drive;
-use crate::i18n::{t, t_with_args, L10nKey};
-
 use eframe::egui;
 
 use crate::process_runner::NativeRunner;
@@ -25,7 +22,7 @@ use views::{
     show_main_ui, show_quit_confirmation_dialog, show_settings_window,
     show_stop_confirmation_dialog,
 };
-use workers::{spawn_probe, WorkerMsg};
+use workers::{spawn_list_drives, spawn_probe, WorkerMsg};
 
 const WINDOW_WIDTH: f32 = 380.0;
 const WINDOW_HEIGHT: f32 = 640.0;
@@ -135,23 +132,24 @@ impl App {
     fn new() -> Self {
         let (worker_tx, worker_rx) = std::sync::mpsc::channel();
         let mut state = AppState::new();
-        state.drive.drives = drive::enumerate_drives();
-        if state.drive.drives.is_empty() {
-            state.log(t(L10nKey::StatusNoDrives, state.chrome.resolved_lang));
-            state.set_status_key(L10nKey::StatusNoDrives, 0.0);
+        let runner: std::sync::Arc<dyn crate::process::ProcessRunner> =
+            std::sync::Arc::new(NativeRunner);
+
+        // Prefer backend `-l` when a tool is configured: on macOS, USB optical
+        // drives only appear as MakeMKV IOKit paths (/IOBDServices/…), which OS
+        // enumeration cannot supply. Fall back to OS discovery otherwise.
+        if ops::backend_configured(&state) {
+            spawn_list_drives(&worker_tx, &mut state, &runner);
         } else {
-            state.log(&t_with_args(
-                L10nKey::StatusDrivesFound,
-                state.chrome.resolved_lang,
-                &[("count", &state.drive.drives.len().to_string())],
-            ));
-            state.drive.selected_drive = Some(0);
+            // No backend: best-effort OS discovery (macOS: drutil / diskutil).
+            ops::refresh_drives(&mut state);
         }
+
         Self {
             state,
             worker_rx,
             worker_tx,
-            runner: std::sync::Arc::new(NativeRunner),
+            runner,
         }
     }
 }
@@ -436,6 +434,7 @@ mod tests {
             vendor: "MockVendor".to_string(),
             product: "MockProduct".to_string(),
             revision: "1.00".to_string(),
+            ..Default::default()
         };
         state.drive.drives.push(mock_drive.clone());
         state.drive.selected_drive = Some(0);

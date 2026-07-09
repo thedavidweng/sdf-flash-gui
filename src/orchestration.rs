@@ -595,7 +595,7 @@ mod tests {
                     encrypted_firmware: false,
                     firmware_date_prefix: None,
                     mtk_mode: None,
-                    libredrive: false,
+                    libredrive: crate::command::LibreDriveStatus::Unknown,
                     sdf_version: None,
                 },
                 identity: test_identity(),
@@ -892,7 +892,10 @@ mod tests {
             "/dev/sr0",
             "SDF.bin version: 0x00A6\n\nDrive Specific SDF present\n",
         );
-        assert!(probe.safety.libredrive);
+        assert_eq!(
+            probe.safety.libredrive,
+            crate::command::LibreDriveStatus::Enabled
+        );
         assert_eq!(probe.safety.sdf_version.as_deref(), Some("0x00A6"));
     }
 
@@ -902,7 +905,7 @@ mod tests {
             "/dev/sr0",
             "SDF.bin version: 0x00A6\n\nDrive Specific SDF not present\n",
         );
-        assert!(!probe.safety.libredrive);
+        assert!(!probe.safety.libredrive.is_enabled());
     }
 
     #[test]

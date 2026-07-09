@@ -3,12 +3,148 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// MakeMKV `AP_MaxCdromDevices` — hard cap for list UIs and OS enumeration.
+/// See `makemkvgui/inc/lgpl/apdefs.h` and specs/33-robot-profile-complete-spec.md.
+pub const MAX_OPTICAL_DRIVES: usize = 16;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Drive {
+    /// OS / MakeMKV device path used with `sdftool -d` (e.g. `/dev/sr0`,
+    /// `E:`, `/IOBDServices/…`, or a BuildDriveId string).
     pub device: String,
     pub vendor: String,
     pub product: String,
     pub revision: String,
+    /// Serial from MakeMKV BuildDriveId tail (e.g. `MODJ9TK3546`).
+    #[serde(default)]
+    pub serial: String,
+    /// Compact firmware date from BuildDriveId (`211904231648` = 2119-04-23 16:48).
+    #[serde(default)]
+    pub firmware_date: String,
+}
+
+impl Drive {
+    /// Stable fingerprint for re-selection after bus re-enumeration
+    /// (flash/reset may change `/dev/sgN` or IOKit path — MakeMKV § firmware protocol).
+    pub fn identity_key(&self) -> String {
+        format!(
+            "{}|{}|{}",
+            self.vendor.trim(),
+            self.product.trim(),
+            self.revision.trim()
+        )
+    }
+
+    /// MakeMKV `BuildDriveId` style (`scsihlp.cpp:403`):  
+    /// `Vendor_Product_Revision` with spaces → `_`, non-printable skipped.
+    pub fn build_drive_id(&self) -> String {
+        let mut s = String::new();
+        append_makemkv_id_field(&mut s, &self.vendor);
+        s.push('_');
+        append_makemkv_id_field(&mut s, &self.product);
+        s.push('_');
+        append_makemkv_id_field(&mut s, &self.revision);
+        s
+    }
+
+    /// Human-readable firmware date (`2119-04-23 16:48`), or empty.
+    pub fn firmware_date_display(&self) -> String {
+        format_firmware_date_raw(&self.firmware_date)
+    }
+}
+
+/// Format compact MakeMKV firmware date token for UI.
+///
+/// `211904231648` → `2119-04-23 16:48`; `21190423` → `2119-04-23`.
+pub fn format_firmware_date_raw(raw: &str) -> String {
+    let raw = raw.trim();
+    if raw.len() >= 12 && raw.as_bytes().iter().all(u8::is_ascii_digit) {
+        format!(
+            "{}-{}-{} {}:{}",
+            &raw[0..4],
+            &raw[4..6],
+            &raw[6..8],
+            &raw[8..10],
+            &raw[10..12]
+        )
+    } else if raw.len() >= 8 && raw.as_bytes().iter().all(u8::is_ascii_digit) {
+        format!("{}-{}-{}", &raw[0..4], &raw[4..6], &raw[6..8])
+    } else {
+        raw.to_string()
+    }
+}
+
+/// True when token looks like a firmware calendar stamp (`211904231648` / `21200507`).
+fn looks_like_firmware_date_token(s: &str) -> bool {
+    (s.len() == 8 || s.len() == 12) && s.as_bytes().iter().all(u8::is_ascii_digit)
+}
+
+/// Append a field the way libdriveio `AppendStr` does (printable ASCII, space→`_`).
+fn append_makemkv_id_field(dst: &mut String, src: &str) {
+    for c in src.chars() {
+        let u = c as u32;
+        if !(0x20..=0x7e).contains(&u) {
+            continue;
+        }
+        if c == ' ' {
+            dst.push('_');
+        } else {
+            dst.push(c);
+        }
+    }
+}
+
+/// Re-select a drive after re-enumeration.
+///
+/// Order (aligned with MakeMKV stability needs after flash reset):
+/// 1. Exact device path match  
+/// 2. Identity key (`vendor|product|revision`)  
+/// 3. Previous index if still in range  
+/// 4. First drive (`Some(0)`) when the list is non-empty  
+pub fn resolve_selection(
+    drives: &[Drive],
+    previous: Option<&Drive>,
+    previous_index: Option<usize>,
+) -> Option<usize> {
+    if drives.is_empty() {
+        return None;
+    }
+    if let Some(prev) = previous {
+        if !prev.device.is_empty() {
+            if let Some(i) = drives.iter().position(|d| d.device == prev.device) {
+                return Some(i);
+            }
+        }
+        let key = prev.identity_key();
+        if key != "||" {
+            if let Some(i) = drives.iter().position(|d| d.identity_key() == key) {
+                return Some(i);
+            }
+        }
+        // BuildDriveId match (device path may be the identity string itself)
+        let bid = prev.build_drive_id();
+        if bid != "__" {
+            if let Some(i) = drives.iter().position(|d| {
+                d.device == bid || d.build_drive_id() == bid || d.device == prev.device
+            }) {
+                return Some(i);
+            }
+        }
+    }
+    if let Some(i) = previous_index {
+        if i < drives.len() {
+            return Some(i);
+        }
+    }
+    Some(0)
+}
+
+/// Cap a drive list at [`MAX_OPTICAL_DRIVES`] (MakeMKV AP_MaxCdromDevices).
+pub fn cap_drive_list(mut drives: Vec<Drive>) -> Vec<Drive> {
+    if drives.len() > MAX_OPTICAL_DRIVES {
+        drives.truncate(MAX_OPTICAL_DRIVES);
+    }
+    drives
 }
 
 /// Drive identity (vendor / model / revision) used for validation.
@@ -108,36 +244,303 @@ pub fn drive_match_for_validation(
     }
 }
 
-/// Parse `sdftool -l` stdout into drives.
-pub fn parse_drive_list(output: &str) -> Vec<Drive> {
-    let mut drives = Vec::new();
-    for line in output.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix(|c: char| c.is_ascii_digit() || c == ':') {
-            let rest = rest.trim_start_matches(':').trim();
-            if !rest.is_empty() && (rest.starts_with("/dev/") || rest.contains(':')) {
-                let parts: Vec<&str> = rest.split_whitespace().collect();
-                if parts.is_empty() {
-                    continue;
+/// True when `token` is a Windows drive letter (`D:` / `e:`).
+fn is_windows_drive_letter(token: &str) -> bool {
+    let b = token.as_bytes();
+    b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+}
+
+/// True when `token` looks like a backend device path / drive letter.
+///
+/// Accepts:
+/// - Linux: `/dev/sr*`, `/dev/sg*`
+/// - macOS: `/dev/rdisk*`, MakeMKV IOKit paths (`/IOBDServices/…`, …)
+/// - Windows: `D:`, `\\.\D:`, `\\.\CdRom0`
+fn is_drive_device_token(token: &str) -> bool {
+    if token.starts_with("/dev/") || token.starts_with("/IO") {
+        return true;
+    }
+    if is_windows_drive_letter(token) {
+        return true;
+    }
+    // Windows SPTI paths used by MakeMKV/sdftool: \\.\D: or \\.\CdRomN
+    if let Some(rest) = token.strip_prefix(r"\\.\") {
+        if is_windows_drive_letter(rest) {
+            return true;
+        }
+        if rest.len() > 5
+            && rest
+                .get(..5)
+                .is_some_and(|p| p.eq_ignore_ascii_case("CdRom"))
+            && rest[5..].chars().all(|c| c.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// sdftool list second-line status that is not an identity string.
+fn is_list_status_line(ident: &str) -> bool {
+    matches!(ident, "open error" | "query error")
+}
+
+/// Split a `sdftool -l` index line: `"00: /path …"` → `Some(("/path …"))`.
+///
+/// The index may be one or more digits (`0:`, `00:`). Returns `None` when the
+/// line is not an index entry.
+fn split_drive_list_index_line(line: &str) -> Option<&str> {
+    let line = line.trim();
+    let mut i = 0;
+    let bytes = line.as_bytes();
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == 0 || i >= bytes.len() || bytes[i] != b':' {
+        return None;
+    }
+    Some(line[i + 1..].trim())
+}
+
+/// Firmware revision token in MakeMKV identity strings (`GE03`, `1.03`, `3.10`).
+fn looks_like_firmware_rev(s: &str) -> bool {
+    if s.len() < 2 || s.len() > 8 {
+        return false;
+    }
+    let mut has_alnum = false;
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            has_alnum = true;
+        } else if c != '.' {
+            return false;
+        }
+    }
+    has_alnum
+}
+
+/// Parsed MakeMKV BuildDriveId / list identity line fields.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UnderscoreIdentity {
+    pub vendor: String,
+    pub product: String,
+    pub revision: String,
+    /// Compact date token (`211904231648`), may be empty.
+    pub firmware_date: String,
+    pub serial: String,
+}
+
+impl UnderscoreIdentity {
+    fn apply_to_drive(self, drive: &mut Drive) {
+        if !self.vendor.is_empty() {
+            drive.vendor = self.vendor;
+        }
+        if !self.product.is_empty() {
+            drive.product = self.product;
+        }
+        if !self.revision.is_empty() {
+            drive.revision = self.revision;
+        }
+        if !self.firmware_date.is_empty() {
+            drive.firmware_date = self.firmware_date;
+        }
+        if !self.serial.is_empty() {
+            drive.serial = self.serial;
+        }
+    }
+}
+
+/// Parse MakeMKV-style underscore identity:
+/// `HL-DT-ST_BD-RE_BU50N_GE03_211904231648_MODJ9TK3546`
+/// → vendor, product, revision, firmware date, serial.
+pub fn parse_underscore_identity_full(ident: &str) -> UnderscoreIdentity {
+    let parts: Vec<&str> = ident.split('_').filter(|p| !p.is_empty()).collect();
+    if parts.is_empty() {
+        return UnderscoreIdentity::default();
+    }
+    if parts.len() == 1 {
+        return UnderscoreIdentity {
+            product: parts[0].to_string(),
+            ..Default::default()
+        };
+    }
+    let vendor = parts[0].to_string();
+    // Prefer: VENDOR + product… + rev + [date] + [serial…]
+    if parts.len() >= 4 {
+        for rev_idx in 2..parts.len() {
+            let cand = parts[rev_idx];
+            if looks_like_firmware_rev(cand)
+                && rev_idx + 1 < parts.len()
+                && parts[rev_idx + 1].len() > cand.len()
+            {
+                let mut firmware_date = String::new();
+                let mut serial = String::new();
+                let mut rest = &parts[rev_idx + 1..];
+                if let Some(first) = rest.first() {
+                    if looks_like_firmware_date_token(first) {
+                        firmware_date = first.to_string();
+                        rest = &rest[1..];
+                    }
                 }
-                let device = parts[0].to_string();
-                let vendor = parts.get(1).copied().unwrap_or("").to_string();
-                let (product, revision) = match parts.len() {
-                    n if n >= 5 => (parts[2..n - 1].join(" "), parts[n - 1].to_string()),
-                    4 => (parts[2].to_string(), parts[3].to_string()),
-                    3 => (parts[2].to_string(), String::new()),
-                    _ => (String::new(), String::new()),
-                };
-                drives.push(Drive {
-                    device,
+                if !rest.is_empty() {
+                    serial = rest.join("_");
+                }
+                return UnderscoreIdentity {
                     vendor,
-                    product,
-                    revision,
-                });
+                    product: parts[1..rev_idx].join(" "),
+                    revision: cand.to_string(),
+                    firmware_date,
+                    serial,
+                };
             }
         }
     }
-    drives
+    UnderscoreIdentity {
+        vendor,
+        product: parts[1..].join(" "),
+        ..Default::default()
+    }
+}
+
+/// Parse vendor / product / revision from whitespace-separated identity fields
+/// after the device token (`HL-DT-ST BU40N 1.03` or multi-word product).
+fn parse_inline_identity(fields: &[&str]) -> (String, String, String) {
+    if fields.is_empty() {
+        return (String::new(), String::new(), String::new());
+    }
+    let vendor = fields[0].to_string();
+    let (product, revision) = match fields.len() {
+        n if n >= 4 => (fields[1..n - 1].join(" "), fields[n - 1].to_string()),
+        3 => (fields[1].to_string(), fields[2].to_string()),
+        2 => (fields[1].to_string(), String::new()),
+        _ => (String::new(), String::new()),
+    };
+    (vendor, product, revision)
+}
+
+/// Consume an indented continuation line under a list entry, if present.
+fn take_indented_continuation<'a>(lines: &[&'a str], i: &mut usize) -> Option<&'a str> {
+    if *i + 1 >= lines.len() {
+        return None;
+    }
+    let next = lines[*i + 1];
+    if !(next.starts_with(' ') || next.starts_with('\t')) {
+        return None;
+    }
+    let ident = next.trim();
+    if ident.is_empty() || split_drive_list_index_line(ident).is_some() {
+        return None;
+    }
+    *i += 1;
+    Some(ident)
+}
+
+/// Parse `sdftool -l` / `makemkvcon f -l` stdout into drives.
+///
+/// Supports both MakeMKV list shapes (specs/01-sdftool-spec §3.1 + real binary):
+///
+/// **A — device path first** (observed on current sdftool):
+/// ```text
+/// 00: /dev/sr0
+///   HL-DT-ST_BD-RE_BU40N_1.03_SERIAL
+/// 00: E:
+///   HL-DT-ST_BD-RE_BU50N_GE03_SERIAL
+/// 00: /IOBDServices/F49D28A7
+///   HL-DT-ST_BD-RE_BU50N_GE03_SERIAL
+/// ```
+///
+/// **B — INQUIRY first** (documented RE format):
+/// ```text
+/// 00:  HL-DT-ST BD-RE BU50N GE03
+///   /IOBDServices/F49D28A7
+/// 01:  HL-DT-ST BU40N 1.03
+///   open error
+/// ```
+///
+/// Also: one-liner `0:/dev/sr0 HL-DT-ST BU40N 1.03`. Capped at [`MAX_OPTICAL_DRIVES`].
+pub fn parse_drive_list(output: &str) -> Vec<Drive> {
+    let mut drives = Vec::new();
+    let lines: Vec<&str> = output.lines().collect();
+    let mut i = 0;
+    while i < lines.len() && drives.len() < MAX_OPTICAL_DRIVES {
+        let Some(rest) = split_drive_list_index_line(lines[i]) else {
+            i += 1;
+            continue;
+        };
+        if rest.is_empty() {
+            i += 1;
+            continue;
+        }
+
+        let parts: Vec<&str> = rest.split_whitespace().collect();
+        if parts.is_empty() {
+            i += 1;
+            continue;
+        }
+
+        let drive = if is_drive_device_token(parts[0]) {
+            // Format A: device path on the index line.
+            let device = parts[0].to_string();
+            let mut drive = Drive {
+                device,
+                ..Default::default()
+            };
+            if parts.len() >= 2 {
+                let (v, p, r) = parse_inline_identity(&parts[1..]);
+                drive.vendor = v;
+                drive.product = p;
+                drive.revision = r;
+            } else if let Some(ident) = take_indented_continuation(&lines, &mut i) {
+                if !is_list_status_line(ident) {
+                    parse_underscore_identity_full(ident).apply_to_drive(&mut drive);
+                }
+            }
+            drive
+        } else {
+            // Format B: INQUIRY vendor/product/rev on the index line.
+            let (vendor, product, revision) = parse_inline_identity(&parts);
+            let mut drive = Drive {
+                vendor,
+                product,
+                revision,
+                ..Default::default()
+            };
+            if let Some(ident) = take_indented_continuation(&lines, &mut i) {
+                if is_list_status_line(ident) {
+                    // open/query error — keep inquiry fields, no usable path yet.
+                } else if is_drive_device_token(ident) {
+                    drive.device = ident.to_string();
+                } else {
+                    // BuildDriveId line — valid `-d` target on real sdftool.
+                    drive.device = ident.to_string();
+                    let parsed = parse_underscore_identity_full(ident);
+                    if drive.vendor.is_empty() && drive.product.is_empty() {
+                        parsed.apply_to_drive(&mut drive);
+                    } else {
+                        // Keep inquiry vendor/product/rev; still take date/serial.
+                        if !parsed.firmware_date.is_empty() {
+                            drive.firmware_date = parsed.firmware_date;
+                        }
+                        if !parsed.serial.is_empty() {
+                            drive.serial = parsed.serial;
+                        }
+                    }
+                }
+            }
+            if drive.device.is_empty() && (!drive.vendor.is_empty() || !drive.product.is_empty()) {
+                // Fallback device = BuildDriveId so the entry remains selectable.
+                drive.device = drive.build_drive_id();
+            }
+            if drive.device.is_empty() {
+                i += 1;
+                continue;
+            }
+            drive
+        };
+
+        drives.push(drive);
+        i += 1;
+    }
+    cap_drive_list(drives)
 }
 
 /// Enumerate all optical drives on the system.
@@ -164,83 +567,258 @@ pub fn enumerate_drives() -> Vec<Drive> {
 }
 
 // ---------------------------------------------------------------------------
-// macOS implementation via IOKit
+// macOS implementation (IOKit-class discovery, aligned with MakeMKV transport)
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "macos")]
 fn enumerate_macos() -> Vec<Drive> {
-    // Use system_profiler or ioreg to find optical drives
-    let Ok(output) = std::process::Command::new("system_profiler")
+    // 1. IOKit optical service classes (specs/04-scsi-transport, 34-backup-profile-drive):
+    //    IOBDServices / IODVDServices / IOCompactDiscServices — works without media.
+    let from_ioreg = enumerate_macos_ioreg();
+    if !from_ioreg.is_empty() {
+        return cap_drive_list(from_ioreg);
+    }
+
+    // 2. drutil list — DiscRecording framework view of burners.
+    let from_drutil = enumerate_macos_drutil();
+    if !from_drutil.is_empty() {
+        return cap_drive_list(from_drutil);
+    }
+
+    // 3. SATA-attached internal drives (legacy Macs) via system_profiler.
+    if let Ok(output) = std::process::Command::new("system_profiler")
         .args(["SPSerialATADataType", "-json"])
         .output()
-    else {
-        return enumerate_macos_fallback();
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if let Ok(data) = serde_json::from_str::<serde_json::Value>(&stdout) {
-        if let Some(items) = data.get("SPSerialATADataType").and_then(|v| v.as_array()) {
-            let mut drives = Vec::new();
-            for item in items {
-                if let Some(devices) = item.get("_items").and_then(|v| v.as_array()) {
-                    for dev in devices {
-                        let name = dev
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let rev = dev
-                            .get("revision_version")
-                            .or_else(|| dev.get("bsd_name"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let bsd = dev
-                            .get("bsd_name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        if !bsd.is_empty() {
-                            // Parse vendor/product from name
-                            let (vendor, product) = parse_vendor_product(&name);
-                            drives.push(Drive {
-                                device: format!("/dev/r{bsd}"),
-                                vendor,
-                                product,
-                                revision: rev,
-                            });
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            if let Some(items) = data.get("SPSerialATADataType").and_then(|v| v.as_array()) {
+                let mut drives = Vec::new();
+                for item in items {
+                    if let Some(devices) = item.get("_items").and_then(|v| v.as_array()) {
+                        for dev in devices {
+                            let name = dev
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let rev = dev
+                                .get("revision_version")
+                                .or_else(|| dev.get("bsd_name"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let bsd = dev
+                                .get("bsd_name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if !bsd.is_empty() {
+                                let (vendor, product) = parse_vendor_product(&name);
+                                drives.push(Drive {
+                                    device: format!("/dev/r{bsd}"),
+                                    vendor,
+                                    product,
+                                    revision: rev,
+                                    ..Default::default()
+                                });
+                            }
                         }
                     }
                 }
-            }
-            if !drives.is_empty() {
-                return drives;
+                if !drives.is_empty() {
+                    return cap_drive_list(drives);
+                }
             }
         }
     }
 
-    enumerate_macos_fallback()
+    cap_drive_list(enumerate_macos_diskutil_fallback())
+}
+
+/// Extract `"Key"="Value"` pairs from an IORegistry property dump block.
+#[cfg(target_os = "macos")]
+fn ioreg_quoted_value(block: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{key}\"=");
+    let idx = block.find(&needle)?;
+    let rest = &block[idx + needle.len()..];
+    let rest = rest.trim_start();
+    if !rest.starts_with('"') {
+        return None;
+    }
+    let end = rest[1..].find('"')?;
+    Some(rest[1..1 + end].to_string())
+}
+
+/// Parse `ioreg -r -c <Class> -l` for Device Characteristics (Vendor/Product/Rev).
+///
+/// MakeMKV/sdftool open these services via IOSCSITaskDeviceInterface; the true
+/// `/IOBDServices/<hash>` path is supplied by backend `-l`. OS enum uses
+/// BuildDriveId as a stable selectable id (works with `sdftool -d`).
+#[cfg(target_os = "macos")]
+fn parse_ioreg_optical_services(output: &str, service_class: &str) -> Vec<Drive> {
+    let mut drives = Vec::new();
+    // Each matching service block usually contains one Device Characteristics dict.
+    for chunk in output.split("Device Characteristics") {
+        if chunk.len() == output.len() {
+            // No split match — try whole buffer once for a single dict form.
+            continue;
+        }
+        // Limit scan to the dict-ish region after the key.
+        let region = chunk.get(..500).unwrap_or(chunk);
+        let vendor = ioreg_quoted_value(region, "Vendor Name").unwrap_or_default();
+        let product = ioreg_quoted_value(region, "Product Name").unwrap_or_default();
+        let revision = ioreg_quoted_value(region, "Product Revision Level").unwrap_or_default();
+        if vendor.is_empty() && product.is_empty() {
+            continue;
+        }
+        let mut drive = Drive {
+            device: String::new(),
+            vendor,
+            product,
+            revision,
+            ..Default::default()
+        };
+        // Prefer a path MakeMKV-style; BuildDriveId is a valid -d target.
+        drive.device = format!("/{service_class}/{}", drive.build_drive_id());
+        drives.push(drive);
+        if drives.len() >= MAX_OPTICAL_DRIVES {
+            break;
+        }
+    }
+    drives
 }
 
 #[cfg(target_os = "macos")]
-fn enumerate_macos_fallback() -> Vec<Drive> {
-    // Fallback: scan /dev/rdisk* for optical drives
+fn enumerate_macos_ioreg() -> Vec<Drive> {
+    // Order matches MakeMKV optical service priority: BD → DVD → CD.
+    const CLASSES: &[&str] = &["IOBDServices", "IODVDServices", "IOCompactDiscServices"];
     let mut drives = Vec::new();
-    for i in 0..8 {
+    let mut seen = std::collections::HashSet::new();
+    for class in CLASSES {
+        let Ok(output) = std::process::Command::new("ioreg")
+            .args(["-r", "-c", class, "-l"])
+            .output()
+        else {
+            continue;
+        };
+        if !output.status.success() && output.stdout.is_empty() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        for d in parse_ioreg_optical_services(&text, class) {
+            let key = d.identity_key();
+            if seen.insert(key) {
+                drives.push(d);
+            }
+            if drives.len() >= MAX_OPTICAL_DRIVES {
+                return drives;
+            }
+        }
+    }
+    drives
+}
+
+/// Parse `drutil list` stdout into drives.
+///
+/// Example:
+/// ```text
+///    Vendor   Product           Rev   Bus       SupportLevel
+/// 1  HL-DT-ST BD-RE BU50N       GE03  USB       Unsupported
+/// ```
+///
+/// Device paths from drutil are 1-based indices (not MakeMKV `/IOBDServices/…`
+/// paths). Prefer backend `-l` when a tool is configured so flash/probe get
+/// the path sdftool actually accepts.
+#[cfg(target_os = "macos")]
+fn parse_drutil_list(output: &str) -> Vec<Drive> {
+    let mut drives = Vec::new();
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // Skip header: "Vendor   Product ..."
+        if trimmed.starts_with("Vendor") {
+            continue;
+        }
+        let mut parts = trimmed.split_whitespace();
+        let Some(index) = parts.next() else {
+            continue;
+        };
+        if !index.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let Some(vendor) = parts.next() else {
+            continue;
+        };
+        let rest: Vec<&str> = parts.collect();
+        // rest: product… rev bus supportLevel — bus is USB/ATAPI/FireWire/etc.
+        let bus_idx = rest.iter().position(|t| {
+            matches!(
+                *t,
+                "USB" | "ATAPI" | "FireWire" | "SCSI" | "SATA" | "Thunderbolt"
+            )
+        });
+        let Some(bus_i) = bus_idx else {
+            continue;
+        };
+        if bus_i == 0 {
+            continue;
+        }
+        // revision is the token immediately before bus
+        let rev_i = bus_i - 1;
+        let product = rest[..rev_i].join(" ");
+        let revision = rest[rev_i].to_string();
+        if product.is_empty() {
+            continue;
+        }
+        drives.push(Drive {
+            // Stable placeholder until backend list supplies /IOBDServices/…
+            device: format!("drutil:{index}"),
+            vendor: vendor.to_string(),
+            product,
+            revision,
+            ..Default::default()
+        });
+    }
+    drives
+}
+
+#[cfg(target_os = "macos")]
+fn enumerate_macos_drutil() -> Vec<Drive> {
+    let Ok(output) = std::process::Command::new("drutil").arg("list").output() else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    parse_drutil_list(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(target_os = "macos")]
+fn enumerate_macos_diskutil_fallback() -> Vec<Drive> {
+    // Last resort: scan /dev/rdisk* when media is present (creates a block node).
+    let mut drives = Vec::new();
+    for i in 0..16 {
         let device = format!("/dev/rdisk{i}");
         if std::path::Path::new(&device).exists() {
-            // Try to identify via diskutil
             if let Ok(out) = std::process::Command::new("diskutil")
                 .args(["info", &device])
                 .output()
             {
                 let info = String::from_utf8_lossy(&out.stdout);
-                if info.contains("Optical") || info.contains("DVD") || info.contains("BD-RE") {
+                if info.contains("Optical")
+                    || info.contains("DVD")
+                    || info.contains("BD-RE")
+                    || info.contains("CD-ROM")
+                {
                     drives.push(Drive {
                         device,
                         vendor: String::new(),
                         product: String::new(),
                         revision: String::new(),
+                        ..Default::default()
                     });
                 }
             }
@@ -253,25 +831,156 @@ fn enumerate_macos_fallback() -> Vec<Drive> {
 // Linux implementation via sysfs
 // ---------------------------------------------------------------------------
 
+/// Collect `srN` block names from sysfs (handles USB-attached sr10+, etc.).
 #[cfg(target_os = "linux")]
-fn enumerate_linux() -> Vec<Drive> {
+fn linux_sr_block_names() -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/sys/block") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some(rest) = name.strip_prefix("sr") {
+                if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
+                    names.push(name);
+                }
+            }
+        }
+    }
+    names.sort_by(|a, b| {
+        let na = a
+            .strip_prefix("sr")
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        let nb = b
+            .strip_prefix("sr")
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        na.cmp(&nb)
+    });
+    // Fallback when /sys/block is unreadable (containers, weird mounts).
+    if names.is_empty() {
+        for i in 0..16 {
+            let name = format!("sr{i}");
+            if PathBuf::from(format!("/dev/{name}")).exists() {
+                names.push(name);
+            }
+        }
+    }
+    names
+}
+
+/// SCSI device type 5 = MMC (CD/DVD/BD) per MakeMKV specs/04-scsi-transport.
+#[cfg(target_os = "linux")]
+const SCSI_TYPE_MMC: &str = "5";
+
+/// Enumerate `/dev/sg*` optical devices via `/sys/class/scsi_generic/` (type 5).
+/// MakeMKV/libdriveio prefers SG_IO on Linux (specs/34-backup-profile-drive §3.2).
+#[cfg(target_os = "linux")]
+fn enumerate_linux_sg() -> Vec<Drive> {
     let mut drives = Vec::new();
-    for i in 0..8 {
-        let device = format!("/dev/sr{i}");
-        if std::path::Path::new(&device).exists() {
-            let sys_path = format!("/sys/block/sr{i}/device");
-            let vendor = read_sysfs_attr(&sys_path, "vendor").unwrap_or_default();
-            let model = read_sysfs_attr(&sys_path, "model").unwrap_or_default();
-            let rev = read_sysfs_attr(&sys_path, "rev").unwrap_or_default();
-            drives.push(Drive {
-                device,
-                vendor: vendor.trim().to_string(),
-                product: model.trim().to_string(),
-                revision: rev.trim().to_string(),
-            });
+    let Ok(entries) = std::fs::read_dir("/sys/class/scsi_generic") else {
+        return drives;
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("sg"))
+        .collect();
+    names.sort_by(|a, b| {
+        let na = a
+            .strip_prefix("sg")
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        let nb = b
+            .strip_prefix("sg")
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        na.cmp(&nb)
+    });
+    for name in names {
+        let type_path = format!("/sys/class/scsi_generic/{name}/device/type");
+        let Ok(ty) = std::fs::read_to_string(&type_path) else {
+            continue;
+        };
+        if ty.trim() != SCSI_TYPE_MMC {
+            continue;
+        }
+        let sys_path = format!("/sys/class/scsi_generic/{name}/device");
+        let vendor = read_sysfs_attr(&sys_path, "vendor").unwrap_or_default();
+        let model = read_sysfs_attr(&sys_path, "model").unwrap_or_default();
+        let rev = read_sysfs_attr(&sys_path, "rev").unwrap_or_default();
+        let device = format!("/dev/{name}");
+        if !std::path::Path::new(&device).exists() {
+            continue;
+        }
+        drives.push(Drive {
+            device,
+            vendor: vendor.trim().to_string(),
+            product: model.trim().to_string(),
+            revision: rev.trim().to_string(),
+            ..Default::default()
+        });
+        if drives.len() >= MAX_OPTICAL_DRIVES {
+            break;
         }
     }
     drives
+}
+
+#[cfg(target_os = "linux")]
+fn enumerate_linux_sr() -> Vec<Drive> {
+    let mut drives = Vec::new();
+    for name in linux_sr_block_names() {
+        let device = format!("/dev/{name}");
+        if !std::path::Path::new(&device).exists() {
+            continue;
+        }
+        let sys_path = format!("/sys/block/{name}/device");
+        let vendor = read_sysfs_attr(&sys_path, "vendor").unwrap_or_default();
+        let model = read_sysfs_attr(&sys_path, "model").unwrap_or_default();
+        let rev = read_sysfs_attr(&sys_path, "rev").unwrap_or_default();
+        drives.push(Drive {
+            device,
+            vendor: vendor.trim().to_string(),
+            product: model.trim().to_string(),
+            revision: rev.trim().to_string(),
+            ..Default::default()
+        });
+        if drives.len() >= MAX_OPTICAL_DRIVES {
+            break;
+        }
+    }
+    drives
+}
+
+/// Prefer `/dev/sg*` (SG_IO) over `/dev/sr*` when both expose the same identity.
+#[cfg(target_os = "linux")]
+fn merge_linux_drives(sg: Vec<Drive>, sr: Vec<Drive>) -> Vec<Drive> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for d in sg.into_iter().chain(sr) {
+        let key = d.identity_key();
+        // Empty identity: still include by device path uniqueness.
+        let dedupe_key = if key == "||" {
+            format!("dev:{}", d.device)
+        } else {
+            key
+        };
+        if seen.insert(dedupe_key) {
+            out.push(d);
+        }
+        if out.len() >= MAX_OPTICAL_DRIVES {
+            break;
+        }
+    }
+    out
+}
+
+#[cfg(target_os = "linux")]
+fn enumerate_linux() -> Vec<Drive> {
+    cap_drive_list(merge_linux_drives(
+        enumerate_linux_sg(),
+        enumerate_linux_sr(),
+    ))
 }
 
 #[cfg(target_os = "linux")]
@@ -294,25 +1003,33 @@ mod winapi {
 #[cfg(target_os = "windows")]
 fn enumerate_windows() -> Vec<Drive> {
     let mut drives = Vec::new();
-    for letter in b'C'..=b'Z' {
+    // MakeMKV: GetDriveType letters A:–Z: (specs/04-scsi-transport).
+    // USB optical burners still get a letter with no media (DRIVE_CDROM = 5).
+    for letter in b'A'..=b'Z' {
+        if drives.len() >= MAX_OPTICAL_DRIVES {
+            break;
+        }
         let device = format!("{}:", letter as char);
-        // GetDriveTypeA expects a null-terminated string pointer (LPCSTR)
-        let path = format!("{}:\\\0", device);
+        // GetDriveTypeA expects a null-terminated root path ("X:\").
+        let path = format!("{}\\\0", device);
 
-        // SAFETY: We pass a valid pointer to a null-terminated ASCII string ("X:\0").
-        // The return value of 5 corresponds to DRIVE_CDROM.
+        // SAFETY: valid pointer to a null-terminated ASCII string ("X:\\0").
+        // Return value 5 == DRIVE_CDROM.
         let is_cdrom = unsafe { winapi::GetDriveTypeA(path.as_ptr()) == 5 };
 
         if is_cdrom {
             drives.push(Drive {
+                // sdftool accepts both `D:` and `\\.\D:`; prefer the short form
+                // used in MakeMKV docs / CLI examples (`-d D:`).
                 device,
                 vendor: String::new(),
                 product: String::new(),
                 revision: String::new(),
+                ..Default::default()
             });
         }
     }
-    drives
+    cap_drive_list(drives)
 }
 
 #[cfg(target_os = "macos")]
@@ -525,6 +1242,7 @@ mod tests {
             vendor: "HL-DT-ST".into(),
             product: "BU40N".into(),
             revision: "1.03".into(),
+            ..Default::default()
         };
         let dm: DriveIdentity = (&drive).into();
         assert_eq!(dm.vendor, "HL-DT-ST");
@@ -539,6 +1257,7 @@ mod tests {
             vendor: String::new(),
             product: String::new(),
             revision: String::new(),
+            ..Default::default()
         };
         let dm: DriveIdentity = (&drive).into();
         assert!(dm.vendor.is_empty());
@@ -589,6 +1308,7 @@ mod tests {
         let drives = parse_drive_list(output);
         assert_eq!(drives.len(), 1);
         assert_eq!(drives[0].device, "/dev/sr0");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
         assert_eq!(drives[0].product, "BU40N");
         assert_eq!(drives[0].revision, "1.03");
     }
@@ -602,6 +1322,394 @@ mod tests {
         assert_eq!(drives[0].revision, "1.03");
     }
 
+    /// Golden fixtures: real MakeMKV/sdftool multi-line shapes per OS.
+    ///
+    /// These always run in CI (no hardware). They exist because the old parser
+    /// only accepted Linux-style one-liners and silently dropped / mis-parsed
+    /// the multi-line format used on macOS, Windows, and modern Linux builds.
+    #[test]
+    fn parse_drive_list_golden_macos_usb_bd() {
+        let output = "\
+Found 1 drives(s)
+00: /IOBDServices/F49D28A7
+  HL-DT-ST_BD-RE_BU50N_GE03_211904231648_MODJ9TK3546
+
+";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/IOBDServices/F49D28A7");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BD-RE BU50N");
+        assert_eq!(drives[0].revision, "GE03");
+    }
+
+    #[test]
+    fn parse_drive_list_golden_linux_multiline() {
+        let output = "\
+Found 1 drives(s)
+00: /dev/sr0
+  HL-DT-ST_BD-RE_BU40N_1.03_211904231648_MODJ9TK3546
+
+";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/dev/sr0");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BD-RE BU40N");
+        assert_eq!(drives[0].revision, "1.03");
+    }
+
+    #[test]
+    fn parse_drive_list_golden_linux_sg_device() {
+        let output = "\
+Found 1 drives(s)
+00: /dev/sg1
+  PIONEER_BD-RW_BDR-209M_1.10_ABCDE12345_EXTRA
+
+";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/dev/sg1");
+        assert_eq!(drives[0].vendor, "PIONEER");
+        assert_eq!(drives[0].product, "BD-RW BDR-209M");
+        assert_eq!(drives[0].revision, "1.10");
+    }
+
+    #[test]
+    fn parse_drive_list_golden_windows_drive_letter_multiline() {
+        let output = "\
+Found 1 drives(s)
+00: E:
+  HL-DT-ST_BD-RE_BU50N_GE03_211904231648_MODJ9TK3546
+
+";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "E:");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BD-RE BU50N");
+        assert_eq!(drives[0].revision, "GE03");
+    }
+
+    #[test]
+    fn parse_drive_list_golden_windows_extended_path() {
+        let output = "\
+Found 1 drives(s)
+00: \\\\.\\D:
+  ASUS_BW-16D1HT_3.10_SERIAL1234567_X
+
+";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, r"\\.\D:");
+        assert_eq!(drives[0].vendor, "ASUS");
+        assert_eq!(drives[0].product, "BW-16D1HT");
+        assert_eq!(drives[0].revision, "3.10");
+    }
+
+    #[test]
+    fn parse_drive_list_golden_windows_cdrom_path() {
+        let output = "00: \\\\.\\CdRom0\n  HL-DT-ST_DVD-RAM_GH24NSD1_LE00_SERIAL\n";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, r"\\.\CdRom0");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+    }
+
+    #[test]
+    fn parse_drive_list_multi_platform_mixed() {
+        // Simulate a capture that includes every platform path shape at once
+        // so a regression on any OS fails CI on all OS runners.
+        let output = "\
+Found 3 drives(s)
+00: /dev/sr0
+  HL-DT-ST_BD-RE_BU40N_1.03_SERIALAAAAAA_X
+01: E:
+  HL-DT-ST_BD-RE_BU50N_GE03_SERIALBBBBBB_Y
+02: /IOBDServices/F49D28A7
+  HL-DT-ST_BD-RE_BU50N_GE03_SERIALCCCCCC_Z
+";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 3);
+        assert_eq!(drives[0].device, "/dev/sr0");
+        assert_eq!(drives[1].device, "E:");
+        assert_eq!(drives[2].device, "/IOBDServices/F49D28A7");
+        assert_eq!(drives[1].revision, "GE03");
+        assert_eq!(drives[2].revision, "GE03");
+    }
+
+    #[test]
+    fn parse_drive_list_open_error_still_lists_device() {
+        let output = "\
+Found 1 drives(s)
+00: /dev/sr0
+  open error
+";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/dev/sr0");
+        assert!(drives[0].vendor.is_empty());
+        assert!(drives[0].product.is_empty());
+    }
+
+    #[test]
+    fn parse_drive_list_query_error_still_lists_device() {
+        let output = "\
+Found 1 drives(s)
+00: D:
+  query error
+";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "D:");
+    }
+
+    #[test]
+    fn parse_drive_list_macos_iodvd_path_only() {
+        let output = "0: /IODVDServices/AABBCCDD\n";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/IODVDServices/AABBCCDD");
+        assert!(drives[0].vendor.is_empty());
+    }
+
+    #[test]
+    fn parse_drive_list_windows_drive_letter_inline() {
+        let output = "0: E: HL-DT-ST BU40N 1.03\n";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "E:");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BU40N");
+        assert_eq!(drives[0].revision, "1.03");
+    }
+
+    #[test]
+    fn parse_drive_list_ignores_noise_and_empty() {
+        let output = "Found 0 drives(s)\nDEBUG: code=00000000\n";
+        assert!(parse_drive_list(output).is_empty());
+        assert!(parse_drive_list("").is_empty());
+    }
+
+    #[test]
+    fn parse_drive_list_two_digit_index_with_space() {
+        let output = "00: /dev/sr0 PIONEER BD-RW 1.00\n";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/dev/sr0");
+        assert_eq!(drives[0].product, "BD-RW");
+        assert_eq!(drives[0].revision, "1.00");
+    }
+
+    /// Old bug: single-char index strip turned `00: /IOBD…` into device `0:`.
+    #[test]
+    fn parse_drive_list_rejects_bogus_zero_colon_device() {
+        let output = "\
+Found 1 drives(s)
+00: /IOBDServices/F49D28A7
+  HL-DT-ST_BD-RE_BU50N_GE03_SERIAL_EXTRA
+";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_ne!(drives[0].device, "0:");
+        assert!(drives[0].device.starts_with('/'));
+    }
+
+    #[test]
+    fn is_drive_device_token_accepts_known_shapes() {
+        assert!(is_drive_device_token("/dev/sr0"));
+        assert!(is_drive_device_token("/dev/sg1"));
+        assert!(is_drive_device_token("/dev/rdisk4"));
+        assert!(is_drive_device_token("/IOBDServices/F49D28A7"));
+        assert!(is_drive_device_token("/IODVDServices/ABC"));
+        assert!(is_drive_device_token("D:"));
+        assert!(is_drive_device_token("e:"));
+        assert!(is_drive_device_token(r"\\.\D:"));
+        assert!(is_drive_device_token(r"\\.\CdRom0"));
+        assert!(is_drive_device_token(r"\\.\cdrom12"));
+        assert!(!is_drive_device_token("0:"));
+        assert!(!is_drive_device_token("HL-DT-ST"));
+        assert!(!is_drive_device_token(r"\\.\NotADrive"));
+        assert!(!is_drive_device_token(""));
+    }
+
+    #[test]
+    fn parse_underscore_identity_bu50n() {
+        let id =
+            parse_underscore_identity_full("HL-DT-ST_BD-RE_BU50N_GE03_211904231648_MODJ9TK3546");
+        assert_eq!(id.vendor, "HL-DT-ST");
+        assert_eq!(id.product, "BD-RE BU50N");
+        assert_eq!(id.revision, "GE03");
+        assert_eq!(id.firmware_date, "211904231648");
+        assert_eq!(id.serial, "MODJ9TK3546");
+        assert_eq!(
+            format_firmware_date_raw(&id.firmware_date),
+            "2119-04-23 16:48"
+        );
+    }
+
+    #[test]
+    fn parse_underscore_identity_short() {
+        let id = parse_underscore_identity_full("VENDOR_MODEL");
+        assert_eq!(id.vendor, "VENDOR");
+        assert_eq!(id.product, "MODEL");
+        assert!(id.revision.is_empty());
+        assert!(id.serial.is_empty());
+    }
+
+    #[test]
+    fn build_drive_id_matches_makemkv_append_str() {
+        // spaces → underscores (scsihlp.cpp AppendStr)
+        let d = Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BD-RE BU50N".into(),
+            revision: "GE03".into(),
+            ..Default::default()
+        };
+        assert_eq!(d.build_drive_id(), "HL-DT-ST_BD-RE_BU50N_GE03");
+    }
+
+    #[test]
+    fn resolve_selection_prefers_device_then_identity() {
+        let drives = vec![
+            Drive {
+                device: "/dev/sr0".into(),
+                vendor: "A".into(),
+                product: "B".into(),
+                revision: "1".into(),
+                ..Default::default()
+            },
+            Drive {
+                device: "/dev/sg2".into(),
+                vendor: "HL-DT-ST".into(),
+                product: "BU40N".into(),
+                revision: "1.03".into(),
+                ..Default::default()
+            },
+        ];
+        let prev = Drive {
+            device: "/dev/sg1".into(), // path changed
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_selection(&drives, Some(&prev), Some(0)),
+            Some(1),
+            "identity match should win over stale index"
+        );
+        assert_eq!(resolve_selection(&[], Some(&prev), Some(0)), None);
+        assert_eq!(resolve_selection(&drives, None, None), Some(0));
+    }
+
+    #[test]
+    fn parse_drive_list_format_b_inquiry_then_path() {
+        // MakeMKV RE format (01-sdftool-spec §3.1): inquiry on index line.
+        let output = "\
+Found 1 drives(s)
+00:  HL-DT-ST BD-RE BU50N GE03
+  /IOBDServices/F49D28A7
+";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/IOBDServices/F49D28A7");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BD-RE BU50N");
+        assert_eq!(drives[0].revision, "GE03");
+    }
+
+    #[test]
+    fn parse_drive_list_format_b_open_error_keeps_build_id_device() {
+        let output = "\
+Found 1 drives(s)
+00:  HL-DT-ST BU40N 1.03
+  open error
+";
+        let drives = parse_drive_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BU40N");
+        assert_eq!(drives[0].revision, "1.03");
+        // Fallback device is BuildDriveId so the row stays selectable.
+        assert_eq!(drives[0].device, "HL-DT-ST_BU40N_1.03");
+    }
+
+    #[test]
+    fn parse_drive_list_caps_at_max_optical_drives() {
+        let mut out = String::from("Found 20 drives(s)\n");
+        for i in 0..20 {
+            out.push_str(&format!(
+                "{i:02}: /dev/sr{i}\n  VEN_PROD_REV1_SERIALLONG_X\n"
+            ));
+        }
+        let drives = parse_drive_list(&out);
+        assert_eq!(drives.len(), MAX_OPTICAL_DRIVES);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn parse_ioreg_device_characteristics() {
+        let sample = r#"
++-o IOBDServices
+  | {
+  |   "Device Characteristics" = {"Product Name"="BD-RE BU50N","Vendor Name"="HL-DT-ST","Product Revision Level"="GE03"}
+  | }
+"#;
+        let drives = parse_ioreg_optical_services(sample, "IOBDServices");
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BD-RE BU50N");
+        assert_eq!(drives[0].revision, "GE03");
+        assert!(drives[0].device.contains("IOBDServices"));
+        assert!(drives[0].device.contains("HL-DT-ST_BD-RE_BU50N_GE03"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn merge_linux_prefers_sg_over_sr_same_identity() {
+        let sg = vec![Drive {
+            device: "/dev/sg1".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+            ..Default::default()
+        }];
+        let sr = vec![Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+            ..Default::default()
+        }];
+        let merged = merge_linux_drives(sg, sr);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].device, "/dev/sg1");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn parse_drutil_list_usb_bd() {
+        let output = "\
+   Vendor   Product           Rev   Bus       SupportLevel
+1  HL-DT-ST BD-RE BU50N       GE03  USB       Unsupported
+";
+        let drives = parse_drutil_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "drutil:1");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BD-RE BU50N");
+        assert_eq!(drives[0].revision, "GE03");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn parse_drutil_list_skips_header_only() {
+        let output = "   Vendor   Product           Rev   Bus       SupportLevel\n";
+        assert!(parse_drutil_list(output).is_empty());
+    }
+
     #[test]
     fn drive_match_prefers_probe() {
         let drive = Drive {
@@ -609,6 +1717,7 @@ mod tests {
             vendor: "HL-DT-ST".into(),
             product: "BU40N".into(),
             revision: "1.03".into(),
+            ..Default::default()
         };
         let probe = DriveIdentity {
             vendor: "HL-DT-ST".into(),

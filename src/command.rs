@@ -47,6 +47,34 @@ pub struct Plan {
     pub command: Command,
 }
 
+/// LibreDrive status from sdftool `--info` Identification SDF strings.
+///
+/// MakeMKV shows e.g. "Possible, not yet enabled" — not a plain bool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LibreDriveStatus {
+    #[default]
+    Unknown,
+    /// Not supported / not reported for this drive.
+    NotAvailable,
+    /// Supported by SDF but not yet activated on the drive.
+    PossibleNotEnabled,
+    /// LibreDrive active (or Drive-Specific SDF present).
+    Enabled,
+}
+
+impl LibreDriveStatus {
+    /// True when LibreDrive is fully enabled on the drive.
+    pub fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+
+    /// True when the feature is at least available (enabled or possible).
+    pub fn is_possible(self) -> bool {
+        matches!(self, Self::Enabled | Self::PossibleNotEnabled)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DriveSafety {
     pub mt1959: bool,
@@ -55,10 +83,9 @@ pub struct DriveSafety {
     pub encrypted_firmware: bool,
     pub firmware_date_prefix: Option<u32>,
     pub mtk_mode: Option<char>,
-    /// LibreDrive support — true when the SDF database has a drive-specific entry
-    /// (sdftool `--info` reports "Drive Specific SDF present").
+    /// LibreDrive status from Identification SDF / Drive Specific SDF lines.
     #[serde(default)]
-    pub libredrive: bool,
+    pub libredrive: LibreDriveStatus,
     /// SDF.bin version string (e.g. `"0x00A6"`) parsed from `--info` output.
     #[serde(default)]
     pub sdf_version: Option<String>,
@@ -283,11 +310,7 @@ pub fn classify_drive_safety(drive_label: &str, info_output: &str) -> DriveSafet
     let encrypted_firmware =
         matches!(firmware_date_prefix, Some(prefix) if prefix >= 2120) && mtk_mode != Some('M');
 
-    let libredrive = info_output.lines().any(|line| {
-        line.contains("Drive Specific SDF")
-            && line.contains("present")
-            && !line.contains("not present")
-    });
+    let libredrive = classify_libredrive_status(info_output);
     let sdf_version = info_output
         .lines()
         .find_map(|line| line.strip_prefix("SDF.bin version: ").map(str::trim))
@@ -302,6 +325,62 @@ pub fn classify_drive_safety(drive_label: &str, info_output: &str) -> DriveSafet
         libredrive,
         sdf_version,
     }
+}
+
+/// Parse LibreDrive status from `sdftool --info` text.
+///
+/// Prefer explicit Identification SDF status (`Possible, not yet enabled` /
+/// `Enabled`). Fall back to Drive Specific SDF present/not present.
+pub fn classify_libredrive_status(info_output: &str) -> LibreDriveStatus {
+    // Exact phrases used by MakeMKV/sdftool Identification strings.
+    if info_output.contains("Possible, not yet enabled")
+        || info_output.contains("Possible, not yet Enabled")
+    {
+        return LibreDriveStatus::PossibleNotEnabled;
+    }
+    for line in info_output.lines() {
+        let t = line.trim();
+        // "8102:Enabled" or bare "Enabled" after Status key
+        if let Some(rest) = t.strip_prefix("8102:") {
+            let r = rest.trim();
+            if r.eq_ignore_ascii_case("Enabled") {
+                return LibreDriveStatus::Enabled;
+            }
+            if r.to_ascii_lowercase().contains("possible") {
+                return LibreDriveStatus::PossibleNotEnabled;
+            }
+            if r.to_ascii_lowercase().contains("not possible") || r.eq_ignore_ascii_case("Disabled")
+            {
+                return LibreDriveStatus::NotAvailable;
+            }
+        }
+        if t.eq_ignore_ascii_case("Enabled") {
+            return LibreDriveStatus::Enabled;
+        }
+        if t.to_ascii_lowercase().contains("not possible") {
+            return LibreDriveStatus::NotAvailable;
+        }
+    }
+    let has_specific_present = info_output.lines().any(|line| {
+        let l = line.trim();
+        l.contains("Drive Specific SDF") && l.contains("present") && !l.contains("not present")
+    });
+    if has_specific_present {
+        return LibreDriveStatus::Enabled;
+    }
+    let has_specific_absent = info_output
+        .lines()
+        .any(|line| line.contains("Drive Specific SDF not present"));
+    let mentions_libredrive = info_output.contains("LibreDrive");
+    if has_specific_absent && mentions_libredrive {
+        // Identification present but not enabled is usually covered above;
+        // if we only saw "not present" without a status phrase:
+        return LibreDriveStatus::NotAvailable;
+    }
+    if mentions_libredrive {
+        return LibreDriveStatus::Unknown;
+    }
+    LibreDriveStatus::Unknown
 }
 
 fn extract_mtk_mode(line: &str) -> Option<char> {
@@ -701,7 +780,7 @@ mod tests {
     fn classify_libredrive_present() {
         let output = "SDF.bin version: 0x00A6\n\nDrive Specific SDF present\n";
         let safety = classify_drive_safety("D: drive", output);
-        assert!(safety.libredrive);
+        assert_eq!(safety.libredrive, LibreDriveStatus::Enabled);
         assert_eq!(safety.sdf_version.as_deref(), Some("0x00A6"));
     }
 
@@ -709,14 +788,35 @@ mod tests {
     fn classify_libredrive_not_present() {
         let output = "SDF.bin version: 0x00A6\n\nDrive Specific SDF not present\n";
         let safety = classify_drive_safety("D: drive", output);
-        assert!(!safety.libredrive);
+        // No LibreDrive mention → Unknown (not forced NotAvailable without section)
+        assert!(matches!(
+            safety.libredrive,
+            LibreDriveStatus::Unknown | LibreDriveStatus::NotAvailable
+        ));
         assert_eq!(safety.sdf_version.as_deref(), Some("0x00A6"));
+    }
+
+    #[test]
+    fn classify_libredrive_possible_not_enabled() {
+        let output = "\
+SDF.bin version: 0x00A6
+Drive Specific SDF not present
+Identification SDF present
+8000:LibreDrive Information
+8013:Status
+8102:Possible, not yet enabled
+8001:Drive platform
+:MT1959
+";
+        let safety = classify_drive_safety("D: drive", output);
+        assert_eq!(safety.libredrive, LibreDriveStatus::PossibleNotEnabled);
+        assert!(safety.mt1959);
     }
 
     #[test]
     fn classify_libredrive_absent_from_output() {
         let safety = classify_drive_safety("D: drive", "no SDF info at all");
-        assert!(!safety.libredrive);
+        assert_eq!(safety.libredrive, LibreDriveStatus::Unknown);
         assert!(safety.sdf_version.is_none());
     }
 
@@ -858,7 +958,7 @@ mod tests {
         assert!(safety.mt1959);
         assert!(!safety.mt1939); // defaults to false
         assert!(!safety.encrypted_firmware);
-        assert!(!safety.libredrive); // defaults to false
+        assert_eq!(safety.libredrive, LibreDriveStatus::Unknown); // default
         assert!(safety.sdf_version.is_none()); // defaults to None
     }
 }

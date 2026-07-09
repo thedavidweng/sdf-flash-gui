@@ -4,7 +4,7 @@ use crate::flash::FlashDirection;
 use crate::gui::file_dialog::{FileDialog, NativeDialog};
 use crate::gui::ops;
 use crate::gui::state::{AppState, ThemeChoice};
-use crate::gui::workers::WorkerMsg;
+use crate::gui::workers::{spawn_list_drives, WorkerMsg};
 use crate::i18n::{t, t_with_args, L10nKey, Language};
 use crate::platform::{self, DriveFormFactor};
 use crate::process;
@@ -58,7 +58,9 @@ pub fn show_main_ui(
             )
         });
         if refresh_resp.on_hover_text(refresh_hint).clicked() {
-            ops::refresh_drives(state);
+            // Backend `-l` is the source of truth (macOS USB optical uses
+            // /IOBDServices/… paths that OS enumeration cannot produce).
+            spawn_list_drives(worker_tx, state, runner);
         }
         let settings_text = t(L10nKey::TooltipSettings, state.chrome.resolved_lang);
         let settings_hint = if cfg!(target_os = "macos") {
@@ -238,8 +240,37 @@ pub fn show_main_ui(
             );
         }
         ui.add_space(GAP_TINY);
+        // Identity fields from list (MakeMKV BuildDriveId) + probe status.
+        let selected = state.selected_drive().cloned();
+        let lang = state.chrome.resolved_lang;
+        let na = t(L10nKey::LabelNotAvailable, lang);
+        let weak_color = ui.visuals().weak_text_color();
         ui.columns(2, |cols| {
-            cols[0].label(t(L10nKey::LabelMt1959Platform, state.chrome.resolved_lang));
+            let prop = |cols: &mut [egui::Ui], label_key: L10nKey, value: &str| {
+                cols[0].label(t(label_key, lang));
+                if value.is_empty() {
+                    cols[1].weak(na);
+                } else {
+                    cols[1].label(value);
+                }
+            };
+
+            if let Some(ref d) = selected {
+                prop(cols, L10nKey::LabelManufacturer, &d.vendor);
+                prop(cols, L10nKey::LabelProduct, &d.product);
+                prop(cols, L10nKey::LabelRevision, &d.revision);
+                prop(cols, L10nKey::LabelSerial, &d.serial);
+                let date = d.firmware_date_display();
+                prop(cols, L10nKey::LabelFirmwareDate, &date);
+            } else {
+                prop(cols, L10nKey::LabelManufacturer, "");
+                prop(cols, L10nKey::LabelProduct, "");
+                prop(cols, L10nKey::LabelRevision, "");
+                prop(cols, L10nKey::LabelSerial, "");
+                prop(cols, L10nKey::LabelFirmwareDate, "");
+            }
+
+            cols[0].label(t(L10nKey::LabelMt1959Platform, lang));
             status_indicator(
                 &mut cols[1],
                 state.runtime.probing,
@@ -247,10 +278,7 @@ pub fn show_main_ui(
                 state.drive.drive_mt1959,
             );
 
-            cols[0].label(t(
-                L10nKey::LabelEncryptedFirmware,
-                state.chrome.resolved_lang,
-            ));
+            cols[0].label(t(L10nKey::LabelEncryptedFirmware, lang));
             status_indicator(
                 &mut cols[1],
                 state.runtime.probing,
@@ -258,15 +286,33 @@ pub fn show_main_ui(
                 state.drive.drive_encrypted_firmware,
             );
 
-            cols[0].label(t(L10nKey::LabelLibreDrive, state.chrome.resolved_lang));
-            status_indicator(
-                &mut cols[1],
-                state.runtime.probing,
-                state.drive.drive_probed,
-                state.drive.drive_libredrive,
-            );
+            cols[0].label(t(L10nKey::LabelLibreDrive, lang));
+            if state.runtime.probing {
+                cols[1].add(egui::Spinner::new());
+            } else if !state.drive.drive_probed {
+                cols[1].weak("…");
+            } else {
+                let (text_key, color_ok) = match state.drive.drive_libredrive {
+                    crate::command::LibreDriveStatus::Enabled => (L10nKey::LibreDriveEnabled, true),
+                    crate::command::LibreDriveStatus::PossibleNotEnabled => {
+                        (L10nKey::LibreDrivePossible, true)
+                    }
+                    crate::command::LibreDriveStatus::NotAvailable => {
+                        (L10nKey::LibreDriveNotAvailable, false)
+                    }
+                    crate::command::LibreDriveStatus::Unknown => {
+                        (L10nKey::LibreDriveUnknown, false)
+                    }
+                };
+                let color = if color_ok {
+                    egui::Color32::from_rgb(120, 200, 120)
+                } else {
+                    weak_color
+                };
+                cols[1].colored_label(color, t(text_key, lang));
+            }
 
-            cols[0].label(t(L10nKey::LabelSdfVersion, state.chrome.resolved_lang));
+            cols[0].label(t(L10nKey::LabelSdfVersion, lang));
             if state.runtime.probing {
                 cols[1].add(egui::Spinner::new());
             } else if !state.drive.drive_probed {
