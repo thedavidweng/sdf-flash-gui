@@ -9,11 +9,14 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Address PR review on shared flash pipeline
 - Suppress no-manifest warnings on recover flash
 - Harden coverage ignore join and validate_flash log
+- Restore exit code 1 for dry-run flash without --confirm
 
 ### <!-- 2 -->🚜 Refactor
 
 - Share flash/probe pipeline between CLI and GUI
 - Drop dead SDF0 offset errors after structured-header gate
+- Remove unused manifest system
+- Fix PR review cleanup items
 
 ### <!-- 3 -->📚 Documentation
 
@@ -35,6 +38,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - Centralize coverage ignores and re-home NativeRunner
 - Pin Codecov patch to 100% and project to 99%
+- **changelog:** Sync CHANGELOG.md
 ## [0.2.0] - 2026-06-26
 
 ### <!-- 0 -->🚀 Features
