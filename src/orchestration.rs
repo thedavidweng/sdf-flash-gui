@@ -261,6 +261,9 @@ pub fn prepare_firmware_op(req: FirmwareOpRequest<'_>) -> Result<PreparedFirmwar
         )?;
         let would = report_val.would_execute;
         (Some(report_val), would, Vec::new())
+    } else if req.recover {
+        // Recovery never uses manifests; do not emit "no manifest" advisories.
+        (None, user_confirmed, Vec::new())
     } else {
         (
             None,
@@ -1267,6 +1270,39 @@ mod tests {
         })
         .unwrap_err();
         assert!(err.contains("cannot be combined"));
+    }
+
+    #[test]
+    fn prepare_firmware_op_recover_skips_no_manifest_warnings() {
+        let drive = test_drive();
+        let prepared = prepare_firmware_op(FirmwareOpRequest {
+            backend: crate::command::Backend::SdfTool,
+            tool_path: "/usr/bin/sdftool",
+            sdf_path: "",
+            device: "/dev/sr0",
+            drive_is_mt1959: true,
+            drive_match: &drive,
+            firmware_path: "/tmp/fw.bin",
+            firmware_data: &[0u8; 32],
+            manifest: None,
+            image_id: None,
+            encrypted: false,
+            include_boot_loader: false,
+            recover: true,
+            wrong_firmware: None,
+            recovery_token: Some("ABCDEFGHIJKLMNOP"),
+            confirm: FlashConfirm::Flag,
+            lang: Language::English,
+        })
+        .expect("recover prepare");
+        assert!(
+            prepared.no_manifest_warnings.is_empty(),
+            "recover must not emit write-mode no-manifest advisories: {:?}",
+            prepared.no_manifest_warnings
+        );
+        assert!(prepared.would_execute);
+        assert!(prepared.plan.is_some());
+        assert!(prepared.report.is_none());
     }
 
     #[cfg(unix)]
