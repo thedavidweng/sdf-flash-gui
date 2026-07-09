@@ -13,11 +13,14 @@ IGNORE_REGEX="$(
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [html|lcov|report]
+Usage: $(basename "$0") [html|lcov|report|gate]
 
   html    HTML report under target/llvm-cov/html (default)
   lcov    Write lcov.info (same as CI upload)
   report  Text summary with missing lines
+  gate    Run full suite coverage + enforce Codecov-equivalent gates:
+            - project line coverage >= 99% (codecov.yml)
+            - patch: 100% of changed executable lines under src/ (non-ignored)
 
 Ignore regex (from scripts/coverage-ignore.regex):
   ${IGNORE_REGEX}
@@ -37,6 +40,11 @@ case "$cmd" in
     ;;
   report)
     cargo llvm-cov --ignore-filename-regex "${IGNORE_REGEX}" --show-missing-lines
+    ;;
+  gate)
+    # Same generator CI uses (Ubuntu job uploads this lcov to Codecov).
+    cargo llvm-cov --lcov --output-path lcov.info --ignore-filename-regex "${IGNORE_REGEX}"
+    python3 "${ROOT}/scripts/coverage-gate.py" --lcov "${ROOT}/lcov.info"
     ;;
   *)
     usage

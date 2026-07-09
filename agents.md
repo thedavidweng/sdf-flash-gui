@@ -33,7 +33,12 @@ cargo test
 
 ### Coverage (required when touching `src/`)
 
-Matches CI on Linux (Codecov patch target is **100%**). Ignore set is centralized:
+Matches CI on Linux. Codecov (and the local/CI gate) enforce:
+
+- **project** line coverage ≥ **99%** (`codecov.yml`)
+- **patch** coverage **100%** on changed executable lines in non-ignored `src/`
+
+Ignore set is centralized:
 
 - `scripts/coverage-ignore.regex` — llvm-cov (CI + local)
 - `codecov.yml` `ignore:` — Codecov upload (must list the same paths)
@@ -42,9 +47,12 @@ Matches CI on Linux (Codecov patch target is **100%**). Ignore set is centralize
 cargo install cargo-llvm-cov   # once, if not installed
 
 ./scripts/coverage.sh html     # HTML under target/llvm-cov/html
-./scripts/coverage.sh lcov     # lcov.info (same as CI)
+./scripts/coverage.sh lcov     # lcov.info (same as CI upload)
 ./scripts/coverage.sh report   # text + missing lines
+./scripts/coverage.sh gate     # **required before push**: lcov + project/patch gates
 ```
+
+`gate` uses the **same lcov generator as Ubuntu CI**, then runs `scripts/coverage-gate.py`. Do not rely only on the Codecov PR check after push.
 
 Open `target/llvm-cov/html/index.html` and confirm changed **non-ignored** files have no meaningful uncovered branches in the diff.
 

@@ -531,6 +531,21 @@ mod tests {
     }
 
     #[test]
+    fn probe_drive_native_wrapper_maps_spawn_error() {
+        // Covers thin NativeRunner wrapper without writing executables.
+        let err = probe_drive(
+            crate::command::Backend::SdfTool,
+            "/nonexistent/sdftool_coverage_probe_xyz",
+            "/dev/sr0",
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("cannot probe") || err.contains("failed"),
+            "err={err}"
+        );
+    }
+
+    #[test]
     fn run_list_backend_success() {
         let runner = stdout_runner("0:/dev/sr0 HL-DT-ST BU40N 1.03\n");
         let out = run_list_backend_with(
@@ -541,6 +556,16 @@ mod tests {
         )
         .expect("list");
         assert!(out.stdout.contains("/dev/sr0") || out.combined().contains("/dev/sr0"));
+    }
+
+    #[test]
+    fn run_list_backend_native_wrapper_maps_spawn_error() {
+        let err = run_list_backend(
+            crate::command::Backend::SdfTool,
+            "/nonexistent/sdftool_coverage_list_xyz",
+        )
+        .unwrap_err();
+        assert!(err.contains("failed") || !err.is_empty(), "err={err}");
     }
 
     #[test]
@@ -565,6 +590,23 @@ mod tests {
         .expect("plan dump");
         execute_command_with(&runner, &plan.command).expect("dump");
         let _ = std::fs::remove_dir_all(&out_dir);
+    }
+
+    #[test]
+    fn run_dump_native_wrapper_maps_spawn_error() {
+        let out_dir =
+            std::env::temp_dir().join(format!("sdf_flash_dump_err_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&out_dir);
+        let err = run_dump(
+            crate::command::Backend::SdfTool,
+            "/nonexistent/sdftool_coverage_dump_xyz",
+            "",
+            "/dev/sr0",
+            &out_dir.to_string_lossy(),
+        )
+        .unwrap_err();
+        let _ = std::fs::remove_dir_all(&out_dir);
+        assert!(err.contains("failed") || !err.is_empty(), "err={err}");
     }
 
     #[test]

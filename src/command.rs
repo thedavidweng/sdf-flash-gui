@@ -354,11 +354,16 @@ pub fn classify_libredrive_status(info_output: &str) -> LibreDriveStatus {
             continue;
         }
 
-        // Full-line phrases (also match without 8102: prefix).
+        // Full-line phrases (also match without 8102: prefix). Use `t_lower`
+        // so unexpected casing still classifies correctly.
         if t_lower.contains("not possible") {
             return LibreDriveStatus::NotAvailable;
         }
-        if t.contains("Possible, not yet enabled") || t.contains("Possible, not yet Enabled") {
+        if t_lower.contains("possible, not yet enabled")
+            || (t_lower.contains("possible")
+                && t_lower.contains("not yet")
+                && !t_lower.contains("not possible"))
+        {
             return LibreDriveStatus::PossibleNotEnabled;
         }
         if t.eq_ignore_ascii_case("Enabled") {
@@ -865,6 +870,24 @@ Identification SDF present
     fn classify_libredrive_possible_capital_enabled_word() {
         assert_eq!(
             classify_libredrive_status("Status: Possible, not yet Enabled\n"),
+            LibreDriveStatus::PossibleNotEnabled
+        );
+    }
+
+    #[test]
+    fn classify_libredrive_possible_all_lowercase_line() {
+        assert_eq!(
+            classify_libredrive_status("status: possible, not yet enabled\n"),
+            LibreDriveStatus::PossibleNotEnabled
+        );
+    }
+
+    #[test]
+    fn classify_libredrive_possible_not_yet_without_comma_phrase() {
+        // Covers the second OR arm: possible && not yet && !not possible
+        // (without the exact "possible, not yet enabled" substring).
+        assert_eq!(
+            classify_libredrive_status("LibreDrive is possible — not yet active\n"),
             LibreDriveStatus::PossibleNotEnabled
         );
     }

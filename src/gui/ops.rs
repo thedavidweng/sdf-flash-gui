@@ -464,7 +464,9 @@ pub fn apply_drive_list(state: &mut AppState, drives: Vec<drive::Drive>) {
         .selected_drive
         .and_then(|i| state.drive.drives.get(i))
         .map(|d| d.device.clone());
-    if old_device != new_device {
+    // Must match workers DrivesListed: index can change with the same path
+    // (new drive inserted above) — keep probe cache consistent with selection.
+    if old_device != new_device || state.drive.selected_drive != prev_idx {
         state.drive.last_probed_drive = None;
         state.drive.drive_probed = false;
     }
@@ -1414,6 +1416,34 @@ mod tests {
         );
         assert_eq!(state.drive.selected_drive, Some(0));
         assert_eq!(state.drive.drives[0].device, "/dev/sg9");
+    }
+
+    #[test]
+    fn apply_drive_list_index_shift_same_path_invalidates_probe() {
+        // Devin: same device path at a new index must not keep stale probe flags.
+        let mut state = AppState::new_no_backend();
+        let target = crate::drive::Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+            ..Default::default()
+        };
+        state.drive.drives.push(target.clone());
+        state.drive.selected_drive = Some(0);
+        state.drive.last_probed_drive = Some(0);
+        state.drive.drive_probed = true;
+        let filler = crate::drive::Drive {
+            device: "/dev/sr9".into(),
+            vendor: "OTHER".into(),
+            product: "X".into(),
+            revision: "0".into(),
+            ..Default::default()
+        };
+        apply_drive_list(&mut state, vec![filler, target]);
+        assert_eq!(state.drive.selected_drive, Some(1));
+        assert!(state.drive.last_probed_drive.is_none());
+        assert!(!state.drive.drive_probed);
     }
 
     #[test]
