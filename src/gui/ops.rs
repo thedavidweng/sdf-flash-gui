@@ -1875,6 +1875,116 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn can_start_write_rejects_empty_firmware_path() {
+        let (mut state, temp_dir) = state_with_valid_paths("emptyfwpath");
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.flash.firmware_data = Some(vec![0u8; 8]);
+        state.flash.firmware_path.clear();
+        assert!(!can_start(&state));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn can_start_write_rejects_mode_conflict() {
+        let (mut state, temp_dir) = state_with_valid_paths("modeconflict");
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.flash.firmware_data = Some(vec![0u8; 8]);
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.encrypted_write = true;
+        state.flash.include_boot_loader = true;
+        assert!(!can_start(&state));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn start_disabled_reason_write_no_manifest_needs_confirmation() {
+        let (mut state, temp_dir) = state_with_valid_paths("nomfconfirm");
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.flash.firmware_data = Some(vec![0u8; 8]);
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.manifest = None;
+        state.flash.confirmation.clear();
+        let reason = start_disabled_reason(&state);
+        assert!(!reason.is_empty());
+        state.flash.confirmation =
+            crate::command::required_flash_confirmation(&test_drive().device);
+        assert!(start_disabled_reason(&state).is_empty());
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn start_disabled_reason_write_mode_conflict() {
+        let (mut state, temp_dir) = state_with_valid_paths("reasonconflict");
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.flash.firmware_data = Some(vec![0u8; 8]);
+        state.flash.encrypted_write = true;
+        state.flash.include_boot_loader = true;
+        let reason = start_disabled_reason(&state);
+        assert!(!reason.is_empty());
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn validate_flash_no_manifest_confirmed_logs_ready() {
+        let (mut state, temp_dir) = state_with_valid_paths("nomfready");
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.flash.manifest = None;
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.firmware_data = Some(vec![0u8; 16]);
+        state.flash.confirmation =
+            crate::command::required_flash_confirmation(&test_drive().device);
+        validate_flash(&mut state);
+        assert!(state.flash.flash_report.is_none());
+        assert!(
+            state.runtime.log_text.contains("WARNING")
+                || state.runtime.log_text.contains("Ready")
+                || state.runtime.log_text.to_lowercase().contains("manifest"),
+            "log: {}",
+            state.runtime.log_text
+        );
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn execute_start_write_prepare_error_logs() {
+        let (mut state, temp_dir) = state_with_valid_paths("prepfail");
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.flash.firmware_data = Some(vec![0u8; 8]);
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.encrypted_write = true;
+        state.flash.include_boot_loader = true;
+        state.flash.confirmation =
+            crate::command::required_flash_confirmation(&test_drive().device);
+        let (tx, _rx) = std::sync::mpsc::channel();
+        execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
+        assert!(!state.runtime.busy);
+        assert!(
+            state.runtime.log_text.contains("ERROR")
+                || state.runtime.log_text.contains("cannot be combined"),
+            "log: {}",
+            state.runtime.log_text
+        );
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
     fn can_start_write_without_manifest_with_confirmation() {
         let (mut state, temp_dir) = state_with_valid_paths("canwritenomf");
         state.drive.drives.push(test_drive());

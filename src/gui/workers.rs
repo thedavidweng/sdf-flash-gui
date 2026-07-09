@@ -760,6 +760,72 @@ mod tests {
 
     use crate::process::ProcessRunner;
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    /// Drain worker messages until `until` matches or timeout (Windows-safe vs fixed sleep).
+    fn collect_worker_msgs(
+        rx: &std::sync::mpsc::Receiver<WorkerMsg>,
+        until: impl Fn(&WorkerMsg) -> bool,
+        timeout: Duration,
+    ) -> Vec<WorkerMsg> {
+        let deadline = Instant::now() + timeout;
+        let mut msgs = Vec::new();
+        while Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(25)) {
+                Ok(msg) => {
+                    let done = until(&msg);
+                    msgs.push(msg);
+                    if done {
+                        break;
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        msgs
+    }
+
+    fn wait_for_operation_complete(rx: &std::sync::mpsc::Receiver<WorkerMsg>) -> Vec<WorkerMsg> {
+        collect_worker_msgs(
+            rx,
+            |m| {
+                matches!(
+                    m,
+                    WorkerMsg::OperationComplete { .. } | WorkerMsg::StopNeedsForceKill
+                )
+            },
+            Duration::from_secs(3),
+        )
+    }
+
+    fn wait_for_probe_complete(rx: &std::sync::mpsc::Receiver<WorkerMsg>) -> Vec<WorkerMsg> {
+        collect_worker_msgs(
+            rx,
+            |m| {
+                matches!(
+                    m,
+                    WorkerMsg::ProbeComplete { .. } | WorkerMsg::StopNeedsForceKill
+                )
+            },
+            Duration::from_secs(3),
+        )
+    }
+
+    fn wait_for_drives_listed(rx: &std::sync::mpsc::Receiver<WorkerMsg>) -> Vec<WorkerMsg> {
+        collect_worker_msgs(
+            rx,
+            |m| {
+                matches!(
+                    m,
+                    WorkerMsg::DrivesListed(_)
+                        | WorkerMsg::OperationComplete { .. }
+                        | WorkerMsg::StopNeedsForceKill
+                )
+            },
+            Duration::from_secs(3),
+        )
+    }
 
     enum MockOutcome {
         Success,
@@ -911,12 +977,8 @@ mod tests {
             Arc::new(MockRunner::success("Vendor: HL-DT-ST\nProduct: BU40N\n"));
         spawn_probe(&tx, &mut state, 0, &runner);
         // Wait for thread to finish
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_probe_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         // Should have: Status, Log (> command), Log (output), ProbeComplete
         assert!(messages.len() >= 3);
         let probe = messages.last().unwrap();
@@ -936,12 +998,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::failing());
         spawn_probe(&tx, &mut state, 0, &runner);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_probe_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         let probe = messages.last().unwrap();
         match probe {
             WorkerMsg::ProbeComplete { error, .. } => {
@@ -968,12 +1026,8 @@ mod tests {
             Language::English,
             Arc::new(OperationControl::new()),
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_operation_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         // Should have: Status, Log (> command), Log (line1), Log (line2), OperationComplete
         assert!(messages.len() >= 4);
         let last = messages.last().unwrap();
@@ -1001,12 +1055,8 @@ mod tests {
             Language::English,
             Arc::new(OperationControl::new()),
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_operation_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         let last = messages.last().unwrap();
         match last {
             WorkerMsg::OperationComplete { success, .. } => {
@@ -1024,12 +1074,8 @@ mod tests {
             Arc::new(MockRunner::success("0:/dev/sr0 HL-DT-ST BU40N 1.03\n"));
         spawn_list_drives(&tx, &mut state, &runner);
         assert!(state.runtime.busy);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         let last = messages.last().unwrap();
         match last {
             WorkerMsg::DrivesListed(drives) => {
@@ -1069,12 +1115,8 @@ mod tests {
             Language::English,
             Arc::new(OperationControl::new()),
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_operation_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         let last = messages.last().unwrap();
         assert!(matches!(
             last,
@@ -1098,12 +1140,8 @@ mod tests {
             Language::English,
             Arc::new(OperationControl::new()),
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_operation_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         assert!(matches!(
             messages.last(),
             Some(WorkerMsg::OperationComplete { success: false, .. })
@@ -1329,12 +1367,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::cancelled());
         spawn_probe(&tx, &mut state, 0, &runner);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_probe_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         assert!(matches!(
             messages.last(),
             Some(WorkerMsg::ProbeComplete { error: Some(_), .. })
@@ -1368,12 +1402,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::probe_failed());
         spawn_probe(&tx, &mut state, 0, &runner);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_probe_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         assert!(matches!(
             messages.last(),
             Some(WorkerMsg::ProbeComplete {
@@ -1390,12 +1420,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::cancelled());
         spawn_list_drives(&tx, &mut state, &runner);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         assert!(matches!(
             messages.last(),
             Some(WorkerMsg::OperationComplete { success: false, .. })
@@ -1451,12 +1477,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::failing());
         spawn_list_drives(&tx, &mut state, &runner);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         let last = messages.last().unwrap();
         match last {
             WorkerMsg::OperationComplete {

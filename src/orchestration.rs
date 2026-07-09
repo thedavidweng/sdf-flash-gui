@@ -938,15 +938,186 @@ mod tests {
     }
 
     #[test]
+    fn probe_error_display() {
+        assert!(ProbeError::Failed("x".into())
+            .to_string()
+            .contains("cannot probe"));
+        assert_eq!(ProbeError::Cancelled.to_string(), "probe cancelled");
+        assert!(ProbeError::NeedsForceKill
+            .to_string()
+            .contains("force kill"));
+    }
+
+    #[test]
     fn flash_confirm_flag_and_typed() {
         assert!(!FlashConfirm::None.is_confirmed("/dev/sr0"));
         assert!(FlashConfirm::Flag.is_confirmed("/dev/sr0"));
         assert!(FlashConfirm::Typed("FLASH /dev/sr0".into()).is_confirmed("/dev/sr0"));
         assert!(!FlashConfirm::Typed("nope".into()).is_confirmed("/dev/sr0"));
+        assert_eq!(FlashConfirm::None.plan_confirmation("/dev/sr0"), "");
         assert_eq!(
             FlashConfirm::Flag.plan_confirmation("/dev/sr0"),
             command::required_flash_confirmation("/dev/sr0")
         );
+        assert_eq!(
+            FlashConfirm::Typed("FLASH /dev/sr0".into()).plan_confirmation("/dev/sr0"),
+            "FLASH /dev/sr0"
+        );
+    }
+
+    struct OutcomeRunner {
+        outcome: Result<CommandRunOutcome, String>,
+    }
+
+    impl ProcessRunner for OutcomeRunner {
+        fn run_command(
+            &self,
+            _program: &str,
+            _args: &[String],
+            _control: Option<&OperationControl>,
+        ) -> Result<CommandRunOutcome, String> {
+            match &self.outcome {
+                Ok(CommandRunOutcome::Completed(out)) => {
+                    Ok(CommandRunOutcome::Completed(CommandOutput {
+                        status: out.status,
+                        stdout: out.stdout.clone(),
+                        stderr: out.stderr.clone(),
+                    }))
+                }
+                Ok(CommandRunOutcome::Cancelled) => Ok(CommandRunOutcome::Cancelled),
+                Ok(CommandRunOutcome::NeedsForceKill) => Ok(CommandRunOutcome::NeedsForceKill),
+                Err(e) => Err(e.clone()),
+            }
+        }
+
+        fn run_command_streaming(
+            &self,
+            program: &str,
+            args: &[String],
+            _on_line: &dyn Fn(&str),
+            control: Option<&OperationControl>,
+        ) -> Result<CommandRunOutcome, String> {
+            self.run_command(program, args, control)
+        }
+    }
+
+    fn exit_status(code: i32) -> std::process::ExitStatus {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(code)
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(code as u32)
+        }
+    }
+
+    #[test]
+    fn probe_drive_with_empty_failure_output() {
+        let runner = OutcomeRunner {
+            outcome: Ok(CommandRunOutcome::Completed(CommandOutput {
+                status: exit_status(1),
+                stdout: String::new(),
+                stderr: String::new(),
+            })),
+        };
+        let err = probe_drive_with(
+            crate::command::Backend::SdfTool,
+            "/usr/bin/sdftool",
+            "/dev/sr0",
+            &runner,
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ProbeError::Failed(ref m) if m.contains("probe command failed")));
+    }
+
+    #[test]
+    fn probe_drive_with_cancelled_and_force_kill() {
+        let cancelled = OutcomeRunner {
+            outcome: Ok(CommandRunOutcome::Cancelled),
+        };
+        assert!(matches!(
+            probe_drive_with(
+                crate::command::Backend::SdfTool,
+                "/usr/bin/sdftool",
+                "/dev/sr0",
+                &cancelled,
+                None,
+            ),
+            Err(ProbeError::Cancelled)
+        ));
+        let force = OutcomeRunner {
+            outcome: Ok(CommandRunOutcome::NeedsForceKill),
+        };
+        assert!(matches!(
+            probe_drive_with(
+                crate::command::Backend::SdfTool,
+                "/usr/bin/sdftool",
+                "/dev/sr0",
+                &force,
+                None,
+            ),
+            Err(ProbeError::NeedsForceKill)
+        ));
+    }
+
+    #[test]
+    fn execute_command_with_cancel_outcomes() {
+        let cmd = crate::command::Command {
+            program: "echo".into(),
+            args: vec![],
+        };
+        let cancelled = OutcomeRunner {
+            outcome: Ok(CommandRunOutcome::Cancelled),
+        };
+        assert!(execute_command_with(&cancelled, &cmd)
+            .unwrap_err()
+            .contains("cancelled"));
+        let force = OutcomeRunner {
+            outcome: Ok(CommandRunOutcome::NeedsForceKill),
+        };
+        assert!(execute_command_with(&force, &cmd)
+            .unwrap_err()
+            .contains("force kill"));
+        let failed = OutcomeRunner {
+            outcome: Ok(CommandRunOutcome::Completed(CommandOutput {
+                status: exit_status(1),
+                stdout: "nope".into(),
+                stderr: String::new(),
+            })),
+        };
+        assert_eq!(execute_command_with(&failed, &cmd).unwrap_err(), "nope");
+    }
+
+    #[test]
+    fn run_list_backend_with_typed_errors() {
+        let cancelled = OutcomeRunner {
+            outcome: Ok(CommandRunOutcome::Cancelled),
+        };
+        assert!(matches!(
+            run_list_backend_with(
+                crate::command::Backend::SdfTool,
+                "/usr/bin/sdftool",
+                &cancelled,
+                None,
+            ),
+            Err(BackendOpError::Cancelled)
+        ));
+        let force = OutcomeRunner {
+            outcome: Ok(CommandRunOutcome::NeedsForceKill),
+        };
+        assert!(matches!(
+            run_list_backend_with(
+                crate::command::Backend::SdfTool,
+                "/usr/bin/sdftool",
+                &force,
+                None,
+            ),
+            Err(BackendOpError::NeedsForceKill)
+        ));
     }
 
     #[test]

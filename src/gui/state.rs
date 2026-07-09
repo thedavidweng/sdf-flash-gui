@@ -359,6 +359,12 @@ mod tests {
     }
 
     #[test]
+    fn find_sdf_bin_matches_drive_module() {
+        // Re-export must stay in sync with drive::find_sdf_bin.
+        assert_eq!(find_sdf_bin(), drive::find_sdf_bin());
+    }
+
+    #[test]
     fn new_no_backend_defaults() {
         let state = AppState::new_no_backend();
         assert_eq!(state.runtime.status_message, "Ready");

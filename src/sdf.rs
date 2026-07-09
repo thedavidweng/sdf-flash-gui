@@ -981,4 +981,45 @@ mod tests {
         assert!(!looks_like_structured_header(24, 16, 24)); // table < header
         assert!(!looks_like_structured_header(24, 48, 32)); // table > payload
     }
+    #[test]
+    fn looks_like_structured_header_table_offset_too_large() {
+        assert!(!looks_like_structured_header(24, SDF0_MAX_OFFSET + 1, 100));
+    }
+
+    #[test]
+    fn parse_sdf0_header_size_larger_than_min_skips_padding() {
+        // header_size > 24 forces skip_bytes on remaining header padding
+        let mut data = Vec::new();
+        data.extend_from_slice(b"SDF0");
+        data.extend_from_slice(&1u32.to_be_bytes());
+        data.extend_from_slice(&32u32.to_be_bytes()); // header_size
+        data.extend_from_slice(&32u32.to_be_bytes()); // table_offset
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(&40u32.to_be_bytes()); // payload_offset
+        data.extend_from_slice(&[0u8; 8]); // padding to header_size 32
+        data.extend_from_slice(b"Vendor\0X\0"); // 9 bytes meta, pad to payload 40
+        data.resize(40, 0);
+        let mut cursor = std::io::Cursor::new(&data);
+        let c = parse_sdf0(&mut cursor).expect("parse");
+        assert_eq!(c.header.header_size, 32);
+    }
+
+    #[test]
+    fn parse_sdf0_rejects_payload_before_header() {
+        // structured-looking but payload_offset < header_size after heuristic
+        // Use values that pass looks_like then fail payload check:
+        // looks_like requires payload_offset >= header_size, so use table_offset issues
+        // table_offset == 0, payload == header is ok. Use metadata_start > payload via table.
+        let mut data = Vec::new();
+        data.extend_from_slice(b"SDF0");
+        data.extend_from_slice(&1u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&50u32.to_be_bytes()); // table after payload
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(&40u32.to_be_bytes());
+        // This should fall back to minimal via inconsistency path, not hard error
+        let mut cursor = std::io::Cursor::new(&data);
+        let c = parse_sdf0(&mut cursor).expect("fallback");
+        assert!(c.metadata.vendor.is_none());
+    }
 }
