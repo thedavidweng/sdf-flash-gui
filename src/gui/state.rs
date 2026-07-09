@@ -53,7 +53,6 @@ pub struct DriveState {
     pub drive_mt1959: bool,
     pub drive_mt1939: bool,
     pub drive_encrypted_firmware: bool,
-    pub drive_libredrive: bool,
     pub drive_probed: bool,
 }
 
@@ -130,7 +129,6 @@ impl AppState {
                 drive_mt1959: false,
                 drive_mt1939: false,
                 drive_encrypted_firmware: false,
-                drive_libredrive: false,
                 drive_probed: false,
             },
             flash: FlashWorkflow {

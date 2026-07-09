@@ -24,7 +24,6 @@ pub enum WorkerMsg {
         mt1959: bool,
         mt1939: bool,
         encrypted_firmware: bool,
-        libredrive: bool,
         error: Option<String>,
     },
     OperationComplete {
@@ -66,7 +65,6 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
             mt1959,
             mt1939,
             encrypted_firmware,
-            libredrive,
             error,
         } => {
             let success = error.is_none();
@@ -74,7 +72,6 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
                 state.drive.drive_mt1959 = mt1959;
                 state.drive.drive_mt1939 = mt1939;
                 state.drive.drive_encrypted_firmware = encrypted_firmware;
-                state.drive.drive_libredrive = libredrive;
                 if success {
                     state.flash.encrypted_write = encrypted_firmware;
                 }
@@ -236,7 +233,6 @@ pub fn spawn_probe(
             mt1959: false,
             mt1939: false,
             encrypted_firmware: false,
-            libredrive: false,
             error: Some(t(L10nKey::ReasonNoBackend, state.chrome.resolved_lang).into()),
         });
         return;
@@ -280,7 +276,6 @@ pub fn spawn_probe(
                     mt1959: probe.safety.mt1959,
                     mt1939: probe.safety.mt1939,
                     encrypted_firmware: probe.safety.encrypted_firmware,
-                    libredrive: probe.safety.libredrive,
                     error: None,
                 });
             }
@@ -290,7 +285,6 @@ pub fn spawn_probe(
                     mt1959: false,
                     mt1939: false,
                     encrypted_firmware: false,
-                    libredrive: false,
                     error: Some(t(L10nKey::StatusProbeFailed, lang).into()),
                 });
             }
@@ -305,7 +299,6 @@ pub fn spawn_probe(
                     mt1959: false,
                     mt1939: false,
                     encrypted_firmware: false,
-                    libredrive: false,
                     error: Some(e),
                 });
             }
@@ -546,7 +539,6 @@ mod tests {
             mt1959: true,
             mt1939: false,
             encrypted_firmware: true,
-            libredrive: false,
             error: None,
         });
         drop(tx);
@@ -573,7 +565,6 @@ mod tests {
             mt1959: false,
             mt1939: false,
             encrypted_firmware: false,
-            libredrive: false,
             error: Some("probe failed".into()),
         });
         drop(tx);
@@ -596,7 +587,6 @@ mod tests {
             mt1959: true,
             mt1939: false,
             encrypted_firmware: true,
-            libredrive: false,
             error: None,
         });
         drop(tx);

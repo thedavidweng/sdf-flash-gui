@@ -257,14 +257,6 @@ pub fn show_main_ui(
                 state.drive.drive_probed,
                 state.drive.drive_encrypted_firmware,
             );
-
-            cols[0].label(t(L10nKey::LabelLibreDrive, state.chrome.resolved_lang));
-            status_indicator(
-                &mut cols[1],
-                state.runtime.probing,
-                state.drive.drive_probed,
-                state.drive.drive_libredrive,
-            );
         });
 
         ui.add_space(GAP_MEDIUM);
