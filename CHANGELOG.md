@@ -4,10 +4,37 @@ All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 ## [Unreleased]
 
+### <!-- 1 -->🐛 Bug Fixes
+
+- Address PR review on shared flash pipeline
+- Suppress no-manifest warnings on recover flash
+- Harden coverage ignore join and validate_flash log
+
+### <!-- 2 -->🚜 Refactor
+
+- Share flash/probe pipeline between CLI and GUI
+- Drop dead SDF0 offset errors after structured-header gate
+
+### <!-- 3 -->📚 Documentation
+
+- Align agents.md Codecov patch target with 100% gate
+
+### <!-- 6 -->🧪 Testing
+
+- Raise coverage and harden worker spawn waits
+- Fix duplicate test attribute and dead-code warning
+- Cover OutcomeRunner streaming and Failed list path
+- Close remaining patch gaps and pin Codecov thresholds
+- Cover remaining patch gaps in ops and workers
+- Cover ops/workers patch residual branches
+
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
 - **changelog:** Sync CHANGELOG.md for v0.2.0
 - Ignore legacy SDFFlashGUI DMGs when updating homebrew tap
+- **changelog:** Sync CHANGELOG.md
+- Centralize coverage ignores and re-home NativeRunner
+- Pin Codecov patch to 100% and project to 99%
 ## [0.2.0] - 2026-06-26
 
 ### <!-- 0 -->🚀 Features
