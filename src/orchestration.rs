@@ -595,6 +595,8 @@ mod tests {
                     encrypted_firmware: false,
                     firmware_date_prefix: None,
                     mtk_mode: None,
+                    libredrive: false,
+                    sdf_version: None,
                 },
                 identity: test_identity(),
                 output: String::new(),
@@ -882,6 +884,25 @@ mod tests {
         assert!(probe.safety.mt1959);
         assert_eq!(probe.identity.vendor, "HL-DT-ST");
         assert_eq!(probe.identity.model, "BU40N");
+    }
+
+    #[test]
+    fn probe_from_output_detects_libredrive() {
+        let probe = probe_from_output(
+            "/dev/sr0",
+            "SDF.bin version: 0x00A6\n\nDrive Specific SDF present\n",
+        );
+        assert!(probe.safety.libredrive);
+        assert_eq!(probe.safety.sdf_version.as_deref(), Some("0x00A6"));
+    }
+
+    #[test]
+    fn probe_from_output_no_libredrive_when_absent() {
+        let probe = probe_from_output(
+            "/dev/sr0",
+            "SDF.bin version: 0x00A6\n\nDrive Specific SDF not present\n",
+        );
+        assert!(!probe.safety.libredrive);
     }
 
     #[test]

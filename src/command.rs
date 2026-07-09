@@ -55,6 +55,13 @@ pub struct DriveSafety {
     pub encrypted_firmware: bool,
     pub firmware_date_prefix: Option<u32>,
     pub mtk_mode: Option<char>,
+    /// LibreDrive support — true when the SDF database has a drive-specific entry
+    /// (sdftool `--info` reports "Drive Specific SDF present").
+    #[serde(default)]
+    pub libredrive: bool,
+    /// SDF.bin version string (e.g. `"0x00A6"`) parsed from `--info` output.
+    #[serde(default)]
+    pub sdf_version: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -276,12 +283,24 @@ pub fn classify_drive_safety(drive_label: &str, info_output: &str) -> DriveSafet
     let encrypted_firmware =
         matches!(firmware_date_prefix, Some(prefix) if prefix >= 2120) && mtk_mode != Some('M');
 
+    let libredrive = info_output.lines().any(|line| {
+        line.contains("Drive Specific SDF")
+            && line.contains("present")
+            && !line.contains("not present")
+    });
+    let sdf_version = info_output
+        .lines()
+        .find_map(|line| line.strip_prefix("SDF.bin version: ").map(str::trim))
+        .map(|s| s.to_string());
+
     DriveSafety {
         mt1959,
         mt1939,
         encrypted_firmware,
         firmware_date_prefix,
         mtk_mode,
+        libredrive,
+        sdf_version,
     }
 }
 
@@ -679,6 +698,36 @@ mod tests {
     }
 
     #[test]
+    fn classify_libredrive_present() {
+        let output = "SDF.bin version: 0x00A6\n\nDrive Specific SDF present\n";
+        let safety = classify_drive_safety("D: drive", output);
+        assert!(safety.libredrive);
+        assert_eq!(safety.sdf_version.as_deref(), Some("0x00A6"));
+    }
+
+    #[test]
+    fn classify_libredrive_not_present() {
+        let output = "SDF.bin version: 0x00A6\n\nDrive Specific SDF not present\n";
+        let safety = classify_drive_safety("D: drive", output);
+        assert!(!safety.libredrive);
+        assert_eq!(safety.sdf_version.as_deref(), Some("0x00A6"));
+    }
+
+    #[test]
+    fn classify_libredrive_absent_from_output() {
+        let safety = classify_drive_safety("D: drive", "no SDF info at all");
+        assert!(!safety.libredrive);
+        assert!(safety.sdf_version.is_none());
+    }
+
+    #[test]
+    fn classify_sdf_version_strips_whitespace() {
+        let output = "SDF.bin version: 0x00B0  \n";
+        let safety = classify_drive_safety("D: drive", output);
+        assert_eq!(safety.sdf_version.as_deref(), Some("0x00B0"));
+    }
+
+    #[test]
     fn required_flash_confirmation_trims() {
         assert_eq!(required_flash_confirmation("  H:  "), "FLASH H:");
     }
@@ -809,5 +858,7 @@ mod tests {
         assert!(safety.mt1959);
         assert!(!safety.mt1939); // defaults to false
         assert!(!safety.encrypted_firmware);
+        assert!(!safety.libredrive); // defaults to false
+        assert!(safety.sdf_version.is_none()); // defaults to None
     }
 }
