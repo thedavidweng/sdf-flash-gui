@@ -782,6 +782,8 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.drive.drives.push(test_drive());
         state.drive.selected_drive = Some(0);
+        state.drive.last_probed_drive = Some(0);
+        state.drive.drive_probed = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::DrivesListed(vec![
             test_drive(),
@@ -795,9 +797,43 @@ mod tests {
         ]));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
-        // Same device path → stay on that drive.
+        // Same device path → stay on that drive; probe cache stays valid.
         assert_eq!(state.drive.selected_drive, Some(0));
         assert_eq!(state.drive.drives.len(), 2);
+        assert_eq!(state.drive.last_probed_drive, Some(0));
+        assert!(state.drive.drive_probed);
+    }
+
+    #[test]
+    fn drain_drives_listed_same_device_new_index_invalidates_probe() {
+        // Cover `selected_drive != prev_idx` when the device *path* is unchanged
+        // (path match moves from index 0 → 1).
+        let mut state = AppState::new_no_backend();
+        let target = crate::drive::Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+            ..Default::default()
+        };
+        state.drive.drives.push(target.clone());
+        state.drive.selected_drive = Some(0);
+        state.drive.last_probed_drive = Some(0);
+        state.drive.drive_probed = true;
+        let filler = crate::drive::Drive {
+            device: "/dev/sr9".into(),
+            vendor: "OTHER".into(),
+            product: "X".into(),
+            revision: "0".into(),
+            ..Default::default()
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(WorkerMsg::DrivesListed(vec![filler, target]));
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert_eq!(state.drive.selected_drive, Some(1));
+        assert!(state.drive.last_probed_drive.is_none());
+        assert!(!state.drive.drive_probed);
     }
 
     #[test]
@@ -853,10 +889,10 @@ mod tests {
         assert!(state.drive.drives.is_empty());
         assert_eq!(state.drive.selected_drive, None);
         assert!(!state.runtime.busy);
-        let status = state.runtime.status_message.to_lowercase();
-        assert!(
-            status.contains("no") || status.contains("drive"),
-            "status should reflect empty list, got: {status}"
+        // Exact status key — avoid dead `||` branches in loose substring asserts (patch coverage).
+        assert_eq!(
+            state.runtime.status_message,
+            t(L10nKey::StatusNoDrives, state.chrome.resolved_lang)
         );
     }
 
@@ -1280,14 +1316,24 @@ mod tests {
         assert!(state.runtime.busy);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        let last = messages.last().unwrap();
-        match last {
-            WorkerMsg::DrivesListed(drives) => {
-                assert_eq!(drives.len(), 1);
-                assert_eq!(drives[0].device, "/dev/sr0");
-            }
-            _ => panic!("expected DrivesListed"),
-        }
+        let drives = expect_drives_listed(&messages);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/dev/sr0");
+    }
+
+    /// Pull `DrivesListed` out of a worker message stream.
+    ///
+    /// Uses `find_map` so Log/Status/Progress messages exercise the skip arm —
+    /// avoids a never-taken `panic!` match arm counting against Codecov patch
+    /// coverage when the test succeeds.
+    fn expect_drives_listed(messages: &[WorkerMsg]) -> &[crate::drive::Drive] {
+        messages
+            .iter()
+            .find_map(|m| match m {
+                WorkerMsg::DrivesListed(d) => Some(d.as_slice()),
+                _ => None,
+            })
+            .expect("DrivesListed message missing")
     }
 
     #[test]
@@ -1304,16 +1350,12 @@ Found 1 drives(s)
         spawn_list_drives(&tx, &mut state, &runner);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        match messages.last().unwrap() {
-            WorkerMsg::DrivesListed(drives) => {
-                assert_eq!(drives.len(), 1);
-                assert_eq!(drives[0].device, "/IOBDServices/F49D28A7");
-                assert_eq!(drives[0].vendor, "HL-DT-ST");
-                assert_eq!(drives[0].product, "BD-RE BU50N");
-                assert_eq!(drives[0].revision, "GE03");
-            }
-            _ => panic!("expected DrivesListed"),
-        }
+        let drives = expect_drives_listed(&messages);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/IOBDServices/F49D28A7");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BD-RE BU50N");
+        assert_eq!(drives[0].revision, "GE03");
     }
 
     #[test]
@@ -1330,14 +1372,10 @@ Found 1 drives(s)
         spawn_list_drives(&tx, &mut state, &runner);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        match messages.last().unwrap() {
-            WorkerMsg::DrivesListed(drives) => {
-                assert_eq!(drives.len(), 1);
-                assert_eq!(drives[0].device, "E:");
-                assert_eq!(drives[0].revision, "GE03");
-            }
-            _ => panic!("expected DrivesListed"),
-        }
+        let drives = expect_drives_listed(&messages);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "E:");
+        assert_eq!(drives[0].revision, "GE03");
     }
 
     #[test]
@@ -1354,14 +1392,10 @@ Found 1 drives(s)
         spawn_list_drives(&tx, &mut state, &runner);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        match messages.last().unwrap() {
-            WorkerMsg::DrivesListed(drives) => {
-                assert_eq!(drives.len(), 1);
-                assert_eq!(drives[0].device, "/dev/sr0");
-                assert_eq!(drives[0].revision, "1.03");
-            }
-            _ => panic!("expected DrivesListed"),
-        }
+        let drives = expect_drives_listed(&messages);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/dev/sr0");
+        assert_eq!(drives[0].revision, "1.03");
     }
 
     #[test]
