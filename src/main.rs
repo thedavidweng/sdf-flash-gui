@@ -137,7 +137,7 @@ fn print_flash_help() {
 }
 
 fn find_backend() -> (command::Backend, String) {
-    drive::find_backend().unwrap_or_else(|| {
+    drive::find_backend(command::Backend::SdfTool).unwrap_or_else(|| {
         eprintln!("ERROR: sdftool or makemkvcon not found. Install MakeMKV or sdftool.");
         std::process::exit(1);
     })

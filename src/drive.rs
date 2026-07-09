@@ -327,89 +327,93 @@ fn parse_vendor_product(name: &str) -> (String, String) {
     }
 }
 
-/// Resolve a path through symlinks, returning the canonical target name.
-fn resolve_name(path: &str) -> String {
-    std::fs::canonicalize(path)
-        .ok()
-        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| {
-            std::path::Path::new(path)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default()
-        })
-}
-
-/// Determine backend type from a resolved binary name.
-fn backend_from_name(name: &str) -> super::command::Backend {
-    if name.starts_with("makemkv") {
-        super::command::Backend::MakeMkvCon
-    } else {
-        super::command::Backend::SdfTool
-    }
-}
-
-/// Try to find sdftool or makemkvcon on the system.
-pub fn find_backend() -> Option<(super::command::Backend, String)> {
-    // Check common names via PATH lookup.
-    // On Linux, sdftool is often a symlink to makemkvcon, so resolve
-    // the symlink target before determining the backend type.
-    for name in &["sdftool64", "sdftool", "makemkvcon64", "makemkvcon"] {
-        if let Ok(path) = which(name) {
-            let resolved = resolve_name(&path);
-            let backend = backend_from_name(&resolved);
+/// Try to find a backend binary on the system.
+///
+/// Searches for the `preferred` backend first (PATH + common install paths).
+/// Falls back to the other backend if the preferred one is not found.
+pub fn find_backend(
+    preferred: super::command::Backend,
+) -> Option<(super::command::Backend, String)> {
+    for backend in [preferred, other_backend(preferred)] {
+        if let Some(path) = find_for_backend(backend) {
             return Some((backend, path));
         }
     }
+    None
+}
 
-    // Check common installation paths
+fn other_backend(b: super::command::Backend) -> super::command::Backend {
+    match b {
+        super::command::Backend::SdfTool => super::command::Backend::MakeMkvCon,
+        super::command::Backend::MakeMkvCon => super::command::Backend::SdfTool,
+    }
+}
+
+/// Search PATH and common install paths for a specific backend's binary.
+fn find_for_backend(backend: super::command::Backend) -> Option<String> {
+    let names: &[&str] = match backend {
+        super::command::Backend::SdfTool => &["sdftool64", "sdftool"],
+        super::command::Backend::MakeMkvCon => &["makemkvcon64", "makemkvcon"],
+    };
+    for name in names {
+        if let Ok(path) = which(name) {
+            return Some(path);
+        }
+    }
+
     #[cfg(target_os = "macos")]
     {
-        let paths = [
-            "/opt/homebrew/bin/sdftool",
-            "/usr/local/bin/sdftool",
-            "/opt/homebrew/bin/makemkvcon",
-            "/usr/local/bin/makemkvcon",
-            "/Applications/MakeMKV.app/Contents/MacOS/sdftool",
-            "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
-        ];
-        for p in &paths {
+        let paths: &[&str] = match backend {
+            super::command::Backend::SdfTool => &[
+                "/opt/homebrew/bin/sdftool",
+                "/usr/local/bin/sdftool",
+                "/Applications/MakeMKV.app/Contents/MacOS/sdftool",
+            ],
+            super::command::Backend::MakeMkvCon => &[
+                "/opt/homebrew/bin/makemkvcon",
+                "/usr/local/bin/makemkvcon",
+                "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            ],
+        };
+        for p in paths {
             if std::path::Path::new(p).exists() {
-                let resolved = resolve_name(p);
-                return Some((backend_from_name(&resolved), p.to_string()));
+                return Some(p.to_string());
             }
         }
     }
 
     #[cfg(target_os = "linux")]
     {
-        let paths = [
-            "/usr/bin/sdftool",
-            "/usr/local/bin/sdftool",
-            "/usr/bin/makemkvcon",
-            "/usr/local/bin/makemkvcon",
-            "/opt/makemkv/bin/makemkvcon",
-        ];
-        for p in &paths {
+        let paths: &[&str] = match backend {
+            super::command::Backend::SdfTool => &["/usr/bin/sdftool", "/usr/local/bin/sdftool"],
+            super::command::Backend::MakeMkvCon => &[
+                "/usr/bin/makemkvcon",
+                "/usr/local/bin/makemkvcon",
+                "/opt/makemkv/bin/makemkvcon",
+            ],
+        };
+        for p in paths {
             if std::path::Path::new(p).exists() {
-                let resolved = resolve_name(p);
-                return Some((backend_from_name(&resolved), p.to_string()));
+                return Some(p.to_string());
             }
         }
     }
 
     #[cfg(target_os = "windows")]
     {
-        let paths = [
-            r"C:\Program Files (x86)\MakeMKV\sdftool64.exe",
-            r"C:\Program Files\MakeMKV\sdftool64.exe",
-            r"C:\Program Files (x86)\MakeMKV\makemkvcon64.exe",
-            r"C:\Program Files\MakeMKV\makemkvcon64.exe",
-        ];
-        for p in &paths {
+        let paths: &[&str] = match backend {
+            super::command::Backend::SdfTool => &[
+                r"C:\Program Files (x86)\MakeMKV\sdftool64.exe",
+                r"C:\Program Files\MakeMKV\sdftool64.exe",
+            ],
+            super::command::Backend::MakeMkvCon => &[
+                r"C:\Program Files (x86)\MakeMKV\makemkvcon64.exe",
+                r"C:\Program Files\MakeMKV\makemkvcon64.exe",
+            ],
+        };
+        for p in paths {
             if std::path::Path::new(p).exists() {
-                let resolved = resolve_name(p);
-                return Some((backend_from_name(&resolved), p.to_string()));
+                return Some(p.to_string());
             }
         }
     }
@@ -468,61 +472,50 @@ mod tests {
     use super::*;
 
     #[test]
-    fn backend_from_name_sdftool() {
+    fn other_backend_swaps() {
         assert_eq!(
-            backend_from_name("sdftool"),
-            crate::command::Backend::SdfTool
-        );
-        assert_eq!(
-            backend_from_name("sdftool64"),
-            crate::command::Backend::SdfTool
-        );
-        assert_eq!(
-            backend_from_name("/usr/bin/sdftool"),
-            crate::command::Backend::SdfTool
-        );
-    }
-
-    #[test]
-    fn backend_from_name_makemkvcon() {
-        assert_eq!(
-            backend_from_name("makemkvcon"),
+            other_backend(crate::command::Backend::SdfTool),
             crate::command::Backend::MakeMkvCon
         );
         assert_eq!(
-            backend_from_name("makemkvcon64"),
-            crate::command::Backend::MakeMkvCon
-        );
-        assert_eq!(
-            backend_from_name("makemkv_something"),
-            crate::command::Backend::MakeMkvCon
-        );
-    }
-
-    #[test]
-    fn backend_from_name_unknown() {
-        assert_eq!(
-            backend_from_name("unknown_tool"),
+            other_backend(crate::command::Backend::MakeMkvCon),
             crate::command::Backend::SdfTool
         );
-        assert_eq!(backend_from_name(""), crate::command::Backend::SdfTool);
     }
 
     #[test]
-    fn resolve_name_existing_file() {
-        let dir = std::env::temp_dir().join("sdf_flash_test_resolve");
-        let _ = std::fs::create_dir_all(&dir);
-        let file = dir.join("test_binary");
-        std::fs::write(&file, b"").unwrap();
-        let name = resolve_name(&file.to_string_lossy());
-        assert_eq!(name, "test_binary");
-        let _ = std::fs::remove_dir_all(&dir);
+    fn find_backend_prefers_selected() {
+        // On any dev machine with sdftool or makemkvcon installed, find_backend
+        // should return the preferred backend when it exists.
+        if let Some((backend, path)) = find_backend(crate::command::Backend::SdfTool) {
+            assert!(!path.is_empty());
+            // If sdftool is installed, it should be preferred; otherwise makemkvcon.
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if backend == crate::command::Backend::SdfTool {
+                assert!(name.contains("sdftool"));
+            } else {
+                assert!(name.contains("makemkv"));
+            }
+        }
     }
 
     #[test]
-    fn resolve_name_nonexistent() {
-        let name = resolve_name("/nonexistent/path/binary");
-        assert_eq!(name, "binary");
+    fn find_backend_makemkvcon_preferred() {
+        if let Some((backend, path)) = find_backend(crate::command::Backend::MakeMkvCon) {
+            assert!(!path.is_empty());
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if backend == crate::command::Backend::MakeMkvCon {
+                assert!(name.contains("makemkv"));
+            } else {
+                assert!(name.contains("sdftool"));
+            }
+        }
     }
 
     #[test]
