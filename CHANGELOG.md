@@ -8,6 +8,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 
 - Detect LibreDrive support from sdftool --info output
 - Show SDF.bin version in Drive Properties panel
+- Robust optical drive detection and MakeMKV-style properties
 
 ### <!-- 1 -->🐛 Bug Fixes
 
@@ -15,10 +16,18 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Forward sdf_version through ProbeComplete to GUI state
 - Use explicit f32 suffix for Stroke width literal
 - Sync mock tool file before exec to avoid ETXTBSY on Linux
+- Correct LibreDrive not-possible parsing and cover status paths
+- Eliminate Linux ETXTBSY flake in orchestration tests
+- Align probe invalidate rules and enforce local Codecov gates
+- Harden patch coverage gate and close residual project gaps
 
 ### <!-- 3 -->📚 Documentation
 
 - Fix sdftool is not standalone, both backends bundled with MakeMKV
+
+### <!-- 6 -->🧪 Testing
+
+- Close workers.rs Codecov patch gaps from dead match arms
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
@@ -27,6 +36,8 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md
+- Stop tracking generated lcov.info
 ## [0.3.0] - 2026-07-09
 
 ### <!-- 0 -->🚀 Features
