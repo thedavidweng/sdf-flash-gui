@@ -29,7 +29,7 @@ Cross-platform GUI for optical drive firmware dump/flash. Inspired by the Window
 - **Encrypted / full boot-loader rawflash** — mutually exclusive flash modes
 - **Recovery flash** — boot token entry or extraction from a wrong firmware dump (offset `0x3000`)
 - **SDF0 container parsing** — reads `sdf.bin` metadata (vendor, model, firmware version, encryption, compression)
-- **Dual backend support** — works with both `sdftool` (standalone) and `makemkvcon` (MakeMKV); auto-detected via PATH or common install locations
+- **Dual backend support** — works with both `sdftool` and `makemkvcon` (both bundled with [MakeMKV](https://www.makemkv.com/)); auto-detected via PATH or common install locations
 
 ## Install
 
@@ -45,7 +45,7 @@ Download the latest installer from [Releases](https://github.com/thedavidweng/sd
 
 ## Requirements
 
-- [MakeMKV](https://www.makemkv.com/) installed on the system (provides `makemkvcon`) or standalone `sdftool`
+- [MakeMKV](https://www.makemkv.com/) installed on the system (provides both `sdftool` and `makemkvcon`)
 - `sdf.bin` from the SDFtool/MKV firmware pack (optional, for SDF container parsing)
 
 ### Platform permissions
