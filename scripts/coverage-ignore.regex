@@ -1,0 +1,21 @@
+# Single source of truth for cargo-llvm-cov --ignore-filename-regex.
+# Keep in sync with codecov.yml `ignore:` (paths only; this file is the regex form).
+#
+# Format: one pattern per non-comment line. scripts/coverage.sh and CI join
+# lines with `|` (do NOT put a full already-joined regex on one line, and do
+# not rely on tr -d '\n' — that silently glues patterns without a separator).
+#
+# src/main.rs              — binary entry, eframe::run_native / process::exit
+# src/gui/mod.rs           — eframe App shell (native window lifecycle)
+# src/gui/views/           — egui rendering only; logic lives in ops/workers
+# src/drive.rs             — OS-specific enumerate/find_backend paths
+# src/gui/file_dialog.rs   — rfd native dialog adapter (one impl, mocked in tests)
+# src/process_runner.rs    — NativeRunner thin OS process adapter (trait mocked)
+#
+# Do not ignore domain modules (command, flash, orchestration, process, sdf, …).
+src/main\.rs
+src/gui/mod\.rs
+src/gui/views/
+src/drive\.rs
+src/gui/file_dialog\.rs
+src/process_runner\.rs

@@ -603,6 +603,27 @@ pub fn format_command(cmd: &crate::command::Command) -> String {
         .join(" ")
 }
 
+/// Seam for backend process execution.
+///
+/// Production uses [`crate::process_runner::NativeRunner`] (coverage-ignored thin
+/// adapter). Tests inject mocks that implement this trait.
+pub trait ProcessRunner: Send + Sync + 'static {
+    fn run_command(
+        &self,
+        program: &str,
+        args: &[String],
+        control: Option<&OperationControl>,
+    ) -> Result<CommandRunOutcome, String>;
+
+    fn run_command_streaming(
+        &self,
+        program: &str,
+        args: &[String],
+        on_line: &dyn Fn(&str),
+        control: Option<&OperationControl>,
+    ) -> Result<CommandRunOutcome, String>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

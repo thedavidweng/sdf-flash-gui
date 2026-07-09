@@ -29,6 +29,7 @@ pub enum Operation {
 pub struct PlanRequest {
     pub backend: Backend,
     pub tool_path: String,
+    pub sdf_path: String,
     pub drive: String,
     pub drive_is_mt1959: bool,
     pub confirmation: String,
@@ -90,6 +91,16 @@ pub fn required_flash_confirmation(drive: &str) -> String {
     format!("FLASH {}", drive.trim())
 }
 
+/// True when encrypted rawflash and full boot-loader modes are both selected.
+pub fn write_modes_conflict(encrypted: bool, include_boot_loader: bool) -> bool {
+    encrypted && include_boot_loader
+}
+
+/// True when the typed confirmation matches the required `FLASH <device>` string.
+pub fn confirmation_matches(device: &str, typed: &str) -> bool {
+    typed.trim() == required_flash_confirmation(device)
+}
+
 pub fn plan_command(request: PlanRequest) -> Result<Plan, PlanError> {
     let tool_path = request.tool_path.trim();
     if tool_path.is_empty() {
@@ -121,6 +132,14 @@ pub fn plan_command(request: PlanRequest) -> Result<Plan, PlanError> {
     }
 
     let mut args = backend_prefix(request.backend);
+
+    // Pass sdf.bin path to sdftool/makemkvcon via -f so it can find the
+    // drive-specific logic database even when MakeMKV is not installed.
+    let sdf_path = request.sdf_path.trim();
+    if !sdf_path.is_empty() {
+        args.extend(["-f".into(), sdf_path.into()]);
+    }
+
     match request.operation {
         Operation::Read { output_dir } => {
             let output_dir = output_dir.trim();
@@ -145,7 +164,7 @@ pub fn plan_command(request: PlanRequest) -> Result<Plan, PlanError> {
             if firmware_path.is_empty() {
                 return Err(PlanError::MissingFirmware);
             }
-            if encrypted && include_boot_loader {
+            if write_modes_conflict(encrypted, include_boot_loader) {
                 return Err(PlanError::ConflictingWriteModes);
             }
             args.extend([
@@ -282,6 +301,7 @@ mod tests {
         PlanRequest {
             backend: Backend::SdfTool,
             tool_path: "sdftool64.exe".into(),
+            sdf_path: String::new(),
             drive: "H:".into(),
             drive_is_mt1959: true,
             confirmation: "FLASH H:".into(),
@@ -330,6 +350,70 @@ mod tests {
         assert_eq!(
             plan.command.args,
             ["f", "-d", "H:", "dump", "auto", "-o", "/tmp/out"]
+        );
+    }
+
+    #[test]
+    fn plans_with_sdf_path_injects_f_flag() {
+        let mut req = base_request(Operation::Write {
+            firmware_path: "fw.bin".into(),
+            encrypted: false,
+            include_boot_loader: false,
+        });
+        req.sdf_path = "/path/to/sdf.bin".into();
+        let plan = plan_command(req).unwrap();
+        assert_eq!(
+            plan.command.args,
+            [
+                "-f",
+                "/path/to/sdf.bin",
+                "--all-yes",
+                "-d",
+                "H:",
+                "rawflash",
+                "-i",
+                "fw.bin"
+            ]
+        );
+    }
+
+    #[test]
+    fn plans_with_sdf_path_makemkvcon() {
+        let mut req = base_request(Operation::Read {
+            output_dir: "/tmp/out".into(),
+        });
+        req.backend = Backend::MakeMkvCon;
+        req.tool_path = "makemkvcon".into();
+        req.sdf_path = "./sdf.bin".into();
+        req.confirmation = String::new();
+        let plan = plan_command(req).unwrap();
+        assert_eq!(
+            plan.command.args,
+            [
+                "f",
+                "-f",
+                "./sdf.bin",
+                "-d",
+                "H:",
+                "dump",
+                "auto",
+                "-o",
+                "/tmp/out"
+            ]
+        );
+    }
+
+    #[test]
+    fn plans_with_empty_sdf_path_omits_f_flag() {
+        let plan = plan_command(base_request(Operation::Write {
+            firmware_path: "fw.bin".into(),
+            encrypted: false,
+            include_boot_loader: false,
+        }))
+        .unwrap();
+        assert_eq!(
+            plan.command.args,
+            ["--all-yes", "-d", "H:", "rawflash", "-i", "fw.bin"]
         );
     }
 
@@ -577,10 +661,27 @@ mod tests {
     }
 
     #[test]
+    fn write_modes_conflict_only_when_both() {
+        assert!(!write_modes_conflict(false, false));
+        assert!(!write_modes_conflict(true, false));
+        assert!(!write_modes_conflict(false, true));
+        assert!(write_modes_conflict(true, true));
+    }
+
+    #[test]
+    fn confirmation_matches_trims_and_requires_flash_device() {
+        assert!(confirmation_matches("/dev/sr0", "FLASH /dev/sr0"));
+        assert!(confirmation_matches("/dev/sr0", "  FLASH /dev/sr0  "));
+        assert!(!confirmation_matches("/dev/sr0", "FLASH"));
+        assert!(!confirmation_matches("/dev/sr0", "WRONG"));
+    }
+
+    #[test]
     fn plan_command_trims_whitespace() {
         let req = PlanRequest {
             backend: Backend::SdfTool,
             tool_path: "  sdftool64.exe  ".into(),
+            sdf_path: String::new(),
             drive: "  H:  ".into(),
             drive_is_mt1959: true,
             confirmation: "FLASH H:".into(),

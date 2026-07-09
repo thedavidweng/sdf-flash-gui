@@ -90,7 +90,12 @@ jobs:
 
       - name: Run tests with coverage (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: cargo llvm-cov --lcov --output-path lcov.info --target ${{ matrix.target }} --ignore-filename-regex '(src/main\.rs|src/gui/mod\.rs|src/gui/views/|src/drive\.rs|src/gui/file_dialog\.rs|src/gui/process_runner\.rs)'
+        run: |
+          # Ignore set: scripts/coverage-ignore.regex (synced with codecov.yml).
+          # One pattern per line → join with `|` (same as scripts/coverage.sh).
+          IGNORE_REGEX="$(grep -v '^\s*#' scripts/coverage-ignore.regex | grep -v '^\s*$' | paste -sd '|' -)"
+          cargo llvm-cov --lcov --output-path lcov.info --target ${{ matrix.target }} \
+            --ignore-filename-regex "${IGNORE_REGEX}"
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'

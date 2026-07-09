@@ -176,7 +176,7 @@ impl AppState {
             config: ToolConfig {
                 backend,
                 tool_path: path,
-                sdf_path: find_sdf_bin(),
+                sdf_path: drive::find_sdf_bin(),
                 auto_detected: auto,
                 ..Self::defaults().config
             },
@@ -273,30 +273,9 @@ impl AppState {
     }
 }
 
+/// Locate `sdf.bin` (re-export for GUI callers; logic lives in `drive`).
 pub fn find_sdf_bin() -> String {
-    let candidates = ["./sdf.bin", "../sdf.bin", "/usr/share/sdftool/sdf.bin"];
-    for c in &candidates {
-        if std::path::Path::new(c).exists() {
-            return c.to_string();
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let paths = [
-            format!("{home}/.MakeMKV/sdf.bin"),
-            "/Library/MakeMKV/sdf.bin".to_string(),
-            "/opt/homebrew/share/sdftool/sdf.bin".to_string(),
-        ];
-        for p in &paths {
-            if std::path::Path::new(p).exists() {
-                return p.clone();
-            }
-        }
-    }
-
-    String::new()
+    drive::find_sdf_bin()
 }
 
 #[cfg(test)]
@@ -377,6 +356,12 @@ mod tests {
         assert!(!state.drive.drive_probed);
         assert!(!state.runtime.probing);
         assert!(state.runtime.probe_control.is_none());
+    }
+
+    #[test]
+    fn find_sdf_bin_matches_drive_module() {
+        // Re-export must stay in sync with drive::find_sdf_bin.
+        assert_eq!(find_sdf_bin(), drive::find_sdf_bin());
     }
 
     #[test]

@@ -9,4 +9,5 @@ pub mod i18n;
 pub mod manifest;
 pub mod orchestration;
 pub mod process;
+pub mod process_runner;
 pub mod sdf;

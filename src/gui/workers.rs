@@ -1,9 +1,7 @@
 use crate::command::{self, Command};
 use crate::drive::Drive;
 use crate::i18n::{log_error, t, t_with_args, L10nKey, Language};
-use crate::process::{self, CommandRunOutcome, OperationControl};
-
-use super::process_runner::ProcessRunner;
+use crate::process::{self, CommandRunOutcome, OperationControl, ProcessRunner};
 
 use super::state::AppState;
 
@@ -214,9 +212,10 @@ pub fn poll_worker(
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui_at));
     }
-    if repaint {
-        ctx.request_repaint();
+    if !repaint {
+        return;
     }
+    ctx.request_repaint();
 }
 
 pub fn spawn_probe(
@@ -261,31 +260,26 @@ pub fn spawn_probe(
             "> {}",
             process::format_command(&cmd)
         )));
-        match runner.run_command(&cmd.program, &cmd.args, Some(control.as_ref())) {
-            Ok(CommandRunOutcome::Completed(out)) => {
-                let combined = out.combined();
-                if !combined.is_empty() {
-                    let _ = tx.send(WorkerMsg::Log(combined.clone()));
+        match crate::orchestration::probe_drive_with(
+            backend,
+            &tool_path,
+            &device,
+            runner.as_ref(),
+            Some(control.as_ref()),
+        ) {
+            Ok(probe) => {
+                if !probe.output.is_empty() {
+                    let _ = tx.send(WorkerMsg::Log(probe.output.clone()));
                 }
-                let safety = command::classify_drive_safety(&device, &combined);
-                let identity = if out.success() {
-                    Some(crate::drive::parse_identity_from_info(&device, &combined))
-                } else {
-                    None
-                };
                 let _ = tx.send(WorkerMsg::ProbeComplete {
                     drive_idx,
-                    mt1959: safety.mt1959,
-                    encrypted_firmware: safety.encrypted_firmware,
-                    identity,
-                    error: if out.success() {
-                        None
-                    } else {
-                        Some(t(L10nKey::StatusProbeFailed, lang).into())
-                    },
+                    mt1959: probe.safety.mt1959,
+                    encrypted_firmware: probe.safety.encrypted_firmware,
+                    identity: Some(probe.identity),
+                    error: None,
                 });
             }
-            Ok(CommandRunOutcome::Cancelled) => {
+            Err(crate::orchestration::ProbeError::Cancelled) => {
                 let _ = tx.send(WorkerMsg::ProbeComplete {
                     drive_idx,
                     mt1959: false,
@@ -294,10 +288,12 @@ pub fn spawn_probe(
                     error: Some(t(L10nKey::StatusProbeFailed, lang).into()),
                 });
             }
-            Ok(CommandRunOutcome::NeedsForceKill) => {
+            Err(crate::orchestration::ProbeError::NeedsForceKill) => {
                 let _ = tx.send(WorkerMsg::StopNeedsForceKill);
             }
-            Err(e) => {
+            Err(crate::orchestration::ProbeError::Failed(e)) => {
+                // probe_drive_with always supplies a non-empty Failed message.
+                let _ = tx.send(WorkerMsg::Log(e.clone()));
                 let _ = tx.send(WorkerMsg::ProbeComplete {
                     drive_idx,
                     mt1959: false,
@@ -396,15 +392,23 @@ pub fn spawn_list_drives(
     state.log(&format!("> {}", process::format_command(&cmd)));
 
     let tx = tx.clone();
-    let program = cmd.program;
-    let args = cmd.args;
+    let backend = state.config.backend;
+    let tool_path = state.config.tool_path.clone();
     let runner = runner.clone();
     run_backend_command(move || {
-        match runner.run_command(&program, &args, Some(control.as_ref())) {
-            Ok(CommandRunOutcome::Completed(out)) => {
-                if !out.combined().is_empty() {
-                    let _ = tx.send(WorkerMsg::Log(out.combined()));
+        // Shared list path with CLI `run_list_backend` (same runner seam + success rules).
+        match crate::orchestration::run_list_backend_with(
+            backend,
+            &tool_path,
+            runner.as_ref(),
+            Some(control.as_ref()),
+        ) {
+            Ok(out) => {
+                let combined = out.combined();
+                if !combined.is_empty() {
+                    let _ = tx.send(WorkerMsg::Log(combined));
                 }
+                // Parse stdout only (stderr may contain noise).
                 let drives = crate::drive::parse_drive_list(&out.stdout);
                 let _ = tx.send(WorkerMsg::Log(t_with_args(
                     L10nKey::LogParsedDrivesFromOutput,
@@ -413,7 +417,7 @@ pub fn spawn_list_drives(
                 )));
                 let _ = tx.send(WorkerMsg::DrivesListed(drives));
             }
-            Ok(CommandRunOutcome::Cancelled) => {
+            Err(crate::orchestration::BackendOpError::Cancelled) => {
                 let _ = tx.send(WorkerMsg::Log(t(L10nKey::LogOpCancelled, lang).into()));
                 let _ = tx.send(WorkerMsg::OperationComplete {
                     success: false,
@@ -421,10 +425,10 @@ pub fn spawn_list_drives(
                     progress: 0.0,
                 });
             }
-            Ok(CommandRunOutcome::NeedsForceKill) => {
+            Err(crate::orchestration::BackendOpError::NeedsForceKill) => {
                 let _ = tx.send(WorkerMsg::StopNeedsForceKill);
             }
-            Err(e) => {
+            Err(crate::orchestration::BackendOpError::Failed(e)) => {
                 let _ = tx.send(WorkerMsg::Log(log_error(lang, &e)));
                 let _ = tx.send(WorkerMsg::OperationComplete {
                     success: false,
@@ -750,8 +754,93 @@ mod tests {
 
     // --- ProcessRunner mock and spawn tests ---
 
-    use super::super::process_runner::ProcessRunner;
+    use crate::process::ProcessRunner;
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    /// Drain worker messages until `until` matches or timeout (Windows-safe vs fixed sleep).
+    fn collect_worker_msgs(
+        rx: &std::sync::mpsc::Receiver<WorkerMsg>,
+        until: impl Fn(&WorkerMsg) -> bool,
+        timeout: Duration,
+    ) -> Vec<WorkerMsg> {
+        let deadline = Instant::now() + timeout;
+        let mut msgs = Vec::new();
+        while Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(25)) {
+                Ok(msg) => {
+                    let done = until(&msg);
+                    msgs.push(msg);
+                    if done {
+                        break;
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // Keep polling until the overall deadline.
+                    continue;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    break;
+                }
+            }
+        }
+        msgs
+    }
+
+    #[test]
+    fn collect_worker_msgs_timeout_and_disconnect() {
+        // Timeout arm: no sender traffic until deadline expires.
+        let (_tx, rx) = std::sync::mpsc::channel::<WorkerMsg>();
+        let empty = collect_worker_msgs(&rx, |_| false, Duration::from_millis(80));
+        assert!(empty.is_empty());
+
+        // Disconnected arm: all senders dropped before wait.
+        let (tx, rx) = std::sync::mpsc::channel::<WorkerMsg>();
+        drop(tx);
+        let after_disconnect = collect_worker_msgs(&rx, |_| false, Duration::from_millis(200));
+        assert!(after_disconnect.is_empty());
+    }
+
+    fn wait_for_operation_complete(rx: &std::sync::mpsc::Receiver<WorkerMsg>) -> Vec<WorkerMsg> {
+        collect_worker_msgs(
+            rx,
+            |m| {
+                matches!(
+                    m,
+                    WorkerMsg::OperationComplete { .. } | WorkerMsg::StopNeedsForceKill
+                )
+            },
+            Duration::from_secs(3),
+        )
+    }
+
+    fn wait_for_probe_complete(rx: &std::sync::mpsc::Receiver<WorkerMsg>) -> Vec<WorkerMsg> {
+        collect_worker_msgs(
+            rx,
+            |m| {
+                matches!(
+                    m,
+                    WorkerMsg::ProbeComplete { .. } | WorkerMsg::StopNeedsForceKill
+                )
+            },
+            Duration::from_secs(3),
+        )
+    }
+
+    fn wait_for_drives_listed(rx: &std::sync::mpsc::Receiver<WorkerMsg>) -> Vec<WorkerMsg> {
+        collect_worker_msgs(
+            rx,
+            |m| {
+                matches!(
+                    m,
+                    WorkerMsg::DrivesListed(_)
+                        | WorkerMsg::OperationComplete { .. }
+                        | WorkerMsg::StopNeedsForceKill
+                )
+            },
+            Duration::from_secs(3),
+        )
+    }
 
     enum MockOutcome {
         Success,
@@ -894,6 +983,40 @@ mod tests {
     }
 
     #[test]
+    fn spawn_probe_success_empty_output() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.config.tool_path = "/usr/bin/sdftool".into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        // Empty stdout/stderr → probe.output empty → skip intermediate Log of output.
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
+        spawn_probe(&tx, &mut state, 0, &runner);
+        let messages = wait_for_probe_complete(&rx);
+        drop(tx);
+        let ok = messages
+            .iter()
+            .any(|m| matches!(m, WorkerMsg::ProbeComplete { error: None, .. }));
+        assert!(ok, "expected ProbeComplete ok, msgs: {messages:?}");
+    }
+
+    #[test]
+    fn spawn_list_drives_success_empty_output() {
+        let mut state = AppState::new_no_backend();
+        state.config.tool_path = "/usr/bin/sdftool".into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
+        spawn_list_drives(&tx, &mut state, &runner);
+        let messages = wait_for_drives_listed(&rx);
+        drop(tx);
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, WorkerMsg::DrivesListed(d) if d.is_empty())),
+            "msgs: {messages:?}"
+        );
+    }
+
+    #[test]
     fn spawn_probe_success() {
         let mut state = AppState::new_no_backend();
         state.drive.drives.push(test_drive());
@@ -903,12 +1026,8 @@ mod tests {
             Arc::new(MockRunner::success("Vendor: HL-DT-ST\nProduct: BU40N\n"));
         spawn_probe(&tx, &mut state, 0, &runner);
         // Wait for thread to finish
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_probe_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         // Should have: Status, Log (> command), Log (output), ProbeComplete
         assert!(messages.len() >= 3);
         let probe = messages.last().unwrap();
@@ -928,12 +1047,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::failing());
         spawn_probe(&tx, &mut state, 0, &runner);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_probe_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         let probe = messages.last().unwrap();
         match probe {
             WorkerMsg::ProbeComplete { error, .. } => {
@@ -960,12 +1075,8 @@ mod tests {
             Language::English,
             Arc::new(OperationControl::new()),
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_operation_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         // Should have: Status, Log (> command), Log (line1), Log (line2), OperationComplete
         assert!(messages.len() >= 4);
         let last = messages.last().unwrap();
@@ -993,12 +1104,8 @@ mod tests {
             Language::English,
             Arc::new(OperationControl::new()),
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_operation_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         let last = messages.last().unwrap();
         match last {
             WorkerMsg::OperationComplete { success, .. } => {
@@ -1016,12 +1123,8 @@ mod tests {
             Arc::new(MockRunner::success("0:/dev/sr0 HL-DT-ST BU40N 1.03\n"));
         spawn_list_drives(&tx, &mut state, &runner);
         assert!(state.runtime.busy);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         let last = messages.last().unwrap();
         match last {
             WorkerMsg::DrivesListed(drives) => {
@@ -1061,12 +1164,8 @@ mod tests {
             Language::English,
             Arc::new(OperationControl::new()),
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_operation_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         let last = messages.last().unwrap();
         assert!(matches!(
             last,
@@ -1090,12 +1189,8 @@ mod tests {
             Language::English,
             Arc::new(OperationControl::new()),
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_operation_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         assert!(matches!(
             messages.last(),
             Some(WorkerMsg::OperationComplete { success: false, .. })
@@ -1281,6 +1376,16 @@ mod tests {
     }
 
     #[test]
+    fn poll_worker_with_context_no_messages_skips_repaint() {
+        // ctx present, no msgs, not waiting on backend stop → !repaint early return.
+        let mut state = AppState::new_no_backend();
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let ctx = egui::Context::default();
+        poll_worker(&mut state, &rx, Some(&ctx));
+        assert!(!state.runtime.busy);
+    }
+
+    #[test]
     fn poll_worker_with_context_requests_attention_on_success() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -1321,12 +1426,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::cancelled());
         spawn_probe(&tx, &mut state, 0, &runner);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_probe_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         assert!(matches!(
             messages.last(),
             Some(WorkerMsg::ProbeComplete { error: Some(_), .. })
@@ -1360,12 +1461,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::probe_failed());
         spawn_probe(&tx, &mut state, 0, &runner);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_probe_complete(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         assert!(matches!(
             messages.last(),
             Some(WorkerMsg::ProbeComplete {
@@ -1382,12 +1479,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::cancelled());
         spawn_list_drives(&tx, &mut state, &runner);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         assert!(matches!(
             messages.last(),
             Some(WorkerMsg::OperationComplete { success: false, .. })
@@ -1443,12 +1536,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::failing());
         spawn_list_drives(&tx, &mut state, &runner);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        let mut messages = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
-        }
         let last = messages.last().unwrap();
         match last {
             WorkerMsg::OperationComplete {

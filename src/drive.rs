@@ -408,6 +408,33 @@ pub fn find_backend() -> Option<(super::command::Backend, String)> {
     None
 }
 
+/// Locate `sdf.bin` in common relative and install paths.
+pub fn find_sdf_bin() -> String {
+    let candidates = ["./sdf.bin", "../sdf.bin", "/usr/share/sdftool/sdf.bin"];
+    for c in &candidates {
+        if std::path::Path::new(c).exists() {
+            return c.to_string();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let paths = [
+            format!("{home}/.MakeMKV/sdf.bin"),
+            "/Library/MakeMKV/sdf.bin".to_string(),
+            "/opt/homebrew/share/sdftool/sdf.bin".to_string(),
+        ];
+        for p in &paths {
+            if std::path::Path::new(p).exists() {
+                return p.clone();
+            }
+        }
+    }
+
+    String::new()
+}
+
 fn which(name: &str) -> Result<String, String> {
     let output = std::process::Command::new(if cfg!(target_os = "windows") {
         "where"

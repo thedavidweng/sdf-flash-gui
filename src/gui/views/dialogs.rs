@@ -1,9 +1,9 @@
 use crate::gui::file_dialog::NativeDialog;
 use crate::gui::ops;
-use crate::gui::process_runner;
 use crate::gui::state::{AppState, StopDialog};
 use crate::gui::workers::WorkerMsg;
 use crate::i18n::{t, L10nKey};
+use crate::process;
 
 use eframe::egui;
 use egui_phosphor::regular as icon;
@@ -15,7 +15,7 @@ pub fn handle_global_shortcuts(
     ctx: &egui::Context,
     state: &mut AppState,
     worker_tx: &mpsc::Sender<WorkerMsg>,
-    runner: &std::sync::Arc<dyn process_runner::ProcessRunner>,
+    runner: &std::sync::Arc<dyn process::ProcessRunner>,
 ) {
     if state.chrome.exiting {
         return;
