@@ -512,15 +512,17 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn probe_drive_parses_mock_output() {
-        let tool = write_mock_probe_tool(
+        // Use ProcessRunner seam — never exec a just-written script (Linux ETXTBSY).
+        let runner = stdout_runner(
             "Drive platform: MT1959\nVendor: HL-DT-ST\nProduct: BU40N\nRevision: 1.03\n",
         );
-        let probe = probe_drive(
+        let probe = probe_drive_with(
             crate::command::Backend::SdfTool,
-            &tool.to_string_lossy(),
+            "/mock/sdftool",
             "/dev/sr0",
+            &runner,
+            None,
         )
         .expect("probe");
         assert!(probe.safety.mt1959);
@@ -529,18 +531,21 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn run_list_backend_success() {
-        let tool = write_mock_probe_tool("0:/dev/sr0 HL-DT-ST BU40N 1.03\n");
-        let out = run_list_backend(crate::command::Backend::SdfTool, &tool.to_string_lossy())
-            .expect("list");
-        assert!(out.contains("/dev/sr0"));
+        let runner = stdout_runner("0:/dev/sr0 HL-DT-ST BU40N 1.03\n");
+        let out = run_list_backend_with(
+            crate::command::Backend::SdfTool,
+            "/mock/sdftool",
+            &runner,
+            None,
+        )
+        .expect("list");
+        assert!(out.stdout.contains("/dev/sr0") || out.combined().contains("/dev/sr0"));
     }
 
     #[test]
-    #[cfg(unix)]
     fn run_dump_with_mock_tool() {
-        let tool = write_mock_probe_tool("");
+        let runner = stdout_runner("");
         let out_dir = std::env::temp_dir().join(format!(
             "sdf_flash_dump_{}",
             std::time::SystemTime::now()
@@ -549,14 +554,16 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&out_dir).unwrap();
-        run_dump(
+        let plan = plan_read(
             crate::command::Backend::SdfTool,
-            &tool.to_string_lossy(),
+            "/mock/sdftool",
             "",
             "/dev/sr0",
             &out_dir.to_string_lossy(),
+            true,
         )
-        .expect("dump");
+        .expect("plan dump");
+        execute_command_with(&runner, &plan.command).expect("dump");
         let _ = std::fs::remove_dir_all(&out_dir);
     }
 
@@ -711,6 +718,31 @@ mod tests {
             use std::os::windows::process::ExitStatusExt;
             std::process::ExitStatus::from_raw(code as u32)
         }
+    }
+
+    /// In-process backend stub — never exec a just-written script (Linux ETXTBSY).
+    fn stdout_runner(stdout: &str) -> OutcomeRunner {
+        OutcomeRunner {
+            outcome: Ok(CommandRunOutcome::Completed(CommandOutput {
+                status: exit_status(0),
+                stdout: stdout.to_string(),
+                stderr: String::new(),
+            })),
+        }
+    }
+
+    fn failing_exit_runner() -> OutcomeRunner {
+        OutcomeRunner {
+            outcome: Ok(CommandRunOutcome::Completed(CommandOutput {
+                status: exit_status(1),
+                stdout: String::new(),
+                stderr: "mock fail".into(),
+            })),
+        }
+    }
+
+    fn mt1959_probe_stdout() -> &'static str {
+        "Drive platform: MT1959\nVendor: HL-DT-ST\nProduct: BU40N\nRevision: 1.03\n"
     }
 
     #[test]
@@ -969,49 +1001,26 @@ mod tests {
         assert!(prepared.plan.is_some());
     }
 
-    #[cfg(unix)]
-    fn write_mock_probe_tool(info: &str) -> std::path::PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "sdf_flash_orchestration_{}_{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("mock_sdftool");
-        let script = format!("#!/bin/sh\nprintf '%s' '{}'\n", info.replace('\'', "'\\''"));
-        {
-            let mut file = std::fs::File::create(&path).unwrap();
-            use std::io::Write;
-            file.write_all(script.as_bytes()).unwrap();
-            file.sync_all().unwrap();
-        }
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        path
-    }
-
     #[test]
-    #[cfg(unix)]
     fn flash_session_prepare_respects_confirm() {
-        let tool = write_mock_probe_tool(
-            "Drive platform: MT1959\nVendor: HL-DT-ST\nProduct: BU40N\nRevision: 1.03\n",
-        );
-        let session = FlashSession::prepare(FlashSessionRequest {
-            backend: crate::command::Backend::SdfTool,
-            tool_path: &tool.to_string_lossy(),
-            sdf_path: "",
-            device: "/dev/sr0",
-            firmware_path: "/tmp/fw.bin",
-            encrypted: false,
-            include_boot_loader: false,
-            recover: false,
-            wrong_firmware: None,
-            recovery_token: None,
-            confirm: FlashConfirm::Flag,
-        })
+        let runner = stdout_runner(mt1959_probe_stdout());
+        let session = FlashSession::prepare_with(
+            FlashSessionRequest {
+                backend: crate::command::Backend::SdfTool,
+                tool_path: "/mock/sdftool",
+                sdf_path: "",
+                device: "/dev/sr0",
+                firmware_path: "/tmp/fw.bin",
+                encrypted: false,
+                include_boot_loader: false,
+                recover: false,
+                wrong_firmware: None,
+                recovery_token: None,
+                confirm: FlashConfirm::Flag,
+            },
+            &runner,
+            None,
+        )
         .expect("prepare should succeed");
         assert!(session.probe.safety.mt1959);
         assert!(session.would_execute);
@@ -1019,45 +1028,41 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn flash_session_prepare_rejects_non_mt1959() {
-        let tool = write_mock_probe_tool("Vendor: Old\nProduct: Drive\n");
-        let err = FlashSession::prepare(FlashSessionRequest {
-            backend: crate::command::Backend::SdfTool,
-            tool_path: &tool.to_string_lossy(),
-            sdf_path: "",
-            device: "/dev/sr0",
-            firmware_path: "/tmp/fw.bin",
-            encrypted: false,
-            include_boot_loader: false,
-            recover: false,
-            wrong_firmware: None,
-            recovery_token: None,
-            confirm: FlashConfirm::None,
-        })
+        let runner = stdout_runner("Vendor: Old\nProduct: Drive\n");
+        let err = FlashSession::prepare_with(
+            FlashSessionRequest {
+                backend: crate::command::Backend::SdfTool,
+                tool_path: "/mock/sdftool",
+                sdf_path: "",
+                device: "/dev/sr0",
+                firmware_path: "/tmp/fw.bin",
+                encrypted: false,
+                include_boot_loader: false,
+                recover: false,
+                wrong_firmware: None,
+                recovery_token: None,
+                confirm: FlashConfirm::None,
+            },
+            &runner,
+            None,
+        )
         .unwrap_err();
         assert!(err.contains("not MT1959"));
     }
 
     #[test]
-    #[cfg(unix)]
     fn run_list_backend_failure() {
-        use std::os::unix::fs::PermissionsExt;
-
-        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "sdf_flash_list_fail_{}_{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("mock_fail");
-        std::fs::write(&path, "#!/bin/sh\nexit 1\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(
-            run_list_backend(crate::command::Backend::SdfTool, &path.to_string_lossy()).is_err()
-        );
-        let _ = std::fs::remove_dir_all(&dir);
+        let runner = failing_exit_runner();
+        let err = run_list_backend_with(
+            crate::command::Backend::SdfTool,
+            "/mock/sdftool",
+            &runner,
+            None,
+        )
+        .err()
+        .expect("list should fail");
+        assert!(matches!(err, BackendOpError::Failed(_)));
     }
 
     #[test]
@@ -1070,49 +1075,52 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn flash_session_prepare_recover_operation() {
-        let tool = write_mock_probe_tool(
-            "Drive platform: MT1959\nVendor: HL-DT-ST\nProduct: BU40N\nRevision: 1.03\n",
-        );
-        let session = FlashSession::prepare(FlashSessionRequest {
-            backend: crate::command::Backend::SdfTool,
-            tool_path: &tool.to_string_lossy(),
-            sdf_path: "",
-            device: "/dev/sr0",
-            firmware_path: "/tmp/fw.bin",
-            encrypted: false,
-            include_boot_loader: false,
-            recover: true,
-            wrong_firmware: None,
-            recovery_token: Some("ABCDEFGHIJKLMNOP"),
-            confirm: FlashConfirm::Flag,
-        })
+        let runner = stdout_runner(mt1959_probe_stdout());
+        let session = FlashSession::prepare_with(
+            FlashSessionRequest {
+                backend: crate::command::Backend::SdfTool,
+                tool_path: "/mock/sdftool",
+                sdf_path: "",
+                device: "/dev/sr0",
+                firmware_path: "/tmp/fw.bin",
+                encrypted: false,
+                include_boot_loader: false,
+                recover: true,
+                wrong_firmware: None,
+                recovery_token: Some("ABCDEFGHIJKLMNOP"),
+                confirm: FlashConfirm::Flag,
+            },
+            &runner,
+            None,
+        )
         .expect("recover prepare");
         assert!(session.plan.is_some());
         assert!(session.would_execute);
     }
 
     #[test]
-    #[cfg(unix)]
     fn flash_session_execute_with_plan() {
-        let tool = write_mock_probe_tool(
-            "Drive platform: MT1959\nVendor: HL-DT-ST\nProduct: BU40N\nRevision: 1.03\n",
-        );
-        let session = FlashSession::prepare(FlashSessionRequest {
-            backend: crate::command::Backend::SdfTool,
-            tool_path: &tool.to_string_lossy(),
-            sdf_path: "",
-            device: "/dev/sr0",
-            firmware_path: "/tmp/fw.bin",
-            encrypted: false,
-            include_boot_loader: false,
-            recover: false,
-            wrong_firmware: None,
-            recovery_token: None,
-            confirm: FlashConfirm::Flag,
-        })
+        let runner = stdout_runner(mt1959_probe_stdout());
+        let session = FlashSession::prepare_with(
+            FlashSessionRequest {
+                backend: crate::command::Backend::SdfTool,
+                tool_path: "/mock/sdftool",
+                sdf_path: "",
+                device: "/dev/sr0",
+                firmware_path: "/tmp/fw.bin",
+                encrypted: false,
+                include_boot_loader: false,
+                recover: false,
+                wrong_firmware: None,
+                recovery_token: None,
+                confirm: FlashConfirm::Flag,
+            },
+            &runner,
+            None,
+        )
         .expect("prepare");
-        session.execute().expect("execute");
+        // Same runner answers the execute step without touching the filesystem.
+        session.execute_with(&runner).expect("execute");
     }
 }
