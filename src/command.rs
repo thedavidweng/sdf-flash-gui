@@ -332,35 +332,40 @@ pub fn classify_drive_safety(drive_label: &str, info_output: &str) -> DriveSafet
 /// Prefer explicit Identification SDF status (`Possible, not yet enabled` /
 /// `Enabled`). Fall back to Drive Specific SDF present/not present.
 pub fn classify_libredrive_status(info_output: &str) -> LibreDriveStatus {
-    // Exact phrases used by MakeMKV/sdftool Identification strings.
-    if info_output.contains("Possible, not yet enabled")
-        || info_output.contains("Possible, not yet Enabled")
-    {
-        return LibreDriveStatus::PossibleNotEnabled;
-    }
+    // Walk lines so we can order "not possible" before "possible" (substring trap).
     for line in info_output.lines() {
         let t = line.trim();
-        // "8102:Enabled" or bare "Enabled" after Status key
+        let t_lower = t.to_ascii_lowercase();
+
+        // "8102:…" status codes from Identification SDF embedded strings.
         if let Some(rest) = t.strip_prefix("8102:") {
             let r = rest.trim();
+            let r_lower = r.to_ascii_lowercase();
             if r.eq_ignore_ascii_case("Enabled") {
                 return LibreDriveStatus::Enabled;
             }
-            if r.to_ascii_lowercase().contains("possible") {
-                return LibreDriveStatus::PossibleNotEnabled;
-            }
-            if r.to_ascii_lowercase().contains("not possible") || r.eq_ignore_ascii_case("Disabled")
-            {
+            // Order matters: "not possible" contains the substring "possible".
+            if r_lower.contains("not possible") || r.eq_ignore_ascii_case("Disabled") {
                 return LibreDriveStatus::NotAvailable;
             }
+            if r_lower.contains("possible") {
+                return LibreDriveStatus::PossibleNotEnabled;
+            }
+            continue;
+        }
+
+        // Full-line phrases (also match without 8102: prefix).
+        if t_lower.contains("not possible") {
+            return LibreDriveStatus::NotAvailable;
+        }
+        if t.contains("Possible, not yet enabled") || t.contains("Possible, not yet Enabled") {
+            return LibreDriveStatus::PossibleNotEnabled;
         }
         if t.eq_ignore_ascii_case("Enabled") {
             return LibreDriveStatus::Enabled;
         }
-        if t.to_ascii_lowercase().contains("not possible") {
-            return LibreDriveStatus::NotAvailable;
-        }
     }
+
     let has_specific_present = info_output.lines().any(|line| {
         let l = line.trim();
         l.contains("Drive Specific SDF") && l.contains("present") && !l.contains("not present")
@@ -777,6 +782,19 @@ mod tests {
     }
 
     #[test]
+    fn libre_drive_status_helpers() {
+        assert!(LibreDriveStatus::Enabled.is_enabled());
+        assert!(!LibreDriveStatus::PossibleNotEnabled.is_enabled());
+        assert!(!LibreDriveStatus::NotAvailable.is_enabled());
+        assert!(!LibreDriveStatus::Unknown.is_enabled());
+
+        assert!(LibreDriveStatus::Enabled.is_possible());
+        assert!(LibreDriveStatus::PossibleNotEnabled.is_possible());
+        assert!(!LibreDriveStatus::NotAvailable.is_possible());
+        assert!(!LibreDriveStatus::Unknown.is_possible());
+    }
+
+    #[test]
     fn classify_libredrive_present() {
         let output = "SDF.bin version: 0x00A6\n\nDrive Specific SDF present\n";
         let safety = classify_drive_safety("D: drive", output);
@@ -789,10 +807,7 @@ mod tests {
         let output = "SDF.bin version: 0x00A6\n\nDrive Specific SDF not present\n";
         let safety = classify_drive_safety("D: drive", output);
         // No LibreDrive mention → Unknown (not forced NotAvailable without section)
-        assert!(matches!(
-            safety.libredrive,
-            LibreDriveStatus::Unknown | LibreDriveStatus::NotAvailable
-        ));
+        assert_eq!(safety.libredrive, LibreDriveStatus::Unknown);
         assert_eq!(safety.sdf_version.as_deref(), Some("0x00A6"));
     }
 
@@ -811,6 +826,104 @@ Identification SDF present
         let safety = classify_drive_safety("D: drive", output);
         assert_eq!(safety.libredrive, LibreDriveStatus::PossibleNotEnabled);
         assert!(safety.mt1959);
+    }
+
+    #[test]
+    fn classify_libredrive_8102_not_possible() {
+        // Regression: "not possible" contains "possible" — must not misclassify.
+        let output = "\
+8000:LibreDrive Information
+8013:Status
+8102:Not possible
+";
+        assert_eq!(
+            classify_libredrive_status(output),
+            LibreDriveStatus::NotAvailable
+        );
+        assert!(!classify_libredrive_status(output).is_possible());
+    }
+
+    #[test]
+    fn classify_libredrive_8102_possible_short() {
+        // "8102:Possible" without the full "not yet enabled" phrase.
+        assert_eq!(
+            classify_libredrive_status("8102:Possible\n"),
+            LibreDriveStatus::PossibleNotEnabled
+        );
+    }
+
+    #[test]
+    fn classify_libredrive_8102_unknown_status_continues() {
+        // Unrecognized 8102 payload falls through; later fallbacks apply.
+        assert_eq!(
+            classify_libredrive_status("8102:???\nLibreDrive Information\n"),
+            LibreDriveStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn classify_libredrive_possible_capital_enabled_word() {
+        assert_eq!(
+            classify_libredrive_status("Status: Possible, not yet Enabled\n"),
+            LibreDriveStatus::PossibleNotEnabled
+        );
+    }
+
+    #[test]
+    fn classify_libredrive_8102_enabled() {
+        let output = "8013:Status\n8102:Enabled\n";
+        assert_eq!(
+            classify_libredrive_status(output),
+            LibreDriveStatus::Enabled
+        );
+    }
+
+    #[test]
+    fn classify_libredrive_8102_disabled() {
+        let output = "8102:Disabled\n";
+        assert_eq!(
+            classify_libredrive_status(output),
+            LibreDriveStatus::NotAvailable
+        );
+    }
+
+    #[test]
+    fn classify_libredrive_bare_enabled_line() {
+        let output = "LibreDrive Information\nEnabled\n";
+        assert_eq!(
+            classify_libredrive_status(output),
+            LibreDriveStatus::Enabled
+        );
+    }
+
+    #[test]
+    fn classify_libredrive_absent_phrase_line() {
+        let output = "some status: Not possible for this model\n";
+        assert_eq!(
+            classify_libredrive_status(output),
+            LibreDriveStatus::NotAvailable
+        );
+    }
+
+    #[test]
+    fn classify_libredrive_specific_absent_with_section() {
+        let output = "\
+LibreDrive Information
+Drive Specific SDF not present
+";
+        assert_eq!(
+            classify_libredrive_status(output),
+            LibreDriveStatus::NotAvailable
+        );
+    }
+
+    #[test]
+    fn classify_libredrive_mentions_without_status() {
+        let output = "LibreDrive Information\n(no status line)\n";
+        assert_eq!(
+            classify_libredrive_status(output),
+            LibreDriveStatus::Unknown
+        );
     }
 
     #[test]

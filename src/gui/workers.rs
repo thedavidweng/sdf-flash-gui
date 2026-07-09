@@ -812,6 +812,8 @@ mod tests {
             ..Default::default()
         });
         state.drive.selected_drive = Some(0);
+        state.drive.last_probed_drive = Some(0);
+        state.drive.drive_probed = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::DrivesListed(vec![
             crate::drive::Drive {
@@ -833,6 +835,55 @@ mod tests {
         drain_worker_messages(&mut state, &rx);
         assert_eq!(state.drive.selected_drive, Some(1));
         assert_eq!(state.drive.drives[1].device, "/dev/sg2");
+        // Path/index changed → invalidate probe cache.
+        assert!(state.drive.last_probed_drive.is_none());
+        assert!(!state.drive.drive_probed);
+    }
+
+    #[test]
+    fn drain_drives_listed_empty_sets_no_drives_status() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.runtime.busy = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(WorkerMsg::DrivesListed(vec![]));
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert!(state.drive.drives.is_empty());
+        assert_eq!(state.drive.selected_drive, None);
+        assert!(!state.runtime.busy);
+        let status = state.runtime.status_message.to_lowercase();
+        assert!(
+            status.contains("no") || status.contains("drive"),
+            "status should reflect empty list, got: {status}"
+        );
+    }
+
+    #[test]
+    fn drain_probe_complete_possible_libredrive() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.runtime.probing = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(WorkerMsg::ProbeComplete {
+            drive_idx: 0,
+            mt1959: true,
+            mt1939: false,
+            encrypted_firmware: false,
+            libredrive: crate::command::LibreDriveStatus::PossibleNotEnabled,
+            sdf_version: Some("0x00A6".into()),
+            error: None,
+        });
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert_eq!(
+            state.drive.drive_libredrive,
+            crate::command::LibreDriveStatus::PossibleNotEnabled
+        );
+        assert!(state.drive.drive_mt1959);
+        assert!(state.drive.drive_probed);
     }
 
     #[test]
