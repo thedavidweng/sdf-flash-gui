@@ -1117,6 +1117,20 @@ mod tests {
             ),
             Err(BackendOpError::NeedsForceKill)
         ));
+        let spawn_err = OutcomeRunner {
+            outcome: Err("boom".into()),
+        };
+        assert!(matches!(
+            run_list_backend_with(
+                crate::command::Backend::SdfTool,
+                "/usr/bin/sdftool",
+                &spawn_err,
+                None,
+            ),
+            Err(BackendOpError::Failed(ref m)) if m == "boom"
+        ));
+        // Exercise ProcessRunner::run_command_streaming adapter path.
+        let _ = spawn_err.run_command_streaming("x", &[], &|_| {}, None);
     }
 
     #[test]
