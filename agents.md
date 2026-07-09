@@ -33,7 +33,7 @@ cargo test
 
 ### Coverage (required when touching `src/`)
 
-Matches CI on Linux (Codecov patch target is **95%**). Ignore set is centralized:
+Matches CI on Linux (Codecov patch target is **100%**). Ignore set is centralized:
 
 - `scripts/coverage-ignore.regex` — llvm-cov (CI + local)
 - `codecov.yml` `ignore:` — Codecov upload (must list the same paths)
