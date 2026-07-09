@@ -3,10 +3,14 @@ coverage:
     project:
       default:
         target: auto
-        threshold: 2%
+        # Large pure-logic additions can lower the overall ratio slightly vs a
+        # near-100% baseline; allow a small drop while keeping the patch gate high.
+        threshold: 1%
     patch:
       default:
-        target: 80%
+        # Explicit fixed target (not auto). New code must be substantially covered.
+        target: 95%
+        threshold: 0%
 
   comment:
     layout: "condensed_header, condensed_files, condensed_footer"

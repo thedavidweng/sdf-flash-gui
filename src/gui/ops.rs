@@ -421,9 +421,7 @@ pub fn execute_start(
                 state.flash.flash_report = Some(report.clone());
             }
 
-            if !prepared.would_execute {
-                return;
-            }
+            // prepare_firmware_op only yields a plan when would_execute is true.
             let Some(plan) = prepared.plan else {
                 return;
             };

@@ -656,18 +656,11 @@ mod tests {
         let outcome = runner
             .run_command("echo", &["native-runner".into()], None)
             .expect("echo");
-        match outcome {
-            CommandRunOutcome::Completed(out) => {
-                assert!(out.success());
-                assert!(
-                    out.stdout.contains("native-runner")
-                        || out.combined().contains("native-runner")
-                );
-            }
-            CommandRunOutcome::Cancelled | CommandRunOutcome::NeedsForceKill => {
-                panic!("expected Completed")
-            }
-        }
+        let CommandRunOutcome::Completed(out) = outcome else {
+            unreachable!("echo completes");
+        };
+        assert!(out.success());
+        assert!(out.stdout.contains("native-runner") || out.combined().contains("native-runner"));
     }
 
     #[test]
@@ -687,19 +680,15 @@ mod tests {
                 None,
             )
             .expect("echo stream");
-        match outcome {
-            CommandRunOutcome::Completed(out) => {
-                assert!(out.success());
-                let captured = lines.lock().unwrap();
-                assert!(
-                    captured.iter().any(|l| l.contains("stream-line"))
-                        || out.combined().contains("stream-line")
-                );
-            }
-            CommandRunOutcome::Cancelled | CommandRunOutcome::NeedsForceKill => {
-                panic!("expected Completed")
-            }
-        }
+        let CommandRunOutcome::Completed(out) = outcome else {
+            unreachable!("echo stream completes");
+        };
+        assert!(out.success());
+        let captured = lines.lock().unwrap();
+        assert!(
+            captured.iter().any(|l| l.contains("stream-line"))
+                || out.combined().contains("stream-line")
+        );
     }
 
     struct RestoreGracefulTerminate(());

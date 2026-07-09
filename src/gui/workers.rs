@@ -291,19 +291,14 @@ pub fn spawn_probe(
                 let _ = tx.send(WorkerMsg::StopNeedsForceKill);
             }
             Err(crate::orchestration::ProbeError::Failed(e)) => {
-                if !e.is_empty() {
-                    let _ = tx.send(WorkerMsg::Log(e.clone()));
-                }
+                // probe_drive_with always supplies a non-empty Failed message.
+                let _ = tx.send(WorkerMsg::Log(e.clone()));
                 let _ = tx.send(WorkerMsg::ProbeComplete {
                     drive_idx,
                     mt1959: false,
                     encrypted_firmware: false,
                     identity: None,
-                    error: Some(if e.is_empty() {
-                        t(L10nKey::StatusProbeFailed, lang).into()
-                    } else {
-                        e
-                    }),
+                    error: Some(e),
                 });
             }
         }
