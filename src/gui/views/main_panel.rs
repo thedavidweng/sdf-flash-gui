@@ -81,7 +81,7 @@ pub fn show_main_ui(
             ui.painter().rect_stroke(
                 settings_resp.rect,
                 ui.visuals().widgets.inactive.corner_radius,
-                egui::Stroke::new(1.5, egui::Color32::from_white_alpha(glow_alpha)),
+                egui::Stroke::new(1.5_f32, egui::Color32::from_white_alpha(glow_alpha)),
                 egui::StrokeKind::Outside,
             );
         }
