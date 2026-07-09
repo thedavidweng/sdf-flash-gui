@@ -591,6 +591,7 @@ mod tests {
             probe: ProbeResult {
                 safety: crate::command::DriveSafety {
                     mt1959: true,
+                    mt1939: false,
                     encrypted_firmware: false,
                     firmware_date_prefix: None,
                     mtk_mode: None,

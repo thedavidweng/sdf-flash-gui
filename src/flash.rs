@@ -20,6 +20,7 @@ pub fn sha256_hex(data: &[u8]) -> String {
 }
 
 /// Metadata extracted from a firmware binary's SDF0 header (if parseable).
+#[derive(Debug, Clone)]
 pub struct FirmwareSdfInfo {
     pub vendor: Option<String>,
     pub model: Option<String>,

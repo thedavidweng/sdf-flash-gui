@@ -50,6 +50,8 @@ pub struct Plan {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DriveSafety {
     pub mt1959: bool,
+    #[serde(default)]
+    pub mt1939: bool,
     pub encrypted_firmware: bool,
     pub firmware_date_prefix: Option<u32>,
     pub mtk_mode: Option<char>,
@@ -261,6 +263,10 @@ pub fn classify_drive_safety(drive_label: &str, info_output: &str) -> DriveSafet
     let mt1959 = info_output
         .lines()
         .any(|line| line.contains(":MT1959") || line.contains(" MT1959"));
+    let mt1939 = !mt1959
+        && info_output
+            .lines()
+            .any(|line| line.contains(":MT1939") || line.contains(" MT1939"));
     let mtk_mode = info_output
         .lines()
         .find(|line| line.contains("mtk:19:59"))
@@ -272,6 +278,7 @@ pub fn classify_drive_safety(drive_label: &str, info_output: &str) -> DriveSafet
 
     DriveSafety {
         mt1959,
+        mt1939,
         encrypted_firmware,
         firmware_date_prefix,
         mtk_mode,
@@ -606,9 +613,25 @@ mod tests {
     fn classify_non_mt1959() {
         let safety = classify_drive_safety("D: Some_Old_Drive", "no platform info");
         assert!(!safety.mt1959);
+        assert!(!safety.mt1939);
         assert!(!safety.encrypted_firmware);
         assert!(safety.mtk_mode.is_none());
         assert!(safety.firmware_date_prefix.is_none());
+    }
+
+    #[test]
+    fn classify_mt1939_detected() {
+        let safety = classify_drive_safety("D: Some_Old_Drive", "Drive platform: MT1939");
+        assert!(!safety.mt1959);
+        assert!(safety.mt1939);
+    }
+
+    #[test]
+    fn classify_mt1959_takes_priority_over_mt1939() {
+        let output = "Drive platform: MT1959\nAlso mentions MT1939 here";
+        let safety = classify_drive_safety("D: drive", output);
+        assert!(safety.mt1959);
+        assert!(!safety.mt1939);
     }
 
     #[test]
@@ -775,5 +798,16 @@ mod tests {
     #[test]
     fn extract_firmware_date_prefix_short_segment() {
         assert_eq!(extract_firmware_date_prefix("BU40N_12"), None);
+    }
+
+    #[test]
+    fn drive_safety_deserialize_without_mt1939_field() {
+        // JSON serialized before mt1939 was added should still deserialize
+        // thanks to #[serde(default)] on the mt1939 field.
+        let json = r#"{"mt1959":true,"encrypted_firmware":false,"firmware_date_prefix":null,"mtk_mode":null}"#;
+        let safety: DriveSafety = serde_json::from_str(json).unwrap();
+        assert!(safety.mt1959);
+        assert!(!safety.mt1939); // defaults to false
+        assert!(!safety.encrypted_firmware);
     }
 }

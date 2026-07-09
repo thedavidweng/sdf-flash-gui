@@ -137,6 +137,18 @@ pub fn decline_force_kill(state: &mut AppState) {
     }
 }
 
+/// Returns true when a platform mismatch is detected between drive and firmware.
+fn cross_flash_confirmation_required(state: &AppState) -> bool {
+    let Some(drive) = state.selected_drive() else {
+        return false;
+    };
+    let drive_ff = crate::platform::classify_drive(&drive.product);
+    let fw_ff = state.flash.firmware_form_factor;
+    drive_ff != crate::platform::DriveFormFactor::Unknown
+        && fw_ff != crate::platform::DriveFormFactor::Unknown
+        && drive_ff != fw_ff
+}
+
 pub fn can_start(state: &AppState) -> bool {
     if state.runtime.busy
         || state.runtime.probing
@@ -169,6 +181,9 @@ pub fn can_start(state: &AppState) -> bool {
             ) {
                 return false;
             }
+            if cross_flash_confirmation_required(state) && !state.flash.cross_flash_confirmed {
+                return false;
+            }
             // Confirmation is the gate (same as CLI flash without manifest).
             state.selected_drive().is_some_and(|d| {
                 command::confirmation_matches(&d.device, &state.flash.confirmation)
@@ -196,6 +211,9 @@ pub fn start_disabled_reason(state: &AppState) -> String {
         return t(L10nKey::ReasonNoDrive, lang).to_string();
     }
     if !state.drive.drive_mt1959 {
+        if state.drive.drive_mt1939 {
+            return t(L10nKey::ReasonMt1939NotCompatible, lang).to_string();
+        }
         return t(L10nKey::ReasonNotMt1959, lang).to_string();
     }
     if let Err(e) = validate_tool_path(&state.config.tool_path, state.config.backend, lang) {
@@ -216,6 +234,9 @@ pub fn start_disabled_reason(state: &AppState) -> String {
             ) {
                 return t(L10nKey::ReasonConflict, lang).to_string();
             }
+            if cross_flash_confirmation_required(state) && !state.flash.cross_flash_confirmed {
+                return t(L10nKey::ReasonCrossFlashNotConfirmed, lang).to_string();
+            }
             let device = state
                 .selected_drive()
                 .map(|d| d.device.as_str())
@@ -225,7 +246,22 @@ pub fn start_disabled_reason(state: &AppState) -> String {
             }
             String::new()
         }
-        OperationMode::Recover => t(L10nKey::ReasonEnterToken, lang).to_string(),
+        OperationMode::Recover => {
+            if state.flash.firmware_path.is_empty() {
+                return t(L10nKey::ReasonNoFirmware, lang).to_string();
+            }
+            if state.flash.recovery_token.len() != 16 {
+                return t(L10nKey::ReasonEnterToken, lang).to_string();
+            }
+            let device = state
+                .selected_drive()
+                .map(|d| d.device.as_str())
+                .unwrap_or("");
+            if !command::confirmation_matches(device, &state.flash.confirmation) {
+                return t(L10nKey::ReasonEnterToken, lang).to_string();
+            }
+            String::new()
+        }
     }
 }
 
@@ -387,6 +423,11 @@ pub(crate) fn firmware_picker_label(path: &str) -> String {
 pub fn load_firmware(state: &mut AppState, path: &str) {
     let lang = state.chrome.resolved_lang;
     state.flash.firmware_path = path.to_string();
+    state.flash.cross_flash_confirmed = false;
+    state.flash.firmware_sdf_info = None;
+    state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Unknown;
+    state.flash.firmware_identification = None;
+    state.flash.encrypted_write = state.drive.drive_encrypted_firmware;
     match std::fs::read(path) {
         Ok(data) => {
             if data.is_empty() {
@@ -397,6 +438,15 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
                 ));
                 state.flash.firmware_data = None;
             } else {
+                let sdf_info = flash::check_firmware_sdf(&data);
+
+                // Identify firmware by hash + binary content analysis (no filename dependency).
+                let id = crate::firmware_db::identify_firmware(&data);
+                state.flash.firmware_form_factor =
+                    crate::firmware_db::resolve_form_factor_with_sdf(&id, sdf_info.as_ref());
+                state.flash.firmware_identification = Some(id);
+                state.flash.firmware_sdf_info = sdf_info;
+
                 state.flash.firmware_data = Some(data);
             }
         }
@@ -1766,5 +1816,301 @@ mod tests {
         assert_eq!(state.flash.wrong_firmware_path, file.to_string_lossy());
         assert_eq!(state.flash.recovery_token, "ABCDEFGHIJKLMNOP");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn build_sdf0_firmware(vendor: &str, model: &str, version: &str) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"SDF0");
+        data.extend_from_slice(&1u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&0u32.to_be_bytes());
+        let metadata = format!("Vendor\0{vendor}\0Model\0{model}\0Version\0{version}\0");
+        let payload_offset = 24 + metadata.len() as u32;
+        data.extend_from_slice(&payload_offset.to_be_bytes());
+        data.extend_from_slice(metadata.as_bytes());
+        data
+    }
+
+    #[test]
+    fn load_firmware_sets_form_factor_from_sdf_metadata() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_load_fw_ff");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("BU40N_fw.bin");
+        let firmware = build_sdf0_firmware("HL-DT-ST", "BU40N", "1.03");
+        std::fs::write(&file, &firmware).unwrap();
+        let mut state = AppState::new_no_backend();
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert_eq!(
+            state.flash.firmware_form_factor,
+            crate::platform::DriveFormFactor::Slim
+        );
+        assert!(state.flash.firmware_sdf_info.is_some());
+        assert_eq!(
+            state
+                .flash
+                .firmware_sdf_info
+                .as_ref()
+                .unwrap()
+                .model
+                .as_deref(),
+            Some("BU40N")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_firmware_sets_form_factor_desktop() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_load_fw_desktop");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("WH16NS60_fw.bin");
+        let firmware = build_sdf0_firmware("HL-DT-ST", "WH16NS60", "1.02");
+        std::fs::write(&file, &firmware).unwrap();
+        let mut state = AppState::new_no_backend();
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert_eq!(
+            state.flash.firmware_form_factor,
+            crate::platform::DriveFormFactor::Desktop
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_firmware_resets_cross_flash_confirmed() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_load_fw_reset");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("fw.bin");
+        std::fs::write(&file, &[0u8; 1024]).unwrap();
+        let mut state = AppState::new_no_backend();
+        state.flash.cross_flash_confirmed = true;
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert!(!state.flash.cross_flash_confirmed);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_firmware_identifies_known_firmware_by_hash() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_known_hash");
+        let _ = std::fs::create_dir_all(&dir);
+        // Build a synthetic firmware with the BW-16D1HT 3.02 hash is not feasible,
+        // but we can test that binary analysis extracts PCB type and model.
+        let mut data = vec![0u8; 40000];
+        let boot = b"MT1959 Boot JB8 ";
+        data[12288..12288 + boot.len()].copy_from_slice(boot);
+        let model = b"BW-16D1HT";
+        data[37600..37600 + model.len()].copy_from_slice(model);
+        let file = dir.join("renamed_firmware.bin");
+        std::fs::write(&file, &data).unwrap();
+        let mut state = AppState::new_no_backend();
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert_eq!(
+            state.flash.firmware_form_factor,
+            crate::platform::DriveFormFactor::Desktop
+        );
+        let id = state.flash.firmware_identification.as_ref().unwrap();
+        assert_eq!(id.binary_info.pcb_type.as_deref(), Some("JB8"));
+        assert_eq!(id.binary_info.model.as_deref(), Some("BW-16D1HT"));
+        // Not in known database (synthetic data)
+        assert!(id.known.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_firmware_identifies_slim_by_pcb_type() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_slim_pcb");
+        let _ = std::fs::create_dir_all(&dir);
+        let mut data = vec![0u8; 40000];
+        let boot = b"MT1959 Boot BU5 ";
+        data[12288..12288 + boot.len()].copy_from_slice(boot);
+        let model = b"BU40N";
+        data[37900..37900 + model.len()].copy_from_slice(model);
+        let file = dir.join("whatever_name.bin");
+        std::fs::write(&file, &data).unwrap();
+        let mut state = AppState::new_no_backend();
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert_eq!(
+            state.flash.firmware_form_factor,
+            crate::platform::DriveFormFactor::Slim
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_firmware_unknown_binary_gets_unknown_form_factor() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_unknown_bin");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("mystery.bin");
+        std::fs::write(&file, &[0u8; 100]).unwrap();
+        let mut state = AppState::new_no_backend();
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert_eq!(
+            state.flash.firmware_form_factor,
+            crate::platform::DriveFormFactor::Unknown
+        );
+        let id = state.flash.firmware_identification.as_ref().unwrap();
+        assert!(id.known.is_none());
+        assert!(id.binary_info.pcb_type.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_firmware_resets_encrypted_to_probe_value() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_probe_enc");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("HL-DT-ST_BW-16D1HT_3.10.bin");
+        std::fs::write(&file, &[0u8; 100]).unwrap();
+        let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = true;
+        state.flash.encrypted_write = false;
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert!(
+            state.flash.encrypted_write,
+            "encrypted_write should reset to probe-detected value"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn start_disabled_reason_recover_empty_when_valid() {
+        let (mut state, temp_dir) = state_with_valid_paths("recover_valid");
+        state.drive.drives.push(Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        });
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Recover;
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.firmware_data = Some(vec![0u8; 100]);
+        state.flash.recovery_token = "1234567890ABCDEF".into();
+        state.flash.confirmation = crate::command::required_flash_confirmation("/dev/sr0");
+        assert_eq!(start_disabled_reason(&state), "");
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn start_disabled_reason_recover_shows_reason_when_token_missing() {
+        let (mut state, temp_dir) = state_with_valid_paths("recover_no_token");
+        state.drive.drives.push(Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        });
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Recover;
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.recovery_token = String::new();
+        let reason = start_disabled_reason(&state);
+        assert!(!reason.is_empty());
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn cross_flash_confirmation_required_no_drive_returns_false() {
+        let (mut state, temp_dir) = state_with_valid_paths("no_drive_cross");
+        state.drive.selected_drive = None;
+        state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Desktop;
+        assert!(!cross_flash_confirmation_required(&state));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn can_start_blocks_cross_flash_not_confirmed() {
+        let (mut state, temp_dir) = state_with_valid_paths("crossflash");
+        state.drive.drives.push(Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        });
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.flash.firmware_data = Some(vec![0u8; 100]);
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Desktop;
+        state.flash.cross_flash_confirmed = false;
+        state.flash.confirmation = crate::command::required_flash_confirmation("/dev/sr0");
+        assert!(!can_start(&state));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn can_start_allows_cross_flash_when_confirmed() {
+        let (mut state, temp_dir) = state_with_valid_paths("crossflash_ok");
+        state.drive.drives.push(Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        });
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.flash.firmware_data = Some(vec![0u8; 100]);
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Desktop;
+        state.flash.cross_flash_confirmed = true;
+        state.flash.confirmation = crate::command::required_flash_confirmation("/dev/sr0");
+        assert!(can_start(&state));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn can_start_allows_when_platform_matches() {
+        let (mut state, temp_dir) = state_with_valid_paths("platformmatch");
+        state.drive.drives.push(Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        });
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.flash.firmware_data = Some(vec![0u8; 100]);
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Slim;
+        state.flash.cross_flash_confirmed = false;
+        state.flash.confirmation = crate::command::required_flash_confirmation("/dev/sr0");
+        assert!(can_start(&state));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn start_disabled_reason_cross_flash_not_confirmed() {
+        let (mut state, temp_dir) = state_with_valid_paths("reason_crossflash");
+        state.drive.drives.push(Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        });
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Write;
+        state.flash.firmware_data = Some(vec![0u8; 100]);
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Desktop;
+        state.flash.cross_flash_confirmed = false;
+        state.flash.confirmation = crate::command::required_flash_confirmation("/dev/sr0");
+        let reason = start_disabled_reason(&state);
+        assert!(reason.contains("cross-flash"));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn start_disabled_reason_mt1939() {
+        let (mut state, _temp_dir) = state_with_valid_paths("reason_mt1939");
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = false;
+        state.drive.drive_mt1939 = true;
+        let reason = start_disabled_reason(&state);
+        assert!(reason.contains("MT1939"));
     }
 }

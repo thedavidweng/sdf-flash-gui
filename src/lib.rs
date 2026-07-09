@@ -3,10 +3,12 @@
 pub mod branding;
 pub mod command;
 pub mod drive;
+pub mod firmware_db;
 pub mod flash;
 pub mod gui;
 pub mod i18n;
 pub mod orchestration;
+pub mod platform;
 pub mod process;
 pub mod process_runner;
 pub mod sdf;
