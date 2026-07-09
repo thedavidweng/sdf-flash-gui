@@ -385,6 +385,15 @@ pub enum L10nKey {
     HintFlashNoCancel,
     HelpEmptyDrives,
     LabelTokenLength,
+    // Platform safety warnings
+    WarnPlatformMismatch,
+    WarnCrossFlashConfirm,
+    ReasonCrossFlashNotConfirmed,
+    InfoTwoStepFlash,
+    WarnFirmwareDowngrade,
+    InfoFirmwareModelMismatch,
+    ReasonMt1939NotCompatible,
+    LogEncryptedAutoDetected,
 }
 
 pub fn t(key: L10nKey, lang: Language) -> &'static str {
@@ -674,6 +683,14 @@ fn t_en(key: L10nKey) -> &'static str {
             "No optical drives detected. Check the connection, permissions (Linux: cdrom group), and refresh."
         }
         L10nKey::LabelTokenLength => "{current}/16",
+        L10nKey::WarnPlatformMismatch => "WARNING: This firmware is for {firmware} drives but your drive is {drive}. Flashing wrong form factor firmware can BRICK your drive.",
+        L10nKey::WarnCrossFlashConfirm => "I understand this is a cross-flash and want to proceed",
+        L10nKey::ReasonCrossFlashNotConfirmed => "Confirm cross-flash to proceed",
+        L10nKey::InfoTwoStepFlash => "This drive model (BP50NB40/WP50NB40/BP55EB40) requires two-step flashing. Step 1: Flash DE_LG_BP50NB40-NB50_1.03_MK.bin in Write mode. Step 2: Switch to Recover mode and flash your target firmware.",
+        L10nKey::WarnFirmwareDowngrade => "This is a firmware downgrade (current: {current}, target: {target}). If downgrading from encrypted firmware, ensure 'Encrypted' is checked.",
+        L10nKey::InfoFirmwareModelMismatch => "Firmware is for {firmware}, your drive is {drive}. This is normal for cross-flashing.",
+        L10nKey::ReasonMt1939NotCompatible => "This drive uses the older MT1939 chip and is NOT compatible with OmniDrive or MK firmware. See: https://wiki.redump.info/index.php?title=Flashing_Older_HLDS_Drives",
+        L10nKey::LogEncryptedAutoDetected => "Firmware filename has a recent date prefix — auto-enabled Encrypted mode.",
     }
 }
 
@@ -4493,6 +4510,14 @@ mod tests {
         L10nKey::HintFlashNoCancel,
         L10nKey::HelpEmptyDrives,
         L10nKey::LabelTokenLength,
+        L10nKey::WarnPlatformMismatch,
+        L10nKey::WarnCrossFlashConfirm,
+        L10nKey::ReasonCrossFlashNotConfirmed,
+        L10nKey::InfoTwoStepFlash,
+        L10nKey::WarnFirmwareDowngrade,
+        L10nKey::InfoFirmwareModelMismatch,
+        L10nKey::ReasonMt1939NotCompatible,
+        L10nKey::LogEncryptedAutoDetected,
     ];
 
     #[test]
@@ -4511,7 +4536,7 @@ mod tests {
     fn test_translation_keys() {
         assert_eq!(
             ALL_KEYS.len(),
-            170,
+            178,
             "L10nKey variant count changed — update ALL_KEYS if intentional"
         );
         for key in ALL_KEYS {
@@ -4528,6 +4553,44 @@ mod tests {
         let args = [("required", "WRITE")];
         let translation = t_with_args(L10nKey::LabelTypeToConfirm, Language::English, &args);
         assert_eq!(translation, "Type \"WRITE\" to confirm:");
+    }
+
+    #[test]
+    fn test_platform_safety_keys_in_all_keys() {
+        let new_keys = [
+            L10nKey::WarnPlatformMismatch,
+            L10nKey::WarnCrossFlashConfirm,
+            L10nKey::ReasonCrossFlashNotConfirmed,
+            L10nKey::InfoTwoStepFlash,
+            L10nKey::WarnFirmwareDowngrade,
+            L10nKey::InfoFirmwareModelMismatch,
+            L10nKey::ReasonMt1939NotCompatible,
+            L10nKey::LogEncryptedAutoDetected,
+        ];
+        for &key in &new_keys {
+            assert!(
+                ALL_KEYS.contains(&key),
+                "new safety key {key:?} missing from ALL_KEYS"
+            );
+        }
+    }
+
+    #[test]
+    fn test_platform_safety_keys_non_empty_english() {
+        let keys = [
+            L10nKey::WarnPlatformMismatch,
+            L10nKey::WarnCrossFlashConfirm,
+            L10nKey::ReasonCrossFlashNotConfirmed,
+            L10nKey::InfoTwoStepFlash,
+            L10nKey::WarnFirmwareDowngrade,
+            L10nKey::InfoFirmwareModelMismatch,
+            L10nKey::ReasonMt1939NotCompatible,
+            L10nKey::LogEncryptedAutoDetected,
+        ];
+        for &key in &keys {
+            let text = t(key, Language::English);
+            assert!(!text.is_empty(), "empty English text for {key:?}");
+        }
     }
 
     #[test]

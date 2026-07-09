@@ -1,9 +1,11 @@
 use crate::command;
+use crate::flash::FlashDirection;
 use crate::gui::file_dialog::{FileDialog, NativeDialog};
 use crate::gui::ops;
 use crate::gui::state::{AppState, ThemeChoice};
 use crate::gui::workers::WorkerMsg;
 use crate::i18n::{t, t_with_args, L10nKey, Language};
+use crate::platform::{self, DriveFormFactor};
 use crate::process;
 
 use eframe::egui;
@@ -539,10 +541,11 @@ fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState, dialog: &
     match state.operation_mode {
         OperationMode::Read => {}
         OperationMode::Write => {
-            if let Some(drive) = state.selected_drive() {
+            if let Some(drive) = state.selected_drive().cloned() {
                 let required = command::required_flash_confirmation(&drive.device);
                 ui.add_space(GAP_SMALL);
-                show_confirmation_summary(ui, state, drive);
+                show_confirmation_summary(ui, state, &drive);
+                show_safety_warnings(ui, state, &drive);
                 ui.label(t_with_args(
                     L10nKey::LabelTypeToConfirm,
                     state.chrome.resolved_lang,
@@ -656,6 +659,76 @@ fn show_confirmation_summary(ui: &mut egui::Ui, state: &AppState, drive: &crate:
         lang,
         &[("mode", &ops::flash_mode_label(state))],
     ));
+}
+
+fn show_safety_warnings(ui: &mut egui::Ui, state: &mut AppState, drive: &crate::drive::Drive) {
+    let lang = state.chrome.resolved_lang;
+
+    // Warning 1: Platform mismatch with cross-flash confirmation
+    let drive_ff = platform::classify_drive(&drive.product);
+    let fw_ff = state.flash.firmware_form_factor;
+    if drive_ff != DriveFormFactor::Unknown
+        && fw_ff != DriveFormFactor::Unknown
+        && drive_ff != fw_ff
+    {
+        ui.add_space(GAP_TINY);
+        ui.colored_label(
+            ui.visuals().error_fg_color,
+            t_with_args(
+                L10nKey::WarnPlatformMismatch,
+                lang,
+                &[("firmware", fw_ff.label()), ("drive", drive_ff.label())],
+            ),
+        );
+        ui.checkbox(
+            &mut state.flash.cross_flash_confirmed,
+            t(L10nKey::WarnCrossFlashConfirm, lang),
+        );
+    }
+
+    // Warning 2: Two-step flash guidance
+    if platform::needs_two_step_flash(&drive.product) {
+        ui.add_space(GAP_TINY);
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            t(L10nKey::InfoTwoStepFlash, lang),
+        );
+    }
+
+    // Warning 3: Version downgrade
+    if let Some(sdf_info) = &state.flash.firmware_sdf_info {
+        if let Some(fw_ver) = &sdf_info.firmware_version {
+            let direction = crate::flash::compare_versions(&drive.revision, fw_ver);
+            if direction == FlashDirection::Downgrade {
+                ui.add_space(GAP_TINY);
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    t_with_args(
+                        L10nKey::WarnFirmwareDowngrade,
+                        lang,
+                        &[("current", &drive.revision), ("target", fw_ver)],
+                    ),
+                );
+            }
+        }
+    }
+
+    // Warning 4: Firmware-drive model match info
+    if let Some(sdf_info) = &state.flash.firmware_sdf_info {
+        if let Some(fw_model) = &sdf_info.model {
+            if !drive.product.contains(fw_model.as_str()) && !fw_model.contains(&drive.product) {
+                ui.add_space(GAP_TINY);
+                ui.colored_label(
+                    ui.visuals().weak_text_color(),
+                    t_with_args(
+                        L10nKey::InfoFirmwareModelMismatch,
+                        lang,
+                        &[("firmware", fw_model), ("drive", &drive.product)],
+                    ),
+                );
+            }
+        }
+    }
 }
 
 /// Renders a TextEdit + Browse button row. Returns `true` if the path changed.
