@@ -33,7 +33,11 @@ pub fn handle_global_shortcuts(
         }
 
         let refresh_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::R);
-        if i.consume_shortcut(&refresh_shortcut) && !state.runtime.busy && !state.runtime.probing {
+        if i.consume_shortcut(&refresh_shortcut)
+            && ops::backend_configured(state)
+            && !state.runtime.busy
+            && !state.runtime.probing
+        {
             ops::refresh_drives(state);
         }
 
@@ -154,47 +158,6 @@ pub fn show_stop_confirmation_dialog(ctx: &egui::Context, state: &mut AppState) 
                         .clicked()
                     {
                         ops::confirm_graceful_stop(state);
-                    }
-                });
-            });
-        });
-}
-
-pub fn show_first_run_dialog(ctx: &egui::Context, state: &mut AppState) {
-    egui::Window::new(t(L10nKey::TitleFirstRun, state.chrome.resolved_lang))
-        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-        .resizable(false)
-        .collapsible(false)
-        .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.label(t(L10nKey::LabelFirstRunMsg, state.chrome.resolved_lang));
-                ui.add_space(8.0);
-                ui.label(t(L10nKey::LabelFirstRunStep1, state.chrome.resolved_lang));
-                ui.label(t(L10nKey::LabelFirstRunStep2, state.chrome.resolved_lang));
-                ui.label(t(L10nKey::LabelFirstRunStep3, state.chrome.resolved_lang));
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    if ui
-                        .add(icon_button(
-                            ui,
-                            icon::X,
-                            t(L10nKey::BtnFirstRunDismiss, state.chrome.resolved_lang),
-                        ))
-                        .clicked()
-                    {
-                        state.chrome.show_first_run_setup = false;
-                    }
-                    ui.add_space(12.0);
-                    if ui
-                        .add(icon_button(
-                            ui,
-                            icon::GEAR,
-                            t(L10nKey::BtnFirstRunOpenSettings, state.chrome.resolved_lang),
-                        ))
-                        .clicked()
-                    {
-                        state.chrome.show_first_run_setup = false;
-                        state.chrome.show_settings = true;
                     }
                 });
             });

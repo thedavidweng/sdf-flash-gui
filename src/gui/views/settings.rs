@@ -79,9 +79,6 @@ pub fn show_settings_window(
                                     state.config.auto_detected = false;
                                     state.drive.last_probed_drive = None;
                                     state.config.tool_detect_failed = false;
-                                    if crate::gui::ops::backend_configured(state) {
-                                        state.chrome.show_first_run_setup = false;
-                                    }
                                 }
                                 ui.add_space(GAP_SMALL);
                                 if ui
@@ -98,7 +95,6 @@ pub fn show_settings_window(
                                         state.config.auto_detected = true;
                                         state.config.tool_detect_failed = false;
                                         state.drive.last_probed_drive = None;
-                                        state.chrome.show_first_run_setup = false;
                                     } else {
                                         state.config.tool_detect_failed = true;
                                     }

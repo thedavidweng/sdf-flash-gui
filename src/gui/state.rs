@@ -28,7 +28,8 @@ pub struct Chrome {
     pub show_about: bool,
     pub show_quit_confirmation: bool,
     pub show_flash_failure_dialog: bool,
-    pub show_first_run_setup: bool,
+    /// egui time until which the Settings toolbar button should pulse (no-backend nudge).
+    pub settings_nudge_until: Option<f64>,
     pub language: Language,
     pub resolved_lang: Language,
     pub theme: ThemeChoice,
@@ -108,7 +109,7 @@ impl AppState {
                 show_about: false,
                 show_quit_confirmation: false,
                 show_flash_failure_dialog: false,
-                show_first_run_setup: false,
+                settings_nudge_until: None,
                 language: Language::Auto,
                 resolved_lang: Language::English,
                 theme: ThemeChoice::System,
@@ -169,7 +170,6 @@ impl AppState {
             Some((b, p)) => (b, p, true),
             None => (Backend::SdfTool, String::new(), false),
         };
-        let show_first_run = path.is_empty();
         Self {
             config: ToolConfig {
                 backend,
@@ -180,7 +180,6 @@ impl AppState {
             },
             chrome: Chrome {
                 resolved_lang: i18n::detect_system_language(),
-                show_first_run_setup: show_first_run,
                 ..Self::defaults().chrome
             },
             ..Self::defaults()
@@ -340,5 +339,7 @@ mod tests {
         assert!(state.drive.drives.is_empty());
         assert!(state.flash.firmware_data.is_none());
         assert_eq!(state.chrome.resolved_lang, Language::English);
+        assert!(state.chrome.settings_nudge_until.is_none());
+        assert!(!state.chrome.show_settings);
     }
 }

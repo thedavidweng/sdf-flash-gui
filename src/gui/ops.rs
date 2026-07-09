@@ -275,6 +275,66 @@ pub fn backend_configured(state: &AppState) -> bool {
     .is_ok()
 }
 
+/// Total nudge window (seconds, egui time).
+///
+/// Timing follows the common “attention double-pulse” pattern (≈ Animate.css flash
+/// cadence, but with soft half-sine envelopes instead of hard on/off).
+pub const SETTINGS_NUDGE_SECONDS: f64 = 0.90;
+
+/// First soft pulse: start offset and duration within the nudge window.
+const NUDGE_PULSE1_START: f32 = 0.0;
+const NUDGE_PULSE1_DUR: f32 = 0.34;
+/// Second softer pulse (decayed amplitude — less strobe-y than two equal flashes).
+const NUDGE_PULSE2_START: f32 = 0.42;
+const NUDGE_PULSE2_DUR: f32 = 0.34;
+const NUDGE_PULSE2_GAIN: f32 = 0.55;
+
+/// True when a primary click should pulse the Settings button (no backend, not on allowed controls).
+pub fn click_should_nudge_settings(backend_ok: bool, click_on_allowed_control: bool) -> bool {
+    !backend_ok && !click_on_allowed_control
+}
+
+/// Whether the settings-button nudge animation is still running at `now` (egui time).
+pub fn settings_nudge_active(until: Option<f64>, now: f64) -> bool {
+    until.is_some_and(|t| now < t)
+}
+
+/// Soft white-highlight strength `0.0..=1.0` for the Settings button during a nudge.
+///
+/// Two half-sine “bell” pulses (smooth fade in/out). Second peak is weaker.
+/// Intensity only — callers must not change widget size or stroke width.
+pub fn settings_nudge_highlight(until: Option<f64>, now: f64) -> f32 {
+    let Some(until) = until else {
+        return 0.0;
+    };
+    if now >= until {
+        return 0.0;
+    }
+    let start = until - SETTINGS_NUDGE_SECONDS;
+    let elapsed = (now - start) as f32;
+    if elapsed < 0.0 {
+        return 0.0;
+    }
+    let a = half_sine_bell(elapsed, NUDGE_PULSE1_START, NUDGE_PULSE1_DUR);
+    let b = NUDGE_PULSE2_GAIN * half_sine_bell(elapsed, NUDGE_PULSE2_START, NUDGE_PULSE2_DUR);
+    (a + b).min(1.0)
+}
+
+/// Unit half-sine envelope over `[start, start+duration]`: 0 → 1 → 0.
+///
+/// Same soft pulse shape used widely for attention fades (raised half-sine / sin(πu)).
+fn half_sine_bell(t: f32, start: f32, duration: f32) -> f32 {
+    if duration <= f32::EPSILON {
+        return 0.0;
+    }
+    let u = (t - start) / duration;
+    if !(0.0..=1.0).contains(&u) {
+        0.0
+    } else {
+        (u * std::f32::consts::PI).sin()
+    }
+}
+
 pub fn on_operation_mode_changed(state: &mut AppState, mode: OperationMode) {
     state.flash.confirmation.clear();
     match mode {
@@ -639,6 +699,70 @@ mod tests {
     fn backend_configured_empty_path() {
         let state = AppState::new_no_backend();
         assert!(!backend_configured(&state));
+    }
+
+    #[test]
+    fn click_should_nudge_settings_when_no_backend_and_not_on_allowed() {
+        assert!(click_should_nudge_settings(false, false));
+        assert!(!click_should_nudge_settings(false, true));
+        assert!(!click_should_nudge_settings(true, false));
+        assert!(!click_should_nudge_settings(true, true));
+    }
+
+    #[test]
+    fn settings_nudge_active_respects_deadline() {
+        assert!(!settings_nudge_active(None, 10.0));
+        assert!(settings_nudge_active(Some(12.0), 10.0));
+        assert!(!settings_nudge_active(Some(12.0), 12.0));
+        assert!(!settings_nudge_active(Some(12.0), 13.0));
+    }
+
+    #[test]
+    fn settings_nudge_highlight_two_soft_pulses_with_decay() {
+        let start = 100.0;
+        let until = start + SETTINGS_NUDGE_SECONDS;
+        assert_eq!(settings_nudge_highlight(None, start), 0.0);
+
+        // Mid first pulse ≈ peak (half-sine at u=0.5 → 1.0)
+        let p1_mid = start + f64::from(NUDGE_PULSE1_START + NUDGE_PULSE1_DUR * 0.5);
+        let h1 = settings_nudge_highlight(Some(until), p1_mid);
+        assert!(
+            (h1 - 1.0).abs() < 0.02,
+            "first peak expected ~1.0, got {h1}"
+        );
+
+        // Gap between pulses ≈ 0
+        let gap_mid = start
+            + f64::from(NUDGE_PULSE1_START + NUDGE_PULSE1_DUR)
+            + f64::from(NUDGE_PULSE2_START - (NUDGE_PULSE1_START + NUDGE_PULSE1_DUR)) * 0.5;
+        let h_gap = settings_nudge_highlight(Some(until), gap_mid);
+        assert!(h_gap < 0.05, "gap should be near 0, got {h_gap}");
+
+        // Mid second pulse ≈ gain (weaker)
+        let p2_mid = start + f64::from(NUDGE_PULSE2_START + NUDGE_PULSE2_DUR * 0.5);
+        let h2 = settings_nudge_highlight(Some(until), p2_mid);
+        assert!(
+            (h2 - NUDGE_PULSE2_GAIN).abs() < 0.05,
+            "second peak expected ~{}, got {h2}",
+            NUDGE_PULSE2_GAIN
+        );
+        assert!(h2 < h1, "second pulse should be softer than first");
+
+        assert_eq!(settings_nudge_highlight(Some(until), until), 0.0);
+        assert_eq!(settings_nudge_highlight(Some(until), until + 1.0), 0.0);
+    }
+
+    #[test]
+    fn half_sine_bell_is_smooth_zero_peak_zero() {
+        assert_eq!(half_sine_bell(-0.1, 0.0, 1.0), 0.0);
+        assert_eq!(half_sine_bell(0.0, 0.0, 1.0), 0.0);
+        assert!((half_sine_bell(0.5, 0.0, 1.0) - 1.0).abs() < 1e-5);
+        assert!((half_sine_bell(1.0, 0.0, 1.0) - 0.0).abs() < 1e-5);
+        assert_eq!(half_sine_bell(1.1, 0.0, 1.0), 0.0);
+        let a = half_sine_bell(0.25, 0.0, 1.0);
+        let b = half_sine_bell(0.75, 0.0, 1.0);
+        assert!((a - b).abs() < 1e-5);
+        assert!(a > 0.5 && a < 1.0);
     }
 
     #[test]
