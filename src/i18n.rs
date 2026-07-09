@@ -372,6 +372,7 @@ pub enum L10nKey {
     BtnFlashFailureDismiss,
     LabelNotAvailable,
     BannerNoBackend,
+    LinkGetMakeMkv,
     OptionDryRunOnly,
     LogDryRunCommand,
     HintFlashNoCancel,
@@ -657,6 +658,7 @@ fn t_en(key: L10nKey) -> &'static str {
         L10nKey::BtnFlashFailureDismiss => "I Understand",
         L10nKey::LabelNotAvailable => "N/A",
         L10nKey::BannerNoBackend => "No backend tool configured.",
+        L10nKey::LinkGetMakeMkv => "Get MakeMKV",
         L10nKey::OptionDryRunOnly => "Dry-run only (validate and show command, do not write)",
         L10nKey::LogDryRunCommand => "Dry-run — command that would run:\n{command}",
         L10nKey::HintFlashNoCancel => "Flash in progress — do not power off. Stop may brick the drive.",
@@ -4477,6 +4479,7 @@ mod tests {
         L10nKey::BtnFlashFailureDismiss,
         L10nKey::LabelNotAvailable,
         L10nKey::BannerNoBackend,
+        L10nKey::LinkGetMakeMkv,
         L10nKey::OptionDryRunOnly,
         L10nKey::LogDryRunCommand,
         L10nKey::HintFlashNoCancel,
@@ -4507,7 +4510,7 @@ mod tests {
     fn test_translation_keys() {
         assert_eq!(
             ALL_KEYS.len(),
-            169,
+            170,
             "L10nKey variant count changed — update ALL_KEYS if intentional"
         );
         for key in ALL_KEYS {

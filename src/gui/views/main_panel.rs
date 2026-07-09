@@ -1,3 +1,4 @@
+use crate::branding::MAKEMKV_DOWNLOAD_URL;
 use crate::command;
 use crate::flash::FlashDirection;
 use crate::gui::file_dialog::{FileDialog, NativeDialog};
@@ -36,6 +37,7 @@ pub fn show_main_ui(
     }
 
     let mut settings_btn_rect = egui::Rect::NOTHING;
+    let mut get_makemkv_link_rect = egui::Rect::NOTHING;
 
     ui.horizontal(|ui| {
         let refresh_text = t(L10nKey::TooltipRefresh, state.chrome.resolved_lang);
@@ -176,15 +178,22 @@ pub fn show_main_ui(
 
     if !backend_ok {
         ui.add_space(GAP_SMALL);
-        ui.colored_label(
-            ui.visuals().error_fg_color,
-            icon_rich(
-                ui,
-                icon::WARNING,
-                t(L10nKey::BannerNoBackend, state.chrome.resolved_lang),
-                egui::TextStyle::Body,
-            ),
-        );
+        ui.horizontal(|ui| {
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                icon_rich(
+                    ui,
+                    icon::WARNING,
+                    t(L10nKey::BannerNoBackend, state.chrome.resolved_lang),
+                    egui::TextStyle::Body,
+                ),
+            );
+            let link_resp = ui.hyperlink_to(
+                t(L10nKey::LinkGetMakeMkv, state.chrome.resolved_lang),
+                MAKEMKV_DOWNLOAD_URL,
+            );
+            get_makemkv_link_rect = link_resp.rect;
+        });
     }
 
     // Operational controls require a configured backend and idle runtime.
@@ -474,11 +483,12 @@ pub fn show_main_ui(
             .weak(),
     );
 
-    // Low-intrusion first-run: no modal. Clicks outside the Settings gear pulse it.
+    // Low-intrusion first-run: no modal. Clicks outside Settings / Get MakeMKV pulse the gear.
     if !backend_ok && ctx.input(|i| i.pointer.primary_clicked()) {
         if let Some(pos) = ctx.pointer_interact_pos() {
             let on_settings = settings_btn_rect.contains(pos);
-            if ops::click_should_nudge_settings(backend_ok, on_settings) {
+            let on_get_makemkv = get_makemkv_link_rect.contains(pos);
+            if ops::click_should_nudge_settings(backend_ok, on_settings || on_get_makemkv) {
                 state.chrome.settings_nudge_until = Some(now + ops::SETTINGS_NUDGE_SECONDS);
             }
         }

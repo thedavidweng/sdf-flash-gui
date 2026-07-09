@@ -1,3 +1,4 @@
+use crate::branding::MAKEMKV_HOME_URL;
 use crate::gui::state::AppState;
 use crate::i18n::{t, t_with_args, L10nKey};
 
@@ -37,10 +38,17 @@ pub fn show_about_window(ctx: &egui::Context, state: &mut AppState) {
                             L10nKey::AboutAcknowledgementsTitle,
                             state.chrome.resolved_lang,
                         ));
-                        ui.small(format!(
-                            "MakeMKV {}",
-                            t(L10nKey::AboutBackendAckText, state.chrome.resolved_lang)
-                        ));
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.add(
+                                egui::Hyperlink::from_label_and_url(
+                                    egui::RichText::new("MakeMKV").small(),
+                                    MAKEMKV_HOME_URL,
+                                )
+                                .open_in_new_tab(true),
+                            );
+                            ui.small(t(L10nKey::AboutBackendAckText, state.chrome.resolved_lang));
+                        });
                         ui.small(format!(
                             "MartyMcNuts {}",
                             t(L10nKey::AboutCreatorAckText, state.chrome.resolved_lang)

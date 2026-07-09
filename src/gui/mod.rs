@@ -300,11 +300,18 @@ mod tests {
             clean_title
         );
 
-        let mkv_html = format!("<b>MakeMKV</b> {}", mkv_text);
+        let home = crate::branding::MAKEMKV_HOME_URL;
         assert!(
-            html.contains(&mkv_html),
-            "Backend ack mismatch in HTML. Expected to find: {}",
-            mkv_html
+            html.contains(&format!("href=\"{home}\"")),
+            "Credits.html missing MakeMKV home link ({home})"
+        );
+        assert!(
+            html.contains(mkv_text),
+            "Credits.html missing backend ack text: {mkv_text}"
+        );
+        assert!(
+            html.contains("<b>MakeMKV</b>"),
+            "Credits.html missing MakeMKV brand markup"
         );
 
         let marty_html = format!("<b>MartyMcNuts</b> {}", creator_text);
