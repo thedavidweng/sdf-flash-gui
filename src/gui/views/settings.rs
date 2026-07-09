@@ -89,7 +89,8 @@ pub fn show_settings_window(
                                     ))
                                     .clicked()
                                 {
-                                    if let Some((b, p)) = drive::find_backend() {
+                                    if let Some((b, p)) = drive::find_backend(state.config.backend)
+                                    {
                                         state.config.backend = b;
                                         state.config.tool_path = p;
                                         state.config.auto_detected = true;

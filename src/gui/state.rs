@@ -166,7 +166,7 @@ impl AppState {
     }
 
     pub fn new() -> Self {
-        let (backend, path, auto) = match drive::find_backend() {
+        let (backend, path, auto) = match drive::find_backend(Backend::SdfTool) {
             Some((b, p)) => (b, p, true),
             None => (Backend::SdfTool, String::new(), false),
         };
