@@ -265,6 +265,17 @@ pub fn show_main_ui(
                 state.drive.drive_probed,
                 state.drive.drive_libredrive,
             );
+
+            cols[0].label(t(L10nKey::LabelSdfVersion, state.chrome.resolved_lang));
+            if state.runtime.probing {
+                cols[1].add(egui::Spinner::new());
+            } else if !state.drive.drive_probed {
+                cols[1].weak("…");
+            } else if let Some(v) = &state.drive.drive_sdf_version {
+                cols[1].label(v);
+            } else {
+                cols[1].weak("—");
+            }
         });
 
         ui.add_space(GAP_MEDIUM);
