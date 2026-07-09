@@ -431,7 +431,7 @@ fn filename_has_recent_date_prefix(filename: &str) -> bool {
                 None
             }
         })
-        .is_some_and(|prefix| prefix >= 2020)
+        .is_some_and(|prefix| prefix >= 2120)
 }
 
 pub fn load_firmware(state: &mut AppState, path: &str) {
@@ -1937,10 +1937,28 @@ mod tests {
     }
 
     #[test]
+    fn load_firmware_no_auto_detect_for_date_prefix_below_threshold() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_below_threshold");
+        let _ = std::fs::create_dir_all(&dir);
+        // Date prefix 2050 is below the 2120 encrypted threshold
+        let file = dir.join("HL-DT-ST_BW-16D1HT_20500101.bin");
+        std::fs::write(&file, &[0u8; 100]).unwrap();
+        let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = false;
+        state.flash.encrypted_write = false;
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert!(
+            !state.flash.encrypted_write,
+            "date prefix 2050 should not trigger encrypted auto-detection (threshold is 2120)"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn load_firmware_resets_encrypted_when_switching_from_encrypted_file() {
         let dir = std::env::temp_dir().join("sdf_flash_test_reset_enc");
         let _ = std::fs::create_dir_all(&dir);
-        // Step 1: load encrypted firmware (date prefix >= 2020, non-SDF0)
+        // Step 1: load encrypted firmware (date prefix >= 2120, non-SDF0)
         let enc_file = dir.join("HL-DT-ST_BW-16D1HT_21200507.bin");
         std::fs::write(&enc_file, &[0x85u8, 0x4a, 0xc0, 0x75, 0, 0, 0, 0, 0, 0]).unwrap();
         let mut state = AppState::new_no_backend();

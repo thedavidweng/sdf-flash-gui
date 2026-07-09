@@ -686,7 +686,7 @@ fn t_en(key: L10nKey) -> &'static str {
         L10nKey::WarnPlatformMismatch => "WARNING: This firmware is for {firmware} drives but your drive is {drive}. Flashing wrong form factor firmware can BRICK your drive.",
         L10nKey::WarnCrossFlashConfirm => "I understand this is a cross-flash and want to proceed",
         L10nKey::ReasonCrossFlashNotConfirmed => "Confirm cross-flash to proceed",
-        L10nKey::InfoTwoStepFlash => "This drive model (BP50NB40/WP50NB40/BP55EB40) requires two-step flashing. Step 1: Flash DE_LG_BP50NB40-NB50_1.03_MK.bin in Write mode. Step 2: Switch to Recover mode and flash your target firmware.",
+        L10nKey::InfoTwoStepFlash => "This drive model (BP50NB40/WP50NB40/BP55EB40) requires two-step flashing. Step 1: Flash the intermediate MK firmware (e.g. DE_LG_BP50NB40-NB50_1.03_MK.bin) in Write mode. Step 2: Switch to Recover mode and flash your target firmware.",
         L10nKey::WarnFirmwareDowngrade => "This is a firmware downgrade (current: {current}, target: {target}). If downgrading from encrypted firmware, ensure 'Encrypted' is checked.",
         L10nKey::InfoFirmwareModelMismatch => "Firmware is for {firmware}, your drive is {drive}. This is normal for cross-flashing.",
         L10nKey::ReasonMt1939NotCompatible => "This drive uses the older MT1939 chip and is NOT compatible with OmniDrive or MK firmware. See: https://wiki.redump.info/index.php?title=Flashing_Older_HLDS_Drives",
