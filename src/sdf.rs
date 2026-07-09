@@ -74,12 +74,6 @@ pub enum SdfError {
 
     #[error("metadata table exceeds maximum size of {max} bytes")]
     MetadataTooLarge { max: usize },
-
-    #[error("payload_offset {offset} is before end of header ({header})")]
-    InvalidPayloadOffset { offset: u32, header: u32 },
-
-    #[error("table_offset {table} is before header_size ({header})")]
-    InvalidTableOffset { table: u32, header: u32 },
 }
 
 const SDF0_MIN_HEADER_SIZE: usize = 24;
@@ -180,30 +174,13 @@ pub fn parse_sdf0<R: Read>(reader: &mut R) -> Result<SdfContainer, SdfError> {
         skip_bytes(reader, remaining)?;
     }
 
-    if payload_offset < header_size {
-        return Err(SdfError::InvalidPayloadOffset {
-            offset: payload_offset,
-            header: header_size,
-        });
-    }
-
+    // looks_like_structured_header already guarantees:
+    // payload_offset >= header_size, and table_offset is 0 or in [header_size, payload_offset].
     let metadata_start = if table_offset == 0 {
         header_size
     } else {
         table_offset
     };
-    if metadata_start < header_size {
-        return Err(SdfError::InvalidTableOffset {
-            table: table_offset,
-            header: header_size,
-        });
-    }
-    if metadata_start > payload_offset {
-        return Err(SdfError::InvalidPayloadOffset {
-            offset: payload_offset,
-            header: metadata_start,
-        });
-    }
 
     let region_size = (payload_offset - header_size) as usize;
     if region_size > SDF0_MAX_METADATA_SIZE {
