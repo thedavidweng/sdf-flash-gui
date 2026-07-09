@@ -3,12 +3,11 @@ coverage:
     project:
       default:
         target: auto
-        # Large pure-logic additions can lower the overall ratio slightly vs a
-        # near-100% baseline; allow a small drop while keeping the patch gate high.
+        # Allow a small drop vs near-100% baseline when pure domain code grows.
         threshold: 1%
     patch:
       default:
-        # Explicit fixed target (not auto). New code must be substantially covered.
+        # Fixed floor for new/changed lines (not auto-locked to baseline %).
         target: 95%
         threshold: 0%
 
@@ -17,18 +16,24 @@ coverage:
     require_changes: true
     hide_project_coverage: false
 
-# Environment-dependent files excluded from coverage metrics:
-# - main.rs: entry point, calls eframe::run_native
-# - gui/mod.rs: egui app shell, requires native window
-# - gui/views/*: egui view rendering (split from gui/mod.rs)
-# - drive.rs: platform-specific code with #[cfg(target_os)]
-# - gui/file_dialog.rs: NativeDialog impl, calls rfd (native dialogs)
+# Paths excluded from Codecov metrics.
+# Keep in sync with scripts/coverage-ignore.regex (llvm-cov) and Agents.md.
+#
+# Do NOT ignore domain logic: command, flash, orchestration, process (lifecycle),
+# sdf, manifest, gui/ops, gui/workers, gui/state, gui/validation, i18n.
 ignore:
+  # Binary entry: eframe launch + CLI process::exit
   - "src/main.rs"
+  # eframe App shell / native window lifecycle
   - "src/gui/mod.rs"
+  # egui view rendering only (logic is in ops/workers)
   - "src/gui/views/**"
+  # OS-specific drive enumerate + backend discovery
   - "src/drive.rs"
+  # rfd native file dialog adapter (mocked at FileDialog trait)
   - "src/gui/file_dialog.rs"
+  # NativeRunner thin OS process adapter (mocked at ProcessRunner trait)
+  - "src/process_runner.rs"
 
 flags:
   unit:

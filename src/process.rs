@@ -603,7 +603,10 @@ pub fn format_command(cmd: &crate::command::Command) -> String {
         .join(" ")
 }
 
-/// Seam for backend process execution. Production uses [`NativeRunner`]; tests inject mocks.
+/// Seam for backend process execution.
+///
+/// Production uses [`crate::process_runner::NativeRunner`] (coverage-ignored thin
+/// adapter). Tests inject mocks that implement this trait.
 pub trait ProcessRunner: Send + Sync + 'static {
     fn run_command(
         &self,
@@ -621,77 +624,9 @@ pub trait ProcessRunner: Send + Sync + 'static {
     ) -> Result<CommandRunOutcome, String>;
 }
 
-/// Production adapter that delegates to real process execution.
-pub struct NativeRunner;
-
-impl ProcessRunner for NativeRunner {
-    fn run_command(
-        &self,
-        program: &str,
-        args: &[String],
-        control: Option<&OperationControl>,
-    ) -> Result<CommandRunOutcome, String> {
-        run_command_cancellable(program, args, control)
-    }
-
-    fn run_command_streaming(
-        &self,
-        program: &str,
-        args: &[String],
-        on_line: &dyn Fn(&str),
-        control: Option<&OperationControl>,
-    ) -> Result<CommandRunOutcome, String> {
-        run_command_streaming_cancellable(program, args, on_line, control)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    #[cfg(unix)]
-    fn native_runner_run_command_completes() {
-        let runner = NativeRunner;
-        let outcome = runner
-            .run_command("echo", &["native-runner".into()], None)
-            .expect("echo");
-        // Prefer if-let so the non-Completed arm is not present in the binary as
-        // an uncovered region of the patch.
-        if let CommandRunOutcome::Completed(out) = outcome {
-            assert!(out.success());
-            assert!(
-                out.stdout.contains("native-runner") || out.combined().contains("native-runner")
-            );
-        } else {
-            panic!("echo completes");
-        }
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn native_runner_streaming_completes() {
-        let runner = NativeRunner;
-        let lines = std::sync::Mutex::new(Vec::<String>::new());
-        let outcome = runner
-            .run_command_streaming(
-                "echo",
-                &["stream-line".into()],
-                &|line| lines.lock().unwrap().push(line.to_string()),
-                None,
-            )
-            .expect("echo stream");
-        if let CommandRunOutcome::Completed(out) = outcome {
-            assert!(out.success());
-            let captured = lines.lock().unwrap();
-            assert!(
-                captured.iter().any(|l| l.contains("stream-line"))
-                    || out.combined().contains("stream-line")
-            );
-        } else {
-            panic!("echo stream completes");
-        }
-    }
 
     struct RestoreGracefulTerminate(());
 

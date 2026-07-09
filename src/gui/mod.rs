@@ -17,7 +17,7 @@ use crate::i18n::{t, t_with_args, L10nKey};
 
 use eframe::egui;
 
-use crate::process::NativeRunner;
+use crate::process_runner::NativeRunner;
 use file_dialog::NativeDialog;
 use state::{AppState, StopDialog};
 use views::{

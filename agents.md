@@ -33,23 +33,22 @@ cargo test
 
 ### Coverage (required when touching `src/`)
 
-Matches CI on Linux (Codecov patch gate is 80%):
+Matches CI on Linux (Codecov patch target is **95%**). Ignore set is centralized:
+
+- `scripts/coverage-ignore.regex` — llvm-cov (CI + local)
+- `codecov.yml` `ignore:` — Codecov upload (must list the same paths)
 
 ```bash
 cargo install cargo-llvm-cov   # once, if not installed
 
-cargo llvm-cov --html \
-  --ignore-filename-regex '(src/main\.rs|src/gui/mod\.rs|src/gui/views/|src/drive\.rs|src/gui/file_dialog\.rs)'
+./scripts/coverage.sh html     # HTML under target/llvm-cov/html
+./scripts/coverage.sh lcov     # lcov.info (same as CI)
+./scripts/coverage.sh report   # text + missing lines
 ```
 
-Open `target/llvm-cov/html/index.html` and confirm changed files have no uncovered lines in the diff.
+Open `target/llvm-cov/html/index.html` and confirm changed **non-ignored** files have no meaningful uncovered branches in the diff.
 
-Generate lcov the same way CI does:
-
-```bash
-cargo llvm-cov --lcov --output-path lcov.info \
-  --ignore-filename-regex '(src/main\.rs|src/gui/mod\.rs|src/gui/views/|src/drive\.rs|src/gui/file_dialog\.rs)'
-```
+**What is ignored (and why):** native entry/shell, egui views, OS drive discovery, rfd dialogs, and `NativeRunner` (thin process adapter). Domain modules (`command`, `flash`, `orchestration`, `process` lifecycle, `sdf`, `gui/ops`, `gui/workers`, …) are **not** ignored — cover new behaviour there with tests.
 
 ### SDF parser policy (CI enforces)
 

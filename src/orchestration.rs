@@ -6,9 +6,8 @@ use crate::command::{
 use crate::drive::{self, Drive};
 use crate::flash;
 use crate::manifest;
-use crate::process::{
-    CommandOutput, CommandRunOutcome, NativeRunner, OperationControl, ProcessRunner,
-};
+use crate::process::{CommandOutput, CommandRunOutcome, OperationControl, ProcessRunner};
+use crate::process_runner::NativeRunner;
 
 // ── Confirmation ───────────────────────────────────────────────────
 
