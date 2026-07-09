@@ -4,12 +4,22 @@ All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 ## [Unreleased]
 
+### <!-- 0 -->🚀 Features
+
+- Add user-facing safety warnings for firmware flashing
+- Identify firmware by binary content + SHA-256 hash database
+
 ### <!-- 1 -->🐛 Bug Fixes
 
 - Address PR review on shared flash pipeline
 - Suppress no-manifest warnings on recover flash
 - Harden coverage ignore join and validate_flash log
 - Restore exit code 1 for dry-run flash without --confirm
+- Reset encrypted_write on firmware load and fix Recover mode reason
+- Align encrypted auto-detect threshold with probe and soften two-step text
+- Downgrade filename-based encrypted detection to advisory hint
+- Firmware_db binary search bugs from review
+- Serde default for mt1939 + remove dead classify_firmware
 
 ### <!-- 2 -->🚜 Refactor
 
@@ -30,6 +40,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Close remaining patch gaps and pin Codecov thresholds
 - Cover remaining patch gaps in ops and workers
 - Cover ops/workers patch residual branches
+- Cover firmware_db resolve_model/resolve_form_factor_with_sdf branches
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
@@ -38,6 +49,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - Centralize coverage ignores and re-home NativeRunner
 - Pin Codecov patch to 100% and project to 99%
+- **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 ## [0.2.0] - 2026-06-26
 
