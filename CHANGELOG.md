@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
+## [Unreleased]
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Auto-detect respects user-selected backend
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md for v0.3.0
 ## [0.3.0] - 2026-07-09
 
 ### <!-- 0 -->🚀 Features
