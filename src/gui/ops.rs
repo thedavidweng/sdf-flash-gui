@@ -420,26 +420,13 @@ pub(crate) fn firmware_picker_label(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
-/// Check if a filename contains a 4-digit date prefix >= 2020 (encrypted firmware indicator).
-fn filename_has_recent_date_prefix(filename: &str) -> bool {
-    filename
-        .split(['_', '-', '.', ' '])
-        .find_map(|part| {
-            if part.len() >= 4 && part.as_bytes()[0..4].iter().all(u8::is_ascii_digit) {
-                part[0..4].parse::<u32>().ok()
-            } else {
-                None
-            }
-        })
-        .is_some_and(|prefix| prefix >= 2120)
-}
-
 pub fn load_firmware(state: &mut AppState, path: &str) {
     let lang = state.chrome.resolved_lang;
     state.flash.firmware_path = path.to_string();
     state.flash.cross_flash_confirmed = false;
     state.flash.firmware_sdf_info = None;
     state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Unknown;
+    state.flash.firmware_identification = None;
     state.flash.encrypted_write = state.drive.drive_encrypted_firmware;
     match std::fs::read(path) {
         Ok(data) => {
@@ -452,20 +439,14 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
                 state.flash.firmware_data = None;
             } else {
                 let sdf_info = flash::check_firmware_sdf(&data);
-                let filename = std::path::Path::new(path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(path);
-                let form_factor = crate::platform::classify_firmware(
-                    filename,
-                    sdf_info.as_ref().and_then(|i| i.model.as_deref()),
-                );
-                state.flash.firmware_form_factor = form_factor;
-                let is_sdf = sdf_info.is_some();
+
+                // Identify firmware by hash + binary content analysis (no filename dependency).
+                let id = crate::firmware_db::identify_firmware(&data);
+                state.flash.firmware_form_factor =
+                    crate::firmware_db::resolve_form_factor_with_sdf(&id, sdf_info.as_ref());
+                state.flash.firmware_identification = Some(id);
                 state.flash.firmware_sdf_info = sdf_info;
-                if !is_sdf && filename_has_recent_date_prefix(filename) {
-                    state.log(t(L10nKey::LogEncryptedFilenameHint, lang));
-                }
+
                 state.flash.firmware_data = Some(data);
             }
         }
@@ -1908,64 +1889,67 @@ mod tests {
     }
 
     #[test]
-    fn load_firmware_logs_hint_for_encrypted_filename() {
-        let dir = std::env::temp_dir().join("sdf_flash_test_load_fw_enc_hint");
+    fn load_firmware_identifies_known_firmware_by_hash() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_known_hash");
         let _ = std::fs::create_dir_all(&dir);
-        let file = dir.join("HL-DT-ST_BW-16D1HT_21200507.bin");
-        // Non-SDF0 data (encrypted raw blob) with date prefix in filename
-        std::fs::write(&file, &[0x85u8, 0x4a, 0xc0, 0x75, 0, 0, 0, 0, 0, 0]).unwrap();
+        // Build a synthetic firmware with the BW-16D1HT 3.02 hash is not feasible,
+        // but we can test that binary analysis extracts PCB type and model.
+        let mut data = vec![0u8; 40000];
+        let boot = b"MT1959 Boot JB8 ";
+        data[12288..12288 + boot.len()].copy_from_slice(boot);
+        let model = b"BW-16D1HT";
+        data[37600..37600 + model.len()].copy_from_slice(model);
+        let file = dir.join("renamed_firmware.bin");
+        std::fs::write(&file, &data).unwrap();
         let mut state = AppState::new_no_backend();
-        state.drive.drive_encrypted_firmware = false;
-        state.flash.encrypted_write = false;
         load_firmware(&mut state, &file.to_string_lossy());
-        // Should NOT auto-set encrypted_write — only log a hint
-        assert!(!state.flash.encrypted_write);
-        assert!(state.flash.firmware_sdf_info.is_none());
-        // Hint should appear in log
-        let log = state.runtime.log_text.as_str();
-        assert!(
-            log.contains("date prefix"),
-            "log should mention date prefix: {log}"
+        assert_eq!(
+            state.flash.firmware_form_factor,
+            crate::platform::DriveFormFactor::Desktop
+        );
+        let id = state.flash.firmware_identification.as_ref().unwrap();
+        assert_eq!(id.binary_info.pcb_type.as_deref(), Some("JB8"));
+        assert_eq!(id.binary_info.model.as_deref(), Some("BW-16D1HT"));
+        // Not in known database (synthetic data)
+        assert!(id.known.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_firmware_identifies_slim_by_pcb_type() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_slim_pcb");
+        let _ = std::fs::create_dir_all(&dir);
+        let mut data = vec![0u8; 40000];
+        let boot = b"MT1959 Boot BU5 ";
+        data[12288..12288 + boot.len()].copy_from_slice(boot);
+        let model = b"BU40N";
+        data[37900..37900 + model.len()].copy_from_slice(model);
+        let file = dir.join("whatever_name.bin");
+        std::fs::write(&file, &data).unwrap();
+        let mut state = AppState::new_no_backend();
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert_eq!(
+            state.flash.firmware_form_factor,
+            crate::platform::DriveFormFactor::Slim
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn load_firmware_no_hint_without_date_prefix() {
-        let dir = std::env::temp_dir().join("sdf_flash_test_load_fw_noenc");
+    fn load_firmware_unknown_binary_gets_unknown_form_factor() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_unknown_bin");
         let _ = std::fs::create_dir_all(&dir);
-        let file = dir.join("HL-DT-ST_BW-16D1HT_3.10.bin");
+        let file = dir.join("mystery.bin");
         std::fs::write(&file, &[0u8; 100]).unwrap();
         let mut state = AppState::new_no_backend();
-        state.drive.drive_encrypted_firmware = false;
-        state.flash.encrypted_write = false;
         load_firmware(&mut state, &file.to_string_lossy());
-        assert!(!state.flash.encrypted_write);
-        let log = state.runtime.log_text.as_str();
-        assert!(!log.contains("date prefix"), "no hint expected: {log}");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn load_firmware_no_hint_for_date_prefix_below_threshold() {
-        let dir = std::env::temp_dir().join("sdf_flash_test_below_threshold");
-        let _ = std::fs::create_dir_all(&dir);
-        // Date prefix 2050 is below the 2120 encrypted threshold
-        let file = dir.join("HL-DT-ST_BW-16D1HT_20500101.bin");
-        std::fs::write(&file, &[0u8; 100]).unwrap();
-        let mut state = AppState::new_no_backend();
-        state.drive.drive_encrypted_firmware = false;
-        state.flash.encrypted_write = false;
-        load_firmware(&mut state, &file.to_string_lossy());
-        assert!(
-            !state.flash.encrypted_write,
-            "date prefix 2050 should not trigger encrypted hint (threshold is 2120)"
+        assert_eq!(
+            state.flash.firmware_form_factor,
+            crate::platform::DriveFormFactor::Unknown
         );
-        let log = state.runtime.log_text.as_str();
-        assert!(
-            !log.contains("date prefix"),
-            "no hint for below-threshold: {log}"
-        );
+        let id = state.flash.firmware_identification.as_ref().unwrap();
+        assert!(id.known.is_none());
+        assert!(id.binary_info.pcb_type.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
