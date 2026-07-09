@@ -8,6 +8,8 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 
 - Add user-facing safety warnings for firmware flashing
 - Identify firmware by binary content + SHA-256 hash database
+- Replace first-run modal with settings-button nudge
+- Link MakeMKV in About and no-backend banner
 
 ### <!-- 1 -->🐛 Bug Fixes
 
@@ -41,6 +43,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Cover remaining patch gaps in ops and workers
 - Cover ops/workers patch residual branches
 - Cover firmware_db resolve_model/resolve_form_factor_with_sdf branches
+- Cover settings_nudge edge branches for 100% patch
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
@@ -49,6 +52,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - Centralize coverage ignores and re-home NativeRunner
 - Pin Codecov patch to 100% and project to 99%
+- **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 ## [0.2.0] - 2026-06-26
