@@ -246,7 +246,22 @@ pub fn start_disabled_reason(state: &AppState) -> String {
             }
             String::new()
         }
-        OperationMode::Recover => t(L10nKey::ReasonEnterToken, lang).to_string(),
+        OperationMode::Recover => {
+            if state.flash.firmware_path.is_empty() {
+                return t(L10nKey::ReasonNoFirmware, lang).to_string();
+            }
+            if state.flash.recovery_token.len() != 16 {
+                return t(L10nKey::ReasonEnterToken, lang).to_string();
+            }
+            let device = state
+                .selected_drive()
+                .map(|d| d.device.as_str())
+                .unwrap_or("");
+            if !command::confirmation_matches(device, &state.flash.confirmation) {
+                return t(L10nKey::ReasonEnterToken, lang).to_string();
+            }
+            String::new()
+        }
     }
 }
 
@@ -425,6 +440,7 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
     state.flash.cross_flash_confirmed = false;
     state.flash.firmware_sdf_info = None;
     state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Unknown;
+    state.flash.encrypted_write = state.drive.drive_encrypted_firmware;
     match std::fs::read(path) {
         Ok(data) => {
             if data.is_empty() {
@@ -1918,6 +1934,94 @@ mod tests {
         load_firmware(&mut state, &file.to_string_lossy());
         assert!(!state.flash.encrypted_write);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_firmware_resets_encrypted_when_switching_from_encrypted_file() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_reset_enc");
+        let _ = std::fs::create_dir_all(&dir);
+        // Step 1: load encrypted firmware (date prefix >= 2020, non-SDF0)
+        let enc_file = dir.join("HL-DT-ST_BW-16D1HT_21200507.bin");
+        std::fs::write(&enc_file, &[0x85u8, 0x4a, 0xc0, 0x75, 0, 0, 0, 0, 0, 0]).unwrap();
+        let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = false;
+        state.flash.encrypted_write = false;
+        load_firmware(&mut state, &enc_file.to_string_lossy());
+        assert!(state.flash.encrypted_write);
+        // Step 2: switch to non-encrypted firmware (no date prefix)
+        let plain_file = dir.join("HL-DT-ST_BW-16D1HT_3.10.bin");
+        std::fs::write(&plain_file, &[0u8; 100]).unwrap();
+        load_firmware(&mut state, &plain_file.to_string_lossy());
+        assert!(
+            !state.flash.encrypted_write,
+            "encrypted_write must reset when loading a non-encrypted firmware"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_firmware_resets_encrypted_to_probe_value() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_probe_enc");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("HL-DT-ST_BW-16D1HT_3.10.bin");
+        std::fs::write(&file, &[0u8; 100]).unwrap();
+        let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = true;
+        state.flash.encrypted_write = false;
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert!(
+            state.flash.encrypted_write,
+            "encrypted_write should reset to probe-detected value"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn start_disabled_reason_recover_empty_when_valid() {
+        let (mut state, temp_dir) = state_with_valid_paths("recover_valid");
+        state.drive.drives.push(Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        });
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Recover;
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.firmware_data = Some(vec![0u8; 100]);
+        state.flash.recovery_token = "1234567890ABCDEF".into();
+        state.flash.confirmation = crate::command::required_flash_confirmation("/dev/sr0");
+        assert_eq!(start_disabled_reason(&state), "");
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn start_disabled_reason_recover_shows_reason_when_token_missing() {
+        let (mut state, temp_dir) = state_with_valid_paths("recover_no_token");
+        state.drive.drives.push(Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+        });
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.operation_mode = OperationMode::Recover;
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.recovery_token = String::new();
+        let reason = start_disabled_reason(&state);
+        assert!(!reason.is_empty());
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn cross_flash_confirmation_required_no_drive_returns_false() {
+        let (mut state, temp_dir) = state_with_valid_paths("no_drive_cross");
+        state.drive.selected_drive = None;
+        state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Desktop;
+        assert!(!cross_flash_confirmation_required(&state));
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[test]
