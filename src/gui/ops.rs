@@ -766,6 +766,21 @@ mod tests {
     }
 
     #[test]
+    fn settings_nudge_highlight_before_window_start_is_zero() {
+        // until is set, but `now` is still before (until - SETTINGS_NUDGE_SECONDS).
+        let until = 200.0;
+        let before_start = until - SETTINGS_NUDGE_SECONDS - 0.05;
+        assert!(before_start < until);
+        assert_eq!(settings_nudge_highlight(Some(until), before_start), 0.0);
+    }
+
+    #[test]
+    fn half_sine_bell_zero_duration_is_zero() {
+        assert_eq!(half_sine_bell(0.0, 0.0, 0.0), 0.0);
+        assert_eq!(half_sine_bell(0.5, 0.0, f32::EPSILON / 2.0), 0.0);
+    }
+
+    #[test]
     fn flash_mode_label_read() {
         let mut state = AppState::new_no_backend();
         state.operation_mode = OperationMode::Read;
