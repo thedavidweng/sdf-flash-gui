@@ -393,7 +393,7 @@ pub enum L10nKey {
     WarnFirmwareDowngrade,
     InfoFirmwareModelMismatch,
     ReasonMt1939NotCompatible,
-    LogEncryptedAutoDetected,
+    LogEncryptedFilenameHint,
 }
 
 pub fn t(key: L10nKey, lang: Language) -> &'static str {
@@ -690,7 +690,7 @@ fn t_en(key: L10nKey) -> &'static str {
         L10nKey::WarnFirmwareDowngrade => "This is a firmware downgrade (current: {current}, target: {target}). If downgrading from encrypted firmware, ensure 'Encrypted' is checked.",
         L10nKey::InfoFirmwareModelMismatch => "Firmware is for {firmware}, your drive is {drive}. This is normal for cross-flashing.",
         L10nKey::ReasonMt1939NotCompatible => "This drive uses the older MT1939 chip and is NOT compatible with OmniDrive or MK firmware. See: https://wiki.redump.info/index.php?title=Flashing_Older_HLDS_Drives",
-        L10nKey::LogEncryptedAutoDetected => "Firmware filename has a recent date prefix — auto-enabled Encrypted mode.",
+        L10nKey::LogEncryptedFilenameHint => "Firmware filename has a date prefix >= 2120 — this may be encrypted firmware. Enable 'Encrypted' mode if flashing fails without it.",
     }
 }
 
@@ -4517,7 +4517,7 @@ mod tests {
         L10nKey::WarnFirmwareDowngrade,
         L10nKey::InfoFirmwareModelMismatch,
         L10nKey::ReasonMt1939NotCompatible,
-        L10nKey::LogEncryptedAutoDetected,
+        L10nKey::LogEncryptedFilenameHint,
     ];
 
     #[test]
@@ -4565,7 +4565,7 @@ mod tests {
             L10nKey::WarnFirmwareDowngrade,
             L10nKey::InfoFirmwareModelMismatch,
             L10nKey::ReasonMt1939NotCompatible,
-            L10nKey::LogEncryptedAutoDetected,
+            L10nKey::LogEncryptedFilenameHint,
         ];
         for &key in &new_keys {
             assert!(
@@ -4585,7 +4585,7 @@ mod tests {
             L10nKey::WarnFirmwareDowngrade,
             L10nKey::InfoFirmwareModelMismatch,
             L10nKey::ReasonMt1939NotCompatible,
-            L10nKey::LogEncryptedAutoDetected,
+            L10nKey::LogEncryptedFilenameHint,
         ];
         for &key in &keys {
             let text = t(key, Language::English);

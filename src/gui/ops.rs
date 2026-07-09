@@ -464,8 +464,7 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
                 let is_sdf = sdf_info.is_some();
                 state.flash.firmware_sdf_info = sdf_info;
                 if !is_sdf && filename_has_recent_date_prefix(filename) {
-                    state.flash.encrypted_write = true;
-                    state.log(t(L10nKey::LogEncryptedAutoDetected, lang));
+                    state.log(t(L10nKey::LogEncryptedFilenameHint, lang));
                 }
                 state.flash.firmware_data = Some(data);
             }
@@ -1909,35 +1908,46 @@ mod tests {
     }
 
     #[test]
-    fn load_firmware_auto_detects_encrypted_from_filename() {
-        let dir = std::env::temp_dir().join("sdf_flash_test_load_fw_enc");
+    fn load_firmware_logs_hint_for_encrypted_filename() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_load_fw_enc_hint");
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join("HL-DT-ST_BW-16D1HT_21200507.bin");
         // Non-SDF0 data (encrypted raw blob) with date prefix in filename
         std::fs::write(&file, &[0x85u8, 0x4a, 0xc0, 0x75, 0, 0, 0, 0, 0, 0]).unwrap();
         let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = false;
         state.flash.encrypted_write = false;
         load_firmware(&mut state, &file.to_string_lossy());
-        assert!(state.flash.encrypted_write);
+        // Should NOT auto-set encrypted_write — only log a hint
+        assert!(!state.flash.encrypted_write);
         assert!(state.flash.firmware_sdf_info.is_none());
+        // Hint should appear in log
+        let log = state.runtime.log_text.as_str();
+        assert!(
+            log.contains("date prefix"),
+            "log should mention date prefix: {log}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn load_firmware_no_auto_detect_without_date_prefix() {
+    fn load_firmware_no_hint_without_date_prefix() {
         let dir = std::env::temp_dir().join("sdf_flash_test_load_fw_noenc");
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join("HL-DT-ST_BW-16D1HT_3.10.bin");
         std::fs::write(&file, &[0u8; 100]).unwrap();
         let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = false;
         state.flash.encrypted_write = false;
         load_firmware(&mut state, &file.to_string_lossy());
         assert!(!state.flash.encrypted_write);
+        let log = state.runtime.log_text.as_str();
+        assert!(!log.contains("date prefix"), "no hint expected: {log}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn load_firmware_no_auto_detect_for_date_prefix_below_threshold() {
+    fn load_firmware_no_hint_for_date_prefix_below_threshold() {
         let dir = std::env::temp_dir().join("sdf_flash_test_below_threshold");
         let _ = std::fs::create_dir_all(&dir);
         // Date prefix 2050 is below the 2120 encrypted threshold
@@ -1949,30 +1959,12 @@ mod tests {
         load_firmware(&mut state, &file.to_string_lossy());
         assert!(
             !state.flash.encrypted_write,
-            "date prefix 2050 should not trigger encrypted auto-detection (threshold is 2120)"
+            "date prefix 2050 should not trigger encrypted hint (threshold is 2120)"
         );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn load_firmware_resets_encrypted_when_switching_from_encrypted_file() {
-        let dir = std::env::temp_dir().join("sdf_flash_test_reset_enc");
-        let _ = std::fs::create_dir_all(&dir);
-        // Step 1: load encrypted firmware (date prefix >= 2120, non-SDF0)
-        let enc_file = dir.join("HL-DT-ST_BW-16D1HT_21200507.bin");
-        std::fs::write(&enc_file, &[0x85u8, 0x4a, 0xc0, 0x75, 0, 0, 0, 0, 0, 0]).unwrap();
-        let mut state = AppState::new_no_backend();
-        state.drive.drive_encrypted_firmware = false;
-        state.flash.encrypted_write = false;
-        load_firmware(&mut state, &enc_file.to_string_lossy());
-        assert!(state.flash.encrypted_write);
-        // Step 2: switch to non-encrypted firmware (no date prefix)
-        let plain_file = dir.join("HL-DT-ST_BW-16D1HT_3.10.bin");
-        std::fs::write(&plain_file, &[0u8; 100]).unwrap();
-        load_firmware(&mut state, &plain_file.to_string_lossy());
+        let log = state.runtime.log_text.as_str();
         assert!(
-            !state.flash.encrypted_write,
-            "encrypted_write must reset when loading a non-encrypted firmware"
+            !log.contains("date prefix"),
+            "no hint for below-threshold: {log}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
