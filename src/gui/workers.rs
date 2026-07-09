@@ -1164,13 +1164,14 @@ mod tests {
         spawn_probe(&tx, &mut state, 0, &runner);
         drop(tx);
         let msg = rx.try_recv().unwrap();
-        match msg {
-            WorkerMsg::ProbeComplete { error, .. } => {
-                assert!(error.is_some());
-                assert!(error.unwrap().contains("Settings"));
-            }
-            _ => panic!("expected ProbeComplete"),
-        }
+        // Prefer matches! over match+panic so the never-taken arm is not a patch DA.
+        assert!(
+            matches!(
+                &msg,
+                WorkerMsg::ProbeComplete { error: Some(e), .. } if e.contains("Settings")
+            ),
+            "expected ProbeComplete with Settings error, got {msg:?}"
+        );
     }
 
     #[test]
@@ -1222,12 +1223,10 @@ mod tests {
         // Should have: Status, Log (> command), Log (output), ProbeComplete
         assert!(messages.len() >= 3);
         let probe = messages.last().unwrap();
-        match probe {
-            WorkerMsg::ProbeComplete { error, .. } => {
-                assert!(error.is_none());
-            }
-            _ => panic!("expected ProbeComplete"),
-        }
+        assert!(
+            matches!(probe, WorkerMsg::ProbeComplete { error: None, .. }),
+            "expected ProbeComplete ok, got {probe:?}"
+        );
     }
 
     #[test]
@@ -1241,13 +1240,13 @@ mod tests {
         let messages = wait_for_probe_complete(&rx);
         drop(tx);
         let probe = messages.last().unwrap();
-        match probe {
-            WorkerMsg::ProbeComplete { error, .. } => {
-                assert!(error.is_some());
-                assert!(error.as_ref().unwrap().contains("mock command failed"));
-            }
-            _ => panic!("expected ProbeComplete with error"),
-        }
+        assert!(
+            matches!(
+                probe,
+                WorkerMsg::ProbeComplete { error: Some(e), .. } if e.contains("mock command failed")
+            ),
+            "expected ProbeComplete with mock failure, got {probe:?}"
+        );
     }
 
     #[test]
@@ -1271,12 +1270,10 @@ mod tests {
         // Should have: Status, Log (> command), Log (line1), Log (line2), OperationComplete
         assert!(messages.len() >= 4);
         let last = messages.last().unwrap();
-        match last {
-            WorkerMsg::OperationComplete { success, .. } => {
-                assert!(success);
-            }
-            _ => panic!("expected OperationComplete"),
-        }
+        assert!(
+            matches!(last, WorkerMsg::OperationComplete { success: true, .. }),
+            "expected OperationComplete success, got {last:?}"
+        );
     }
 
     #[test]
@@ -1298,12 +1295,10 @@ mod tests {
         let messages = wait_for_operation_complete(&rx);
         drop(tx);
         let last = messages.last().unwrap();
-        match last {
-            WorkerMsg::OperationComplete { success, .. } => {
-                assert!(!success);
-            }
-            _ => panic!("expected OperationComplete failure"),
-        }
+        assert!(
+            matches!(last, WorkerMsg::OperationComplete { success: false, .. }),
+            "expected OperationComplete failure, got {last:?}"
+        );
     }
 
     #[test]
@@ -1798,14 +1793,16 @@ Found 1 drives(s)
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
         let last = messages.last().unwrap();
-        match last {
-            WorkerMsg::OperationComplete {
-                success, status, ..
-            } => {
-                assert!(!success);
-                assert!(status.contains("failed"));
-            }
-            _ => panic!("expected OperationComplete failure"),
-        }
+        assert!(
+            matches!(
+                last,
+                WorkerMsg::OperationComplete {
+                    success: false,
+                    status,
+                    ..
+                } if status.contains("failed")
+            ),
+            "expected OperationComplete failure, got {last:?}"
+        );
     }
 }

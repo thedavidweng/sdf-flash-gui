@@ -204,8 +204,14 @@ def main() -> int:
     try:
         changed = git_changed_lines(args.base)
     except subprocess.CalledProcessError as e:
-        print(f"warning: could not compute patch vs {args.base}: {e}", file=sys.stderr)
-        changed = {}
+        # Never treat a missing base / failed diff as an empty patch (that would
+        # vacuous-pass the 100% patch gate). CI must fetch base history first.
+        print(
+            f"error: could not compute patch vs {args.base}: {e}\n"
+            f"  Ensure the base ref exists locally (CI: fetch-depth: 0 or git fetch).",
+            file=sys.stderr,
+        )
+        return 2
 
     misses = patch_uncovered(lcov, changed, pats)
     if misses:
