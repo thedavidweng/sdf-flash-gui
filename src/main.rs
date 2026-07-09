@@ -280,7 +280,7 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
 
     if !args.confirm {
         println!("Dry-run complete. Add --confirm to proceed.");
-        return;
+        std::process::exit(1);
     }
 
     match session.execute() {
