@@ -647,14 +647,13 @@ mod tests {
     fn wait_until_child_exited(control: &OperationControl) {
         use std::time::{Duration, Instant};
 
+        // Always fall through to assert! so the helper has no dead panic-only DA
+        // when the child exits within the deadline (the common test path).
         let deadline = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < deadline {
-            if !control.is_child_running() {
-                return;
-            }
+        while Instant::now() < deadline && control.is_child_running() {
             thread::sleep(Duration::from_millis(5));
         }
-        panic!("child did not exit within 5s");
+        assert!(!control.is_child_running(), "child did not exit within 5s");
     }
 
     #[test]
@@ -1248,7 +1247,6 @@ mod tests {
     #[cfg(unix)]
     fn operation_control_is_child_running_uses_exit_cache() {
         use std::process::Command;
-        use std::time::Duration;
 
         let control = OperationControl::new();
         let child = Command::new("true").spawn().unwrap();

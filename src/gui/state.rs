@@ -53,7 +53,7 @@ pub struct DriveState {
     pub drive_mt1959: bool,
     pub drive_mt1939: bool,
     pub drive_encrypted_firmware: bool,
-    pub drive_libredrive: bool,
+    pub drive_libredrive: crate::command::LibreDriveStatus,
     pub drive_sdf_version: Option<String>,
     pub drive_probed: bool,
 }
@@ -131,7 +131,7 @@ impl AppState {
                 drive_mt1959: false,
                 drive_mt1939: false,
                 drive_encrypted_firmware: false,
-                drive_libredrive: false,
+                drive_libredrive: crate::command::LibreDriveStatus::Unknown,
                 drive_sdf_version: None,
                 drive_probed: false,
             },
@@ -170,10 +170,8 @@ impl AppState {
     }
 
     pub fn new() -> Self {
-        let (backend, path, auto) = match drive::find_backend(Backend::SdfTool) {
-            Some((b, p)) => (b, p, true),
-            None => (Backend::SdfTool, String::new(), false),
-        };
+        let (backend, path, auto) =
+            resolved_discovered_backend(drive::find_backend(Backend::SdfTool));
         Self {
             config: ToolConfig {
                 backend,
@@ -263,6 +261,17 @@ impl AppState {
     }
 }
 
+/// Map OS backend discovery into `(backend, tool_path, auto_detected)`.
+///
+/// Kept free of `drive::` I/O so both outcomes are unit-testable; `AppState::new`
+/// is the only caller that hits the real enumerator.
+fn resolved_discovered_backend(found: Option<(Backend, String)>) -> (Backend, String, bool) {
+    match found {
+        Some((b, p)) => (b, p, true),
+        None => (Backend::SdfTool, String::new(), false),
+    }
+}
+
 /// Locate `sdf.bin` (re-export for GUI callers; logic lives in `drive`).
 pub fn find_sdf_bin() -> String {
     drive::find_sdf_bin()
@@ -271,6 +280,23 @@ pub fn find_sdf_bin() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolved_discovered_backend_some() {
+        let (b, p, auto) =
+            resolved_discovered_backend(Some((Backend::MakeMkvCon, "/opt/makemkvcon".into())));
+        assert_eq!(b, Backend::MakeMkvCon);
+        assert_eq!(p, "/opt/makemkvcon");
+        assert!(auto);
+    }
+
+    #[test]
+    fn resolved_discovered_backend_none() {
+        let (b, p, auto) = resolved_discovered_backend(None);
+        assert_eq!(b, Backend::SdfTool);
+        assert!(p.is_empty());
+        assert!(!auto);
+    }
 
     #[test]
     fn begin_operation_sets_state() {
@@ -315,6 +341,7 @@ mod tests {
             vendor: "V".into(),
             product: "P".into(),
             revision: "R".into(),
+            ..Default::default()
         });
         state.drive.selected_drive = Some(0);
         state.runtime.probing_drive = Some(0);

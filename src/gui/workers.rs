@@ -24,7 +24,7 @@ pub enum WorkerMsg {
         mt1959: bool,
         mt1939: bool,
         encrypted_firmware: bool,
-        libredrive: bool,
+        libredrive: crate::command::LibreDriveStatus,
         sdf_version: Option<String>,
         error: Option<String>,
     },
@@ -126,14 +126,34 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
         }
         WorkerMsg::DrivesListed(drives) => {
             let count = drives.len();
+            // Identity-stable reselection (path may change after flash re-enum).
+            // Inline (avoid ops↔workers cycle): same rules as ops::apply_drive_list.
+            let previous = state
+                .drive
+                .selected_drive
+                .and_then(|i| state.drive.drives.get(i))
+                .cloned();
+            let prev_idx = state.drive.selected_drive;
+            let old_device = previous.as_ref().map(|d| d.device.clone());
             state.drive.drives = drives;
-            state.drive.last_probed_drive = None;
-            if state.drive.selected_drive.is_none() && count > 0 {
-                state.drive.selected_drive = Some(0);
+            state.drive.selected_drive =
+                crate::drive::resolve_selection(&state.drive.drives, previous.as_ref(), prev_idx);
+            let new_device = state
+                .drive
+                .selected_drive
+                .and_then(|i| state.drive.drives.get(i))
+                .map(|d| d.device.clone());
+            if old_device != new_device || state.drive.selected_drive != prev_idx {
+                state.drive.last_probed_drive = None;
+                state.drive.drive_probed = false;
             }
             state.finish_operation();
             let lang = state.chrome.resolved_lang;
-            state.set_status_key(L10nKey::StatusReady, 0.0);
+            if state.drive.drives.is_empty() {
+                state.set_status_key(L10nKey::StatusNoDrives, 0.0);
+            } else {
+                state.set_status_key(L10nKey::StatusReady, 0.0);
+            }
             state.log(&t_with_args(
                 L10nKey::StatusDrivesFound,
                 lang,
@@ -239,7 +259,7 @@ pub fn spawn_probe(
             mt1959: false,
             mt1939: false,
             encrypted_firmware: false,
-            libredrive: false,
+            libredrive: crate::command::LibreDriveStatus::Unknown,
             sdf_version: None,
             error: Some(t(L10nKey::ReasonNoBackend, state.chrome.resolved_lang).into()),
         });
@@ -295,7 +315,7 @@ pub fn spawn_probe(
                     mt1959: false,
                     mt1939: false,
                     encrypted_firmware: false,
-                    libredrive: false,
+                    libredrive: crate::command::LibreDriveStatus::Unknown,
                     sdf_version: None,
                     error: Some(t(L10nKey::StatusProbeFailed, lang).into()),
                 });
@@ -311,7 +331,7 @@ pub fn spawn_probe(
                     mt1959: false,
                     mt1939: false,
                     encrypted_firmware: false,
-                    libredrive: false,
+                    libredrive: crate::command::LibreDriveStatus::Unknown,
                     sdf_version: None,
                     error: Some(e),
                 });
@@ -477,6 +497,7 @@ mod tests {
             vendor: "HL-DT-ST".into(),
             product: "BU40N".into(),
             revision: "1.03".into(),
+            ..Default::default()
         }
     }
 
@@ -553,7 +574,7 @@ mod tests {
             mt1959: true,
             mt1939: false,
             encrypted_firmware: true,
-            libredrive: false,
+            libredrive: crate::command::LibreDriveStatus::Unknown,
             sdf_version: None,
             error: None,
         });
@@ -581,14 +602,17 @@ mod tests {
             mt1959: true,
             mt1939: false,
             encrypted_firmware: false,
-            libredrive: true,
+            libredrive: crate::command::LibreDriveStatus::Enabled,
             sdf_version: Some("0x00A6".into()),
             error: None,
         });
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert_eq!(state.drive.drive_sdf_version.as_deref(), Some("0x00A6"));
-        assert!(state.drive.drive_libredrive);
+        assert_eq!(
+            state.drive.drive_libredrive,
+            crate::command::LibreDriveStatus::Enabled
+        );
     }
 
     #[test]
@@ -603,7 +627,7 @@ mod tests {
             mt1959: false,
             mt1939: false,
             encrypted_firmware: false,
-            libredrive: false,
+            libredrive: crate::command::LibreDriveStatus::Unknown,
             sdf_version: None,
             error: Some("probe failed".into()),
         });
@@ -627,7 +651,7 @@ mod tests {
             mt1959: true,
             mt1939: false,
             encrypted_firmware: true,
-            libredrive: false,
+            libredrive: crate::command::LibreDriveStatus::Unknown,
             sdf_version: None,
             error: None,
         });
@@ -742,13 +766,15 @@ mod tests {
     #[test]
     fn drain_drives_listed_empty() {
         let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
         state.drive.selected_drive = Some(0);
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::DrivesListed(vec![]));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert!(state.drive.drives.is_empty());
-        // selected_drive not changed to None by DrivesListed — only set to Some(0) if was None
+        // Empty list clears selection (no stale index into vanished list).
+        assert_eq!(state.drive.selected_drive, None);
     }
 
     #[test]
@@ -756,6 +782,8 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.drive.drives.push(test_drive());
         state.drive.selected_drive = Some(0);
+        state.drive.last_probed_drive = Some(0);
+        state.drive.drive_probed = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::DrivesListed(vec![
             test_drive(),
@@ -764,13 +792,134 @@ mod tests {
                 vendor: "V".into(),
                 product: "P".into(),
                 revision: "R".into(),
+                ..Default::default()
             },
         ]));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
-        // selected_drive should remain Some(0) since it was already set
+        // Same device path → stay on that drive; probe cache stays valid.
         assert_eq!(state.drive.selected_drive, Some(0));
         assert_eq!(state.drive.drives.len(), 2);
+        assert_eq!(state.drive.last_probed_drive, Some(0));
+        assert!(state.drive.drive_probed);
+    }
+
+    #[test]
+    fn drain_drives_listed_same_device_new_index_invalidates_probe() {
+        // Cover `selected_drive != prev_idx` when the device *path* is unchanged
+        // (path match moves from index 0 → 1).
+        let mut state = AppState::new_no_backend();
+        let target = crate::drive::Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+            ..Default::default()
+        };
+        state.drive.drives.push(target.clone());
+        state.drive.selected_drive = Some(0);
+        state.drive.last_probed_drive = Some(0);
+        state.drive.drive_probed = true;
+        let filler = crate::drive::Drive {
+            device: "/dev/sr9".into(),
+            vendor: "OTHER".into(),
+            product: "X".into(),
+            revision: "0".into(),
+            ..Default::default()
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(WorkerMsg::DrivesListed(vec![filler, target]));
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert_eq!(state.drive.selected_drive, Some(1));
+        assert!(state.drive.last_probed_drive.is_none());
+        assert!(!state.drive.drive_probed);
+    }
+
+    #[test]
+    fn drain_drives_listed_reselects_by_identity_after_path_change() {
+        // After flash, MakeMKV notes the drive may re-enumerate under a new path.
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(crate::drive::Drive {
+            device: "/dev/sg1".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+            ..Default::default()
+        });
+        state.drive.selected_drive = Some(0);
+        state.drive.last_probed_drive = Some(0);
+        state.drive.drive_probed = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(WorkerMsg::DrivesListed(vec![
+            crate::drive::Drive {
+                device: "/dev/sr0".into(),
+                vendor: "OTHER".into(),
+                product: "X".into(),
+                revision: "0".into(),
+                ..Default::default()
+            },
+            crate::drive::Drive {
+                device: "/dev/sg2".into(), // path changed, same identity
+                vendor: "HL-DT-ST".into(),
+                product: "BU40N".into(),
+                revision: "1.03".into(),
+                ..Default::default()
+            },
+        ]));
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert_eq!(state.drive.selected_drive, Some(1));
+        assert_eq!(state.drive.drives[1].device, "/dev/sg2");
+        // Path/index changed → invalidate probe cache.
+        assert!(state.drive.last_probed_drive.is_none());
+        assert!(!state.drive.drive_probed);
+    }
+
+    #[test]
+    fn drain_drives_listed_empty_sets_no_drives_status() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.runtime.busy = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(WorkerMsg::DrivesListed(vec![]));
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert!(state.drive.drives.is_empty());
+        assert_eq!(state.drive.selected_drive, None);
+        assert!(!state.runtime.busy);
+        // Exact status key — avoid dead `||` branches in loose substring asserts (patch coverage).
+        assert_eq!(
+            state.runtime.status_message,
+            t(L10nKey::StatusNoDrives, state.chrome.resolved_lang)
+        );
+    }
+
+    #[test]
+    fn drain_probe_complete_possible_libredrive() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.runtime.probing = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(WorkerMsg::ProbeComplete {
+            drive_idx: 0,
+            mt1959: true,
+            mt1939: false,
+            encrypted_firmware: false,
+            libredrive: crate::command::LibreDriveStatus::PossibleNotEnabled,
+            sdf_version: Some("0x00A6".into()),
+            error: None,
+        });
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert_eq!(
+            state.drive.drive_libredrive,
+            crate::command::LibreDriveStatus::PossibleNotEnabled
+        );
+        assert!(state.drive.drive_mt1959);
+        assert!(state.drive.drive_probed);
     }
 
     #[test]
@@ -1015,13 +1164,14 @@ mod tests {
         spawn_probe(&tx, &mut state, 0, &runner);
         drop(tx);
         let msg = rx.try_recv().unwrap();
-        match msg {
-            WorkerMsg::ProbeComplete { error, .. } => {
-                assert!(error.is_some());
-                assert!(error.unwrap().contains("Settings"));
-            }
-            _ => panic!("expected ProbeComplete"),
-        }
+        // Prefer matches! over match+panic so the never-taken arm is not a patch DA.
+        assert!(
+            matches!(
+                &msg,
+                WorkerMsg::ProbeComplete { error: Some(e), .. } if e.contains("Settings")
+            ),
+            "expected ProbeComplete with Settings error, got {msg:?}"
+        );
     }
 
     #[test]
@@ -1073,12 +1223,10 @@ mod tests {
         // Should have: Status, Log (> command), Log (output), ProbeComplete
         assert!(messages.len() >= 3);
         let probe = messages.last().unwrap();
-        match probe {
-            WorkerMsg::ProbeComplete { error, .. } => {
-                assert!(error.is_none());
-            }
-            _ => panic!("expected ProbeComplete"),
-        }
+        assert!(
+            matches!(probe, WorkerMsg::ProbeComplete { error: None, .. }),
+            "expected ProbeComplete ok, got {probe:?}"
+        );
     }
 
     #[test]
@@ -1092,13 +1240,13 @@ mod tests {
         let messages = wait_for_probe_complete(&rx);
         drop(tx);
         let probe = messages.last().unwrap();
-        match probe {
-            WorkerMsg::ProbeComplete { error, .. } => {
-                assert!(error.is_some());
-                assert!(error.as_ref().unwrap().contains("mock command failed"));
-            }
-            _ => panic!("expected ProbeComplete with error"),
-        }
+        assert!(
+            matches!(
+                probe,
+                WorkerMsg::ProbeComplete { error: Some(e), .. } if e.contains("mock command failed")
+            ),
+            "expected ProbeComplete with mock failure, got {probe:?}"
+        );
     }
 
     #[test]
@@ -1122,12 +1270,10 @@ mod tests {
         // Should have: Status, Log (> command), Log (line1), Log (line2), OperationComplete
         assert!(messages.len() >= 4);
         let last = messages.last().unwrap();
-        match last {
-            WorkerMsg::OperationComplete { success, .. } => {
-                assert!(success);
-            }
-            _ => panic!("expected OperationComplete"),
-        }
+        assert!(
+            matches!(last, WorkerMsg::OperationComplete { success: true, .. }),
+            "expected OperationComplete success, got {last:?}"
+        );
     }
 
     #[test]
@@ -1149,12 +1295,10 @@ mod tests {
         let messages = wait_for_operation_complete(&rx);
         drop(tx);
         let last = messages.last().unwrap();
-        match last {
-            WorkerMsg::OperationComplete { success, .. } => {
-                assert!(!success);
-            }
-            _ => panic!("expected OperationComplete failure"),
-        }
+        assert!(
+            matches!(last, WorkerMsg::OperationComplete { success: false, .. }),
+            "expected OperationComplete failure, got {last:?}"
+        );
     }
 
     #[test]
@@ -1167,14 +1311,86 @@ mod tests {
         assert!(state.runtime.busy);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        let last = messages.last().unwrap();
-        match last {
-            WorkerMsg::DrivesListed(drives) => {
-                assert_eq!(drives.len(), 1);
-                assert_eq!(drives[0].device, "/dev/sr0");
-            }
-            _ => panic!("expected DrivesListed"),
-        }
+        let drives = expect_drives_listed(&messages);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/dev/sr0");
+    }
+
+    /// Pull `DrivesListed` out of a worker message stream.
+    ///
+    /// Uses `find_map` so Log/Status/Progress messages exercise the skip arm —
+    /// avoids a never-taken `panic!` match arm counting against Codecov patch
+    /// coverage when the test succeeds.
+    fn expect_drives_listed(messages: &[WorkerMsg]) -> &[crate::drive::Drive] {
+        messages
+            .iter()
+            .find_map(|m| match m {
+                WorkerMsg::DrivesListed(d) => Some(d.as_slice()),
+                _ => None,
+            })
+            .expect("DrivesListed message missing")
+    }
+
+    #[test]
+    fn spawn_list_drives_macos_iokit_path() {
+        let mut state = AppState::new_no_backend();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let stdout = "\
+Found 1 drives(s)
+00: /IOBDServices/F49D28A7
+  HL-DT-ST_BD-RE_BU50N_GE03_211904231648_MODJ9TK3546
+
+";
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(stdout));
+        spawn_list_drives(&tx, &mut state, &runner);
+        let messages = wait_for_drives_listed(&rx);
+        drop(tx);
+        let drives = expect_drives_listed(&messages);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/IOBDServices/F49D28A7");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BD-RE BU50N");
+        assert_eq!(drives[0].revision, "GE03");
+    }
+
+    #[test]
+    fn spawn_list_drives_windows_letter_multiline() {
+        let mut state = AppState::new_no_backend();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let stdout = "\
+Found 1 drives(s)
+00: E:
+  HL-DT-ST_BD-RE_BU50N_GE03_SERIALBBBBBB_Y
+
+";
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(stdout));
+        spawn_list_drives(&tx, &mut state, &runner);
+        let messages = wait_for_drives_listed(&rx);
+        drop(tx);
+        let drives = expect_drives_listed(&messages);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "E:");
+        assert_eq!(drives[0].revision, "GE03");
+    }
+
+    #[test]
+    fn spawn_list_drives_linux_multiline() {
+        let mut state = AppState::new_no_backend();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let stdout = "\
+Found 1 drives(s)
+00: /dev/sr0
+  HL-DT-ST_BD-RE_BU40N_1.03_SERIALAAAAAA_X
+
+";
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(stdout));
+        spawn_list_drives(&tx, &mut state, &runner);
+        let messages = wait_for_drives_listed(&rx);
+        drop(tx);
+        let drives = expect_drives_listed(&messages);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "/dev/sr0");
+        assert_eq!(drives[0].revision, "1.03");
     }
 
     #[test]
@@ -1577,14 +1793,16 @@ mod tests {
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
         let last = messages.last().unwrap();
-        match last {
-            WorkerMsg::OperationComplete {
-                success, status, ..
-            } => {
-                assert!(!success);
-                assert!(status.contains("failed"));
-            }
-            _ => panic!("expected OperationComplete failure"),
-        }
+        assert!(
+            matches!(
+                last,
+                WorkerMsg::OperationComplete {
+                    success: false,
+                    status,
+                    ..
+                } if status.contains("failed")
+            ),
+            "expected OperationComplete failure, got {last:?}"
+        );
     }
 }

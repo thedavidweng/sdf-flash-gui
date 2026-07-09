@@ -66,6 +66,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Ubuntu patch gate needs merge-base vs PR base. Default depth=1 omits
+          # base.sha / origin/main, so coverage-gate would see an empty patch.
+          # Strings keep '0' truthy in the expression (bare 0 is falsy).
+          fetch-depth: ${{ matrix.os == 'ubuntu-latest' && '0' || '1' }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -94,8 +99,30 @@ jobs:
           # Ignore set: scripts/coverage-ignore.regex (synced with codecov.yml).
           # One pattern per line → join with `|` (same as scripts/coverage.sh).
           IGNORE_REGEX="$(grep -v '^\s*#' scripts/coverage-ignore.regex | grep -v '^\s*$' | paste -sd '|' -)"
+          # Same artifact Codecov consumes — generate once, then gate + upload.
           cargo llvm-cov --lcov --output-path lcov.info --target ${{ matrix.target }} \
             --ignore-filename-regex "${IGNORE_REGEX}"
+
+      - name: Coverage gate (project ≥99%, patch 100% on changed domain lines)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # Fail the Ubuntu job here so we do not wait on Codecov UI for the same rules.
+          # Prefer PR base SHA; on push use the previous tip; never the all-zero "before".
+          BASE="${{ github.event.pull_request.base.sha || github.event.before || '' }}"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            BASE="origin/main"
+          fi
+          if ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            # fetch-depth: 0 should already have history; re-fetch base as a fallback.
+            git fetch --no-tags origin \
+              "${{ github.event.pull_request.base.ref || 'main' }}:refs/remotes/origin/${{ github.event.pull_request.base.ref || 'main' }}"
+            BASE="origin/${{ github.event.pull_request.base.ref || 'main' }}"
+          fi
+          if ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "error: coverage base '${BASE}' is not available; cannot enforce patch gate" >&2
+            exit 1
+          fi
+          python3 scripts/coverage-gate.py --lcov lcov.info --base "$BASE"
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'

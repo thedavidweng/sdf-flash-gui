@@ -3,6 +3,7 @@
 use sdf_flash_gui::command;
 use sdf_flash_gui::drive;
 use sdf_flash_gui::orchestration;
+use sdf_flash_gui::process_runner::NativeRunner;
 use sdf_flash_gui::sdf;
 
 fn main() {
@@ -148,22 +149,40 @@ fn find_sdf_bin() -> String {
 }
 
 fn cmd_list() {
-    let drives = drive::enumerate_drives();
+    // Prefer backend `-l` (correct device paths for flash/probe). Fall back to
+    // OS enumeration when the tool is missing or returns nothing parseable.
+    let (backend, path) = find_backend();
+    let mut drives = match orchestration::run_list_backend_with(backend, &path, &NativeRunner, None)
+    {
+        Ok(out) => drive::parse_drive_list(&out.stdout),
+        Err(e) => {
+            eprintln!("WARNING: backend list failed: {e}");
+            Vec::new()
+        }
+    };
+
+    if drives.is_empty() {
+        drives = drive::enumerate_drives();
+    }
+
     if drives.is_empty() {
         println!("No optical drives detected.");
-        let (backend, path) = find_backend();
-        match orchestration::run_list_backend(backend, &path) {
-            Ok(out) => print!("{out}"),
-            Err(e) => eprintln!("ERROR: {e}"),
-        }
-    } else {
-        println!("Optical Drives:");
-        for d in &drives {
-            if d.vendor.is_empty() {
-                println!("  {}", d.device);
-            } else {
-                println!("  {} {} {} ({})", d.device, d.vendor, d.product, d.revision);
+        return;
+    }
+
+    println!("Optical Drives:");
+    for d in &drives {
+        if d.vendor.is_empty() {
+            println!("  {}", d.device);
+        } else {
+            print!("  {} {} {} ({})", d.device, d.vendor, d.product, d.revision);
+            if !d.serial.is_empty() {
+                print!(" serial={}", d.serial);
             }
+            if !d.firmware_date.is_empty() {
+                print!(" fw-date={}", d.firmware_date_display());
+            }
+            println!();
         }
     }
 }
@@ -178,6 +197,7 @@ fn cmd_info(device: &str) {
             }
             println!("Platform: MT1959={}", probe.safety.mt1959);
             println!("Encrypted firmware: {}", probe.safety.encrypted_firmware);
+            println!("LibreDrive: {:?}", probe.safety.libredrive);
             if let Some(prefix) = probe.safety.firmware_date_prefix {
                 println!("Firmware date prefix: {prefix}");
             }
