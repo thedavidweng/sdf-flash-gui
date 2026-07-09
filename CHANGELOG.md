@@ -55,6 +55,8 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md
+- Bump version to 0.3.0 and fix flaky process tests
 ## [0.2.0] - 2026-06-26
 
 ### <!-- 0 -->🚀 Features
