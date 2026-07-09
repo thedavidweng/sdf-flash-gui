@@ -285,15 +285,14 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
     });
 
     let (backend, path) = find_backend();
-    let sdf_path = args.sdf_path.map(String::as_str).unwrap_or_else(|| {
-        let auto = find_sdf_bin();
-        if auto.is_empty() {
-            ""
-        } else {
-            // Leak the string to get a 'static str — this is a CLI short-lived process
-            Box::leak(auto.into_boxed_str())
+    let sdf_path_owned;
+    let sdf_path = match args.sdf_path.map(String::as_str) {
+        Some(p) => p,
+        None => {
+            sdf_path_owned = find_sdf_bin();
+            sdf_path_owned.as_str()
         }
-    });
+    };
     let session = match orchestration::FlashSession::prepare(orchestration::FlashSessionRequest {
         backend,
         tool_path: &path,

@@ -421,7 +421,7 @@ pub fn spawn_list_drives(
                 )));
                 let _ = tx.send(WorkerMsg::DrivesListed(drives));
             }
-            Err(e) if e == "operation cancelled" => {
+            Err(crate::orchestration::BackendOpError::Cancelled) => {
                 let _ = tx.send(WorkerMsg::Log(t(L10nKey::LogOpCancelled, lang).into()));
                 let _ = tx.send(WorkerMsg::OperationComplete {
                     success: false,
@@ -429,10 +429,10 @@ pub fn spawn_list_drives(
                     progress: 0.0,
                 });
             }
-            Err(e) if e.contains("force kill") => {
+            Err(crate::orchestration::BackendOpError::NeedsForceKill) => {
                 let _ = tx.send(WorkerMsg::StopNeedsForceKill);
             }
-            Err(e) => {
+            Err(crate::orchestration::BackendOpError::Failed(e)) => {
                 let _ = tx.send(WorkerMsg::Log(log_error(lang, &e)));
                 let _ = tx.send(WorkerMsg::OperationComplete {
                     success: false,

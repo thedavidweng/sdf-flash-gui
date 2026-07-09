@@ -145,8 +145,28 @@ pub fn run_dump(
     execute_command(&plan.command)
 }
 
+/// Shared outcome errors for cancellable backend ops (list, etc.).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackendOpError {
+    Failed(String),
+    Cancelled,
+    NeedsForceKill,
+}
+
+impl std::fmt::Display for BackendOpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Failed(msg) => write!(f, "{msg}"),
+            Self::Cancelled => write!(f, "operation cancelled"),
+            Self::NeedsForceKill => write!(f, "backend did not stop; force kill required"),
+        }
+    }
+}
+
 pub fn run_list_backend(backend: Backend, tool_path: &str) -> Result<String, String> {
-    run_list_backend_with(backend, tool_path, &NativeRunner, None).map(|o| o.combined())
+    run_list_backend_with(backend, tool_path, &NativeRunner, None)
+        .map(|o| o.combined())
+        .map_err(|e| e.to_string())
 }
 
 /// List drives via backend `-l`, using the shared process runner seam.
@@ -155,16 +175,14 @@ pub fn run_list_backend_with(
     tool_path: &str,
     runner: &dyn ProcessRunner,
     control: Option<&OperationControl>,
-) -> Result<CommandOutput, String> {
+) -> Result<CommandOutput, BackendOpError> {
     let cmd = command::plan_drive_list(backend, tool_path);
     match runner.run_command(&cmd.program, &cmd.args, control) {
         Ok(CommandRunOutcome::Completed(out)) if out.success() => Ok(out),
-        Ok(CommandRunOutcome::Completed(out)) => Err(out.combined()),
-        Ok(CommandRunOutcome::Cancelled) => Err("operation cancelled".into()),
-        Ok(CommandRunOutcome::NeedsForceKill) => {
-            Err("backend did not stop; force kill required".into())
-        }
-        Err(e) => Err(e),
+        Ok(CommandRunOutcome::Completed(out)) => Err(BackendOpError::Failed(out.combined())),
+        Ok(CommandRunOutcome::Cancelled) => Err(BackendOpError::Cancelled),
+        Ok(CommandRunOutcome::NeedsForceKill) => Err(BackendOpError::NeedsForceKill),
+        Err(e) => Err(BackendOpError::Failed(e)),
     }
 }
 
@@ -911,6 +929,14 @@ mod tests {
     }
 
     #[test]
+    fn backend_op_error_display() {
+        assert_eq!(BackendOpError::Failed("boom".into()).to_string(), "boom");
+        assert_eq!(BackendOpError::Cancelled.to_string(), "operation cancelled");
+        assert!(BackendOpError::NeedsForceKill
+            .to_string()
+            .contains("force kill"));
+    }
+
     #[test]
     fn flash_confirm_flag_and_typed() {
         assert!(!FlashConfirm::None.is_confirmed("/dev/sr0"));
@@ -989,6 +1015,7 @@ mod tests {
         assert_eq!(probe.identity.model, "BU40N");
     }
 
+    #[test]
     fn warn_no_manifest_with_sdf_firmware() {
         let mut data = Vec::new();
         data.extend_from_slice(b"SDF0");
@@ -1000,7 +1027,63 @@ mod tests {
         let payload_offset = 24 + metadata.len() as u32;
         data.extend_from_slice(&payload_offset.to_be_bytes());
         data.extend_from_slice(metadata);
+        let warnings = no_manifest_warnings(&data);
+        assert!(warnings.iter().any(|w| w.contains("manifest")));
+        // SDF metadata extraction is best-effort; always assert base warnings.
+        assert!(warnings.len() >= 3);
         warn_no_manifest(&data);
+    }
+
+    #[test]
+    fn prepare_firmware_op_rejects_non_mt1959() {
+        let drive = test_drive();
+        let err = prepare_firmware_op(FirmwareOpRequest {
+            backend: crate::command::Backend::SdfTool,
+            tool_path: "/usr/bin/sdftool",
+            sdf_path: "",
+            device: "/dev/sr0",
+            drive_is_mt1959: false,
+            drive_match: &drive,
+            firmware_path: "/tmp/fw.bin",
+            firmware_data: &[],
+            manifest: None,
+            image_id: None,
+            encrypted: false,
+            include_boot_loader: false,
+            recover: false,
+            wrong_firmware: None,
+            recovery_token: None,
+            confirm: FlashConfirm::Flag,
+            lang: Language::English,
+        })
+        .unwrap_err();
+        assert!(err.contains("not MT1959"));
+    }
+
+    #[test]
+    fn prepare_firmware_op_mode_conflict() {
+        let drive = test_drive();
+        let err = prepare_firmware_op(FirmwareOpRequest {
+            backend: crate::command::Backend::SdfTool,
+            tool_path: "/usr/bin/sdftool",
+            sdf_path: "",
+            device: "/dev/sr0",
+            drive_is_mt1959: true,
+            drive_match: &drive,
+            firmware_path: "/tmp/fw.bin",
+            firmware_data: &[],
+            manifest: None,
+            image_id: None,
+            encrypted: true,
+            include_boot_loader: true,
+            recover: false,
+            wrong_firmware: None,
+            recovery_token: None,
+            confirm: FlashConfirm::Flag,
+            lang: Language::English,
+        })
+        .unwrap_err();
+        assert!(err.contains("cannot be combined"));
     }
 
     #[cfg(unix)]

@@ -649,6 +649,59 @@ impl ProcessRunner for NativeRunner {
 mod tests {
     use super::*;
 
+    #[test]
+    #[cfg(unix)]
+    fn native_runner_run_command_completes() {
+        let runner = NativeRunner;
+        let outcome = runner
+            .run_command("echo", &["native-runner".into()], None)
+            .expect("echo");
+        match outcome {
+            CommandRunOutcome::Completed(out) => {
+                assert!(out.success());
+                assert!(
+                    out.stdout.contains("native-runner")
+                        || out.combined().contains("native-runner")
+                );
+            }
+            CommandRunOutcome::Cancelled | CommandRunOutcome::NeedsForceKill => {
+                panic!("expected Completed")
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn native_runner_streaming_completes() {
+        let runner = NativeRunner;
+        let lines = std::sync::Mutex::new(Vec::new());
+        let outcome = runner
+            .run_command_streaming(
+                "echo",
+                &["stream-line".into()],
+                &|line| {
+                    if let Ok(mut guard) = lines.lock() {
+                        guard.push(line.to_string());
+                    }
+                },
+                None,
+            )
+            .expect("echo stream");
+        match outcome {
+            CommandRunOutcome::Completed(out) => {
+                assert!(out.success());
+                let captured = lines.lock().unwrap();
+                assert!(
+                    captured.iter().any(|l| l.contains("stream-line"))
+                        || out.combined().contains("stream-line")
+                );
+            }
+            CommandRunOutcome::Cancelled | CommandRunOutcome::NeedsForceKill => {
+                panic!("expected Completed")
+            }
+        }
+    }
+
     struct RestoreGracefulTerminate(());
 
     impl RestoreGracefulTerminate {
