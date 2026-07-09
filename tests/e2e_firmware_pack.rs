@@ -734,6 +734,7 @@ fn firmware_pack_command_plan_write() {
         let plan = command::plan_command(PlanRequest {
             backend: Backend::SdfTool,
             tool_path: "sdftool".to_string(),
+            sdf_path: String::new(),
             drive: device.to_string(),
             drive_is_mt1959: true,
             confirmation,
@@ -811,6 +812,7 @@ fn firmware_pack_end_to_end_full_pipeline() {
             let plan = command::plan_command(PlanRequest {
                 backend: Backend::SdfTool,
                 tool_path: "sdftool".to_string(),
+                sdf_path: String::new(),
                 drive: device.to_string(),
                 drive_is_mt1959: true,
                 confirmation,

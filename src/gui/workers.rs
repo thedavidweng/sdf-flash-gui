@@ -1,9 +1,7 @@
 use crate::command::{self, Command};
 use crate::drive::Drive;
 use crate::i18n::{log_error, t, t_with_args, L10nKey, Language};
-use crate::process::{self, CommandRunOutcome, OperationControl};
-
-use super::process_runner::ProcessRunner;
+use crate::process::{self, CommandRunOutcome, OperationControl, ProcessRunner};
 
 use super::state::AppState;
 
@@ -261,31 +259,26 @@ pub fn spawn_probe(
             "> {}",
             process::format_command(&cmd)
         )));
-        match runner.run_command(&cmd.program, &cmd.args, Some(control.as_ref())) {
-            Ok(CommandRunOutcome::Completed(out)) => {
-                let combined = out.combined();
-                if !combined.is_empty() {
-                    let _ = tx.send(WorkerMsg::Log(combined.clone()));
+        match crate::orchestration::probe_drive_with(
+            backend,
+            &tool_path,
+            &device,
+            runner.as_ref(),
+            Some(control.as_ref()),
+        ) {
+            Ok(probe) => {
+                if !probe.output.is_empty() {
+                    let _ = tx.send(WorkerMsg::Log(probe.output.clone()));
                 }
-                let safety = command::classify_drive_safety(&device, &combined);
-                let identity = if out.success() {
-                    Some(crate::drive::parse_identity_from_info(&device, &combined))
-                } else {
-                    None
-                };
                 let _ = tx.send(WorkerMsg::ProbeComplete {
                     drive_idx,
-                    mt1959: safety.mt1959,
-                    encrypted_firmware: safety.encrypted_firmware,
-                    identity,
-                    error: if out.success() {
-                        None
-                    } else {
-                        Some(t(L10nKey::StatusProbeFailed, lang).into())
-                    },
+                    mt1959: probe.safety.mt1959,
+                    encrypted_firmware: probe.safety.encrypted_firmware,
+                    identity: Some(probe.identity),
+                    error: None,
                 });
             }
-            Ok(CommandRunOutcome::Cancelled) => {
+            Err(crate::orchestration::ProbeError::Cancelled) => {
                 let _ = tx.send(WorkerMsg::ProbeComplete {
                     drive_idx,
                     mt1959: false,
@@ -294,16 +287,23 @@ pub fn spawn_probe(
                     error: Some(t(L10nKey::StatusProbeFailed, lang).into()),
                 });
             }
-            Ok(CommandRunOutcome::NeedsForceKill) => {
+            Err(crate::orchestration::ProbeError::NeedsForceKill) => {
                 let _ = tx.send(WorkerMsg::StopNeedsForceKill);
             }
-            Err(e) => {
+            Err(crate::orchestration::ProbeError::Failed(e)) => {
+                if !e.is_empty() {
+                    let _ = tx.send(WorkerMsg::Log(e.clone()));
+                }
                 let _ = tx.send(WorkerMsg::ProbeComplete {
                     drive_idx,
                     mt1959: false,
                     encrypted_firmware: false,
                     identity: None,
-                    error: Some(e),
+                    error: Some(if e.is_empty() {
+                        t(L10nKey::StatusProbeFailed, lang).into()
+                    } else {
+                        e
+                    }),
                 });
             }
         }
@@ -396,15 +396,23 @@ pub fn spawn_list_drives(
     state.log(&format!("> {}", process::format_command(&cmd)));
 
     let tx = tx.clone();
-    let program = cmd.program;
-    let args = cmd.args;
+    let backend = state.config.backend;
+    let tool_path = state.config.tool_path.clone();
     let runner = runner.clone();
     run_backend_command(move || {
-        match runner.run_command(&program, &args, Some(control.as_ref())) {
-            Ok(CommandRunOutcome::Completed(out)) => {
-                if !out.combined().is_empty() {
-                    let _ = tx.send(WorkerMsg::Log(out.combined()));
+        // Shared list path with CLI `run_list_backend` (same runner seam + success rules).
+        match crate::orchestration::run_list_backend_with(
+            backend,
+            &tool_path,
+            runner.as_ref(),
+            Some(control.as_ref()),
+        ) {
+            Ok(out) => {
+                let combined = out.combined();
+                if !combined.is_empty() {
+                    let _ = tx.send(WorkerMsg::Log(combined));
                 }
+                // Parse stdout only (stderr may contain noise).
                 let drives = crate::drive::parse_drive_list(&out.stdout);
                 let _ = tx.send(WorkerMsg::Log(t_with_args(
                     L10nKey::LogParsedDrivesFromOutput,
@@ -413,7 +421,7 @@ pub fn spawn_list_drives(
                 )));
                 let _ = tx.send(WorkerMsg::DrivesListed(drives));
             }
-            Ok(CommandRunOutcome::Cancelled) => {
+            Err(e) if e == "operation cancelled" => {
                 let _ = tx.send(WorkerMsg::Log(t(L10nKey::LogOpCancelled, lang).into()));
                 let _ = tx.send(WorkerMsg::OperationComplete {
                     success: false,
@@ -421,7 +429,7 @@ pub fn spawn_list_drives(
                     progress: 0.0,
                 });
             }
-            Ok(CommandRunOutcome::NeedsForceKill) => {
+            Err(e) if e.contains("force kill") => {
                 let _ = tx.send(WorkerMsg::StopNeedsForceKill);
             }
             Err(e) => {
@@ -750,7 +758,7 @@ mod tests {
 
     // --- ProcessRunner mock and spawn tests ---
 
-    use super::super::process_runner::ProcessRunner;
+    use crate::process::ProcessRunner;
     use std::sync::Arc;
 
     enum MockOutcome {

@@ -72,14 +72,18 @@ Output: `target/release/sdf-flash-gui` (~4 MB, single binary, no runtime deps be
 
 ```
 src/
-  main.rs          Entry point, CLI arg parsing, GUI launch
-  gui.rs           egui-based interface (drives, flash, settings tabs)
-  drive.rs         Optical drive enumeration + backend binary detection
-  sdf.rs           SDF0 container parser
-  flash.rs         Flash safety model (validation, dry-run, execute)
-  command.rs       sdftool/makemkvcon command planner (structured args, no shell strings)
-  manifest.rs      Firmware manifest parser + drive matching
+  main.rs            CLI entry (no-args launches GUI)
+  orchestration.rs   Shared flash pipeline: probe → validate → plan → execute
+  command.rs         Backend argv planner (no shell strings)
+  process.rs         Process run/stream/cancel + ProcessRunner seam
+  flash.rs           Manifest safety gates + advisory warnings
+  manifest.rs        Firmware manifest parser + drive matching
+  drive.rs           Drive enumeration, identity, backend/sdf.bin discovery
+  sdf.rs             SDF0 container parser
+  gui/               egui shell (state, ops, workers, views) — uses orchestration
 ```
+
+CLI and GUI share the same flash/probe planning logic via `orchestration`.
 
 ## Acknowledgements
 

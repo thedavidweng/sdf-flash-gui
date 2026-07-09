@@ -39,7 +39,7 @@ Matches CI on Linux (Codecov patch gate is 80%):
 cargo install cargo-llvm-cov   # once, if not installed
 
 cargo llvm-cov --html \
-  --ignore-filename-regex '(src/main\.rs|src/gui/mod\.rs|src/gui/views/|src/drive\.rs|src/gui/file_dialog\.rs|src/gui/process_runner\.rs)'
+  --ignore-filename-regex '(src/main\.rs|src/gui/mod\.rs|src/gui/views/|src/drive\.rs|src/gui/file_dialog\.rs)'
 ```
 
 Open `target/llvm-cov/html/index.html` and confirm changed files have no uncovered lines in the diff.
@@ -48,7 +48,7 @@ Generate lcov the same way CI does:
 
 ```bash
 cargo llvm-cov --lcov --output-path lcov.info \
-  --ignore-filename-regex '(src/main\.rs|src/gui/mod\.rs|src/gui/views/|src/drive\.rs|src/gui/file_dialog\.rs|src/gui/process_runner\.rs)'
+  --ignore-filename-regex '(src/main\.rs|src/gui/mod\.rs|src/gui/views/|src/drive\.rs|src/gui/file_dialog\.rs)'
 ```
 
 ### SDF parser policy (CI enforces)

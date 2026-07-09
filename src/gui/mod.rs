@@ -5,19 +5,20 @@
 
 pub mod file_dialog;
 mod ops;
-mod process_runner;
 mod state;
 mod validation;
 mod views;
 mod workers;
+
+pub use crate::drive::find_sdf_bin;
 
 use crate::drive;
 use crate::i18n::{t, t_with_args, L10nKey};
 
 use eframe::egui;
 
+use crate::process::NativeRunner;
 use file_dialog::NativeDialog;
-use process_runner::NativeRunner;
 use state::{AppState, StopDialog};
 use views::{
     handle_global_shortcuts, show_about_window, show_first_run_dialog, show_flash_failure_dialog,
@@ -88,12 +89,26 @@ pub enum OperationMode {
     Recover,
 }
 
+/// Window/dock icon embedded at compile time (same asset as packager `icons`).
+pub(crate) fn window_icon() -> std::sync::Arc<egui::IconData> {
+    use std::sync::{Arc, OnceLock};
+
+    static ICON: OnceLock<Arc<egui::IconData>> = OnceLock::new();
+    ICON.get_or_init(|| {
+        let icon = eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon.png"))
+            .expect("bundled app icon must be valid PNG");
+        Arc::new(icon)
+    })
+    .clone()
+}
+
 pub fn run() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([WINDOW_WIDTH, WINDOW_HEIGHT])
             .with_min_inner_size([WINDOW_WIDTH, WINDOW_HEIGHT])
-            .with_resizable(true),
+            .with_resizable(true)
+            .with_icon(window_icon()),
         ..Default::default()
     };
     eframe::run_native(
@@ -113,7 +128,7 @@ struct App {
     state: AppState,
     worker_rx: std::sync::mpsc::Receiver<WorkerMsg>,
     worker_tx: std::sync::mpsc::Sender<WorkerMsg>,
-    runner: std::sync::Arc<dyn process_runner::ProcessRunner>,
+    runner: std::sync::Arc<dyn crate::process::ProcessRunner>,
 }
 
 impl App {
@@ -240,6 +255,17 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use crate::i18n::{t, L10nKey, Language};
+
+    #[test]
+    fn window_icon_is_valid_png() {
+        let icon = super::window_icon();
+        assert!(icon.width > 0);
+        assert!(icon.height > 0);
+        assert_eq!(
+            icon.rgba.len(),
+            (icon.width as usize) * (icon.height as usize) * 4
+        );
+    }
 
     #[test]
     fn test_credits_html_matches_gui_about() {

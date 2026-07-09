@@ -2,10 +2,10 @@ use crate::command;
 use crate::flash;
 use crate::gui::file_dialog::{FileDialog, NativeDialog};
 use crate::gui::ops;
-use crate::gui::process_runner;
 use crate::gui::state::{AppState, ThemeChoice};
 use crate::gui::workers::WorkerMsg;
 use crate::i18n::{t, t_with_args, L10nKey, Language};
+use crate::process;
 
 use eframe::egui;
 use egui_phosphor::regular as icon;
@@ -22,7 +22,7 @@ pub fn show_main_ui(
     frame: &mut eframe::Frame,
     state: &mut AppState,
     worker_tx: &mpsc::Sender<WorkerMsg>,
-    runner: &std::sync::Arc<dyn process_runner::ProcessRunner>,
+    runner: &std::sync::Arc<dyn process::ProcessRunner>,
 ) {
     ui.horizontal(|ui| {
         let refresh_text = t(L10nKey::TooltipRefresh, state.chrome.resolved_lang);

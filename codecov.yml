@@ -19,14 +19,12 @@ coverage:
 # - gui/views/*: egui view rendering (split from gui/mod.rs)
 # - drive.rs: platform-specific code with #[cfg(target_os)]
 # - gui/file_dialog.rs: NativeDialog impl, calls rfd (native dialogs)
-# - gui/process_runner.rs: NativeRunner impl, calls real process::run_command
 ignore:
   - "src/main.rs"
   - "src/gui/mod.rs"
   - "src/gui/views/**"
   - "src/drive.rs"
   - "src/gui/file_dialog.rs"
-  - "src/gui/process_runner.rs"
 
 flags:
   unit:

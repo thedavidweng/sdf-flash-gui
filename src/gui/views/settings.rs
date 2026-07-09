@@ -1,11 +1,11 @@
 use crate::command::Backend;
 use crate::drive;
 use crate::gui::file_dialog::FileDialog;
-use crate::gui::process_runner;
 use crate::gui::state::{self, AppState};
 use crate::gui::validation;
 use crate::gui::workers::{spawn_list_drives, WorkerMsg};
 use crate::i18n::{self, t, t_with_args, L10nKey, Language};
+use crate::process;
 use crate::sdf;
 
 use eframe::egui;
@@ -20,7 +20,7 @@ pub fn show_settings_window(
     ctx: &egui::Context,
     state: &mut AppState,
     worker_tx: &mpsc::Sender<WorkerMsg>,
-    runner: &std::sync::Arc<dyn process_runner::ProcessRunner>,
+    runner: &std::sync::Arc<dyn process::ProcessRunner>,
     dialog: &impl FileDialog,
 ) {
     let app_ctx = ctx.clone();

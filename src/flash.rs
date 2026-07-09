@@ -895,13 +895,13 @@ mod tests {
         // Build a minimal SDF0 container with metadata
         let mut data = Vec::new();
         data.extend_from_slice(b"SDF0");
-        data.extend_from_slice(&1u32.to_le_bytes()); // version
-        data.extend_from_slice(&24u32.to_le_bytes()); // header_size
-        data.extend_from_slice(&24u32.to_le_bytes()); // table_offset
-        data.extend_from_slice(&0u32.to_le_bytes()); // flags
+        data.extend_from_slice(&1u32.to_be_bytes()); // version
+        data.extend_from_slice(&24u32.to_be_bytes()); // header_size
+        data.extend_from_slice(&24u32.to_be_bytes()); // table_offset
+        data.extend_from_slice(&0u32.to_be_bytes()); // flags
         let metadata = b"Vendor\0TestVendor\0Model\0TestModel\0";
         let payload_offset = 24 + metadata.len() as u32;
-        data.extend_from_slice(&payload_offset.to_le_bytes());
+        data.extend_from_slice(&payload_offset.to_be_bytes());
         data.extend_from_slice(metadata);
 
         let info = check_firmware_sdf(&data).unwrap();
@@ -912,13 +912,13 @@ mod tests {
     fn build_sdf0_firmware_bytes(vendor: &str, model: &str) -> Vec<u8> {
         let mut data = Vec::new();
         data.extend_from_slice(b"SDF0");
-        data.extend_from_slice(&1u32.to_le_bytes());
-        data.extend_from_slice(&24u32.to_le_bytes());
-        data.extend_from_slice(&24u32.to_le_bytes());
-        data.extend_from_slice(&0u32.to_le_bytes());
+        data.extend_from_slice(&1u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&0u32.to_be_bytes());
         let metadata = format!("Vendor\0{vendor}\0Model\0{model}\0");
         let payload_offset = 24 + metadata.len() as u32;
-        data.extend_from_slice(&payload_offset.to_le_bytes());
+        data.extend_from_slice(&payload_offset.to_be_bytes());
         data.extend_from_slice(metadata.as_bytes());
         data
     }
@@ -984,11 +984,11 @@ mod tests {
         let payload_offset = 256u32;
         let mut data = Vec::new();
         data.extend_from_slice(b"SDF0");
-        data.extend_from_slice(&1u32.to_le_bytes());
-        data.extend_from_slice(&24u32.to_le_bytes());
-        data.extend_from_slice(&24u32.to_le_bytes());
-        data.extend_from_slice(&0u32.to_le_bytes());
-        data.extend_from_slice(&payload_offset.to_le_bytes());
+        data.extend_from_slice(&1u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(&payload_offset.to_be_bytes());
         data.extend_from_slice(metadata);
         data.resize(payload_offset as usize, 0xAA);
         data.extend(vec![0u8; 64]);

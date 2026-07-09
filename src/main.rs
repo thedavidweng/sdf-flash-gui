@@ -2,10 +2,8 @@
 
 use sdf_flash_gui::command;
 use sdf_flash_gui::drive;
-use sdf_flash_gui::gui;
 use sdf_flash_gui::manifest;
 use sdf_flash_gui::orchestration;
-use sdf_flash_gui::process;
 use sdf_flash_gui::sdf;
 
 fn main() {
@@ -14,7 +12,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() <= 1 {
-        if let Err(e) = gui::run() {
+        if let Err(e) = sdf_flash_gui::gui::run() {
             eprintln!("GUI error: {e}");
             std::process::exit(1);
         }
@@ -68,6 +66,10 @@ fn main() {
                     image_id: args
                         .iter()
                         .position(|a| a == "--image-id")
+                        .and_then(|i| args.get(i + 1)),
+                    sdf_path: args
+                        .iter()
+                        .position(|a| a == "--sdf")
                         .and_then(|i| args.get(i + 1)),
                     encrypted: args.contains(&"--encrypted".to_string()),
                     include_boot_loader: args.contains(&"--include-boot-loader".to_string()),
@@ -137,6 +139,7 @@ fn print_flash_help() {
     println!("  -i <file>                  Firmware image path (required)");
     println!("  --manifest <file>          Firmware manifest JSON");
     println!("  --image-id <id>            Image ID for multi-image manifests");
+    println!("  --sdf <file>               Path to sdf.bin (auto-detected if omitted)");
     println!("  --encrypted                Use encrypted rawflash mode");
     println!("  --include-boot-loader      Use full boot-loader rawflash mode");
     println!("  --recover                  Recovery flash mode");
@@ -150,6 +153,10 @@ fn find_backend() -> (command::Backend, String) {
         eprintln!("ERROR: sdftool or makemkvcon not found. Install MakeMKV or sdftool.");
         std::process::exit(1);
     })
+}
+
+fn find_sdf_bin() -> String {
+    drive::find_sdf_bin()
 }
 
 fn cmd_list() {
@@ -175,19 +182,25 @@ fn cmd_list() {
 
 fn cmd_info(device: &str) {
     let (backend, path) = find_backend();
-    let cmd = command::plan_drive_info(backend, &path, device);
-    match process::run_command(&cmd.program, &cmd.args) {
-        Ok(out) => {
-            print!("{}", out.combined());
-            let safety = command::classify_drive_safety(device, &out.combined());
-            println!();
-            println!("Platform: MT1959={}", safety.mt1959);
-            println!("Encrypted firmware: {}", safety.encrypted_firmware);
-            if let Some(prefix) = safety.firmware_date_prefix {
+    match orchestration::probe_drive(backend, &path, device) {
+        Ok(probe) => {
+            print!("{}", probe.output);
+            if !probe.output.is_empty() {
+                println!();
+            }
+            println!("Platform: MT1959={}", probe.safety.mt1959);
+            println!("Encrypted firmware: {}", probe.safety.encrypted_firmware);
+            if let Some(prefix) = probe.safety.firmware_date_prefix {
                 println!("Firmware date prefix: {prefix}");
             }
-            if let Some(mode) = safety.mtk_mode {
+            if let Some(mode) = probe.safety.mtk_mode {
                 println!("MTK mode: {mode}");
+            }
+            if !probe.identity.vendor.is_empty() || !probe.identity.model.is_empty() {
+                println!(
+                    "Identity: {} {} {}",
+                    probe.identity.vendor, probe.identity.model, probe.identity.revision
+                );
             }
         }
         Err(e) => eprintln!("ERROR: {e}"),
@@ -214,7 +227,8 @@ fn cmd_dump(device: &str, output_dir: &str) {
         std::process::exit(1);
     }
     let (backend, path) = find_backend();
-    match orchestration::run_dump(backend, &path, device, output_dir) {
+    let sdf_path = find_sdf_bin();
+    match orchestration::run_dump(backend, &path, &sdf_path, device, output_dir) {
         Ok(()) => println!("Firmware dumped to {output_dir}"),
         Err(e) => {
             eprintln!("ERROR: {e}");
@@ -227,6 +241,7 @@ struct FlashArgs<'a> {
     firmware: Option<&'a String>,
     manifest_path: Option<&'a String>,
     image_id: Option<&'a String>,
+    sdf_path: Option<&'a String>,
     encrypted: bool,
     include_boot_loader: bool,
     recover: bool,
@@ -270,9 +285,19 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
     });
 
     let (backend, path) = find_backend();
+    let sdf_path = args.sdf_path.map(String::as_str).unwrap_or_else(|| {
+        let auto = find_sdf_bin();
+        if auto.is_empty() {
+            ""
+        } else {
+            // Leak the string to get a 'static str — this is a CLI short-lived process
+            Box::leak(auto.into_boxed_str())
+        }
+    });
     let session = match orchestration::FlashSession::prepare(orchestration::FlashSessionRequest {
         backend,
         tool_path: &path,
+        sdf_path,
         device,
         firmware_path: firmware,
         firmware_data: &firmware_data,
@@ -284,7 +309,11 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
         recover: args.recover,
         wrong_firmware: args.wrong_firmware.map(String::as_str),
         recovery_token: args.recovery_token.map(String::as_str),
-        confirm: args.confirm,
+        confirm: if args.confirm {
+            orchestration::FlashConfirm::Flag
+        } else {
+            orchestration::FlashConfirm::None
+        },
         lang: sdf_flash_gui::i18n::Language::English,
     }) {
         Ok(s) => s,
@@ -293,6 +322,10 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
             std::process::exit(1);
         }
     };
+
+    for w in &session.no_manifest_warnings {
+        eprintln!("WARNING: {w}");
+    }
 
     if let Some(report) = &session.report {
         for w in &report.warnings {

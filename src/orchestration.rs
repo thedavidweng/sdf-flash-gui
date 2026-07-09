@@ -6,12 +6,42 @@ use crate::command::{
 use crate::drive::{self, Drive};
 use crate::flash;
 use crate::manifest;
-use crate::process;
+use crate::process::{
+    CommandOutput, CommandRunOutcome, NativeRunner, OperationControl, ProcessRunner,
+};
 
-/// Parse drive identity from sdftool `--info` output for manifest matching.
-pub fn parse_drive_identity(device: &str, info_output: &str) -> manifest::DriveMatch {
-    drive::parse_identity_from_info(device, info_output)
+// ── Confirmation ───────────────────────────────────────────────────
+
+/// How the user confirmed a destructive firmware write/recover.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FlashConfirm {
+    /// Dry-run / not confirmed.
+    None,
+    /// CLI `--confirm`: treated as typing the required `FLASH <device>` string.
+    Flag,
+    /// GUI typed confirmation string.
+    Typed(String),
 }
+
+impl FlashConfirm {
+    pub fn is_confirmed(&self, device: &str) -> bool {
+        match self {
+            Self::None => false,
+            Self::Flag => true,
+            Self::Typed(s) => command::confirmation_matches(device, s),
+        }
+    }
+
+    pub fn plan_confirmation(&self, device: &str) -> String {
+        match self {
+            Self::None => String::new(),
+            Self::Flag => command::required_flash_confirmation(device),
+            Self::Typed(s) => s.clone(),
+        }
+    }
+}
+
+// ── Probe ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct ProbeResult {
@@ -20,59 +50,254 @@ pub struct ProbeResult {
     pub output: String,
 }
 
-pub fn probe_drive(backend: Backend, tool_path: &str, device: &str) -> Result<ProbeResult, String> {
-    let cmd = command::plan_drive_info(backend, tool_path, device);
-    let out = process::run_command(&cmd.program, &cmd.args)
-        .map_err(|e| format!("cannot probe drive: {e}"))?;
-    Ok(ProbeResult {
-        safety: command::classify_drive_safety(device, &out.combined()),
-        identity: parse_drive_identity(device, &out.combined()),
-        output: out.combined(),
-    })
+/// Probe failure modes shared by CLI and GUI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProbeError {
+    Failed(String),
+    Cancelled,
+    NeedsForceKill,
 }
 
-pub fn run_dump(
+impl std::fmt::Display for ProbeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Failed(msg) => write!(f, "cannot probe drive: {msg}"),
+            Self::Cancelled => write!(f, "probe cancelled"),
+            Self::NeedsForceKill => write!(f, "backend did not stop; force kill required"),
+        }
+    }
+}
+
+/// Build a [`ProbeResult`] from tool output (no process I/O).
+pub fn probe_from_output(device: &str, output: &str) -> ProbeResult {
+    ProbeResult {
+        safety: command::classify_drive_safety(device, output),
+        identity: drive::parse_identity_from_info(device, output),
+        output: output.to_string(),
+    }
+}
+
+/// Probe a drive via the process runner seam (shared by CLI and GUI).
+pub fn probe_drive_with(
     backend: Backend,
     tool_path: &str,
     device: &str,
+    runner: &dyn ProcessRunner,
+    control: Option<&OperationControl>,
+) -> Result<ProbeResult, ProbeError> {
+    let cmd = command::plan_drive_info(backend, tool_path, device);
+    match runner.run_command(&cmd.program, &cmd.args, control) {
+        Ok(CommandRunOutcome::Completed(out)) => {
+            let combined = out.combined();
+            if !out.success() {
+                return Err(ProbeError::Failed(if combined.is_empty() {
+                    "probe command failed".into()
+                } else {
+                    combined
+                }));
+            }
+            Ok(probe_from_output(device, &combined))
+        }
+        Ok(CommandRunOutcome::Cancelled) => Err(ProbeError::Cancelled),
+        Ok(CommandRunOutcome::NeedsForceKill) => Err(ProbeError::NeedsForceKill),
+        Err(e) => Err(ProbeError::Failed(e)),
+    }
+}
+
+/// Convenience probe using the native process runner (CLI / tests).
+pub fn probe_drive(backend: Backend, tool_path: &str, device: &str) -> Result<ProbeResult, String> {
+    probe_drive_with(backend, tool_path, device, &NativeRunner, None).map_err(|e| e.to_string())
+}
+
+// ── Plan helpers (read / dump / list) ──────────────────────────────
+
+/// Plan a firmware dump (read) operation.
+pub fn plan_read(
+    backend: Backend,
+    tool_path: &str,
+    sdf_path: &str,
+    device: &str,
     output_dir: &str,
-) -> Result<(), String> {
-    let plan = command::plan_command(PlanRequest {
+    drive_is_mt1959: bool,
+) -> Result<Plan, String> {
+    command::plan_command(PlanRequest {
         backend,
         tool_path: tool_path.to_string(),
+        sdf_path: sdf_path.to_string(),
         drive: device.to_string(),
-        drive_is_mt1959: true,
+        drive_is_mt1959,
         confirmation: String::new(),
         operation: Operation::Read {
             output_dir: output_dir.to_string(),
         },
     })
-    .map_err(|e| format!("cannot plan dump: {e}"))?;
+    .map_err(|e| format!("cannot plan dump: {e}"))
+}
+
+pub fn run_dump(
+    backend: Backend,
+    tool_path: &str,
+    sdf_path: &str,
+    device: &str,
+    output_dir: &str,
+) -> Result<(), String> {
+    let plan = plan_read(backend, tool_path, sdf_path, device, output_dir, true)?;
     execute_command(&plan.command)
 }
 
 pub fn run_list_backend(backend: Backend, tool_path: &str) -> Result<String, String> {
+    run_list_backend_with(backend, tool_path, &NativeRunner, None).map(|o| o.combined())
+}
+
+/// List drives via backend `-l`, using the shared process runner seam.
+pub fn run_list_backend_with(
+    backend: Backend,
+    tool_path: &str,
+    runner: &dyn ProcessRunner,
+    control: Option<&OperationControl>,
+) -> Result<CommandOutput, String> {
     let cmd = command::plan_drive_list(backend, tool_path);
-    let out = process::run_command(&cmd.program, &cmd.args).map_err(|e| e.to_string())?;
-    if out.success() {
-        Ok(out.combined())
-    } else {
-        Err(out.combined())
+    match runner.run_command(&cmd.program, &cmd.args, control) {
+        Ok(CommandRunOutcome::Completed(out)) if out.success() => Ok(out),
+        Ok(CommandRunOutcome::Completed(out)) => Err(out.combined()),
+        Ok(CommandRunOutcome::Cancelled) => Err("operation cancelled".into()),
+        Ok(CommandRunOutcome::NeedsForceKill) => {
+            Err("backend did not stop; force kill required".into())
+        }
+        Err(e) => Err(e),
     }
 }
 
 pub fn execute_command(cmd: &Command) -> Result<(), String> {
-    match process::run_command(&cmd.program, &cmd.args) {
-        Ok(out) if out.success() => Ok(()),
-        Ok(out) => Err(out.combined()),
+    execute_command_with(&NativeRunner, cmd)
+}
+
+pub fn execute_command_with(runner: &dyn ProcessRunner, cmd: &Command) -> Result<(), String> {
+    match runner.run_command(&cmd.program, &cmd.args, None) {
+        Ok(CommandRunOutcome::Completed(out)) if out.success() => Ok(()),
+        Ok(CommandRunOutcome::Completed(out)) => Err(out.combined()),
+        Ok(CommandRunOutcome::Cancelled) => Err("operation cancelled".into()),
+        Ok(CommandRunOutcome::NeedsForceKill) => {
+            Err("backend did not stop; force kill required".into())
+        }
         Err(e) => Err(e),
     }
 }
+
+// ── Firmware operation (write / recover) — no re-probe ─────────────
+
+/// Inputs for planning a write/recover after identity is known.
+/// Used by both GUI (pre-probed) and [`FlashSession::prepare`] (after probe).
+#[derive(Debug)]
+pub struct FirmwareOpRequest<'a> {
+    pub backend: Backend,
+    pub tool_path: &'a str,
+    pub sdf_path: &'a str,
+    pub device: &'a str,
+    pub drive_is_mt1959: bool,
+    pub drive_match: &'a manifest::DriveMatch,
+    pub firmware_path: &'a str,
+    pub firmware_data: &'a [u8],
+    pub manifest: Option<&'a manifest::FirmwareManifest>,
+    pub image_id: Option<&'a str>,
+    pub encrypted: bool,
+    pub include_boot_loader: bool,
+    pub recover: bool,
+    pub wrong_firmware: Option<&'a str>,
+    pub recovery_token: Option<&'a str>,
+    pub confirm: FlashConfirm,
+    pub lang: crate::i18n::Language,
+}
+
+#[derive(Debug)]
+pub struct PreparedFirmwareOp {
+    pub report: Option<flash::FlashReport>,
+    pub plan: Option<Plan>,
+    pub would_execute: bool,
+    /// Advisory lines when no manifest is present (empty otherwise).
+    pub no_manifest_warnings: Vec<String>,
+}
+
+/// Shared write/recover planning: mode checks → validate → plan.
+///
+/// Both CLI (via [`FlashSession`]) and GUI call this so gates and argv planning
+/// cannot drift.
+pub fn prepare_firmware_op(req: FirmwareOpRequest<'_>) -> Result<PreparedFirmwareOp, String> {
+    if command::write_modes_conflict(req.encrypted, req.include_boot_loader) {
+        return Err("--encrypted and --include-boot-loader cannot be combined".into());
+    }
+    if !req.drive_is_mt1959 {
+        return Err("drive is not MT1959 platform".into());
+    }
+
+    let user_confirmed = req.confirm.is_confirmed(req.device);
+
+    let (report, would_execute, no_manifest_warnings) = if let Some(manifest) = req.manifest {
+        let image_id = resolve_image_id(manifest, req.image_id)?;
+        let report_val = validate_flash(
+            manifest,
+            req.drive_match,
+            &image_id,
+            req.firmware_data,
+            user_confirmed,
+            req.lang,
+        )?;
+        let would = report_val.would_execute;
+        (Some(report_val), would, Vec::new())
+    } else {
+        (
+            None,
+            user_confirmed,
+            no_manifest_warnings(req.firmware_data),
+        )
+    };
+
+    let operation = if req.recover {
+        let token = resolve_recovery_token(req.wrong_firmware, req.recovery_token)?;
+        Operation::Recover {
+            firmware_path: req.firmware_path.to_string(),
+            recovery_boot_token: token,
+        }
+    } else {
+        Operation::Write {
+            firmware_path: req.firmware_path.to_string(),
+            encrypted: req.encrypted,
+            include_boot_loader: req.include_boot_loader,
+        }
+    };
+
+    let plan = if would_execute {
+        Some(
+            command::plan_command(PlanRequest {
+                backend: req.backend,
+                tool_path: req.tool_path.to_string(),
+                sdf_path: req.sdf_path.to_string(),
+                drive: req.device.to_string(),
+                drive_is_mt1959: req.drive_is_mt1959,
+                confirmation: req.confirm.plan_confirmation(req.device),
+                operation,
+            })
+            .map_err(plan_error_string)?,
+        )
+    } else {
+        None
+    };
+
+    Ok(PreparedFirmwareOp {
+        report,
+        plan,
+        would_execute,
+        no_manifest_warnings,
+    })
+}
+
+// ── Full session (probe + prepare) — CLI and full GUI execute ──────
 
 #[derive(Debug)]
 pub struct FlashSessionRequest<'a> {
     pub backend: Backend,
     pub tool_path: &'a str,
+    pub sdf_path: &'a str,
     pub device: &'a str,
     pub firmware_path: &'a str,
     pub firmware_data: &'a [u8],
@@ -84,7 +309,7 @@ pub struct FlashSessionRequest<'a> {
     pub recover: bool,
     pub wrong_firmware: Option<&'a str>,
     pub recovery_token: Option<&'a str>,
-    pub confirm: bool,
+    pub confirm: FlashConfirm,
     pub lang: crate::i18n::Language,
 }
 
@@ -95,15 +320,26 @@ pub struct FlashSession {
     pub report: Option<flash::FlashReport>,
     pub plan: Option<Plan>,
     pub would_execute: bool,
+    pub no_manifest_warnings: Vec<String>,
 }
 
 impl FlashSession {
     pub fn prepare(req: FlashSessionRequest<'_>) -> Result<Self, String> {
-        if req.encrypted && req.include_boot_loader {
+        Self::prepare_with(req, &NativeRunner, None)
+    }
+
+    pub fn prepare_with(
+        req: FlashSessionRequest<'_>,
+        runner: &dyn ProcessRunner,
+        control: Option<&OperationControl>,
+    ) -> Result<Self, String> {
+        // Fail fast on mode conflict before probing (same rule as plan_command / GUI can_start).
+        if command::write_modes_conflict(req.encrypted, req.include_boot_loader) {
             return Err("--encrypted and --include-boot-loader cannot be combined".into());
         }
 
-        let probe = probe_drive(req.backend, req.tool_path, req.device)?;
+        let probe = probe_drive_with(req.backend, req.tool_path, req.device, runner, control)
+            .map_err(|e| e.to_string())?;
         if !probe.safety.mt1959 {
             return Err("drive is not MT1959 platform".into());
         }
@@ -116,66 +352,43 @@ impl FlashSession {
         };
         let drive_match = drive::drive_match_for_validation(&drive, Some(&probe.identity));
 
-        let mut report = None;
-        let would_execute = if let Some(manifest) = req.manifest {
-            let image_id = resolve_image_id(manifest, req.image_id)?;
-            let report_val = validate_flash(
-                manifest,
-                &drive_match,
-                &image_id,
-                req.firmware_data,
-                req.confirm,
-                req.lang,
-            )?;
-            report = Some(report_val.clone());
-            report_val.would_execute
-        } else {
-            warn_no_manifest(req.firmware_data);
-            req.confirm
-        };
-
-        let operation = if req.recover {
-            let token = resolve_recovery_token(req.wrong_firmware, req.recovery_token)?;
-            Operation::Recover {
-                firmware_path: req.firmware_path.to_string(),
-                recovery_boot_token: token,
-            }
-        } else {
-            Operation::Write {
-                firmware_path: req.firmware_path.to_string(),
-                encrypted: req.encrypted,
-                include_boot_loader: req.include_boot_loader,
-            }
-        };
-
-        let plan = if req.confirm && would_execute {
-            Some(
-                command::plan_command(PlanRequest {
-                    backend: req.backend,
-                    tool_path: req.tool_path.to_string(),
-                    drive: req.device.to_string(),
-                    drive_is_mt1959: probe.safety.mt1959,
-                    confirmation: command::required_flash_confirmation(req.device),
-                    operation,
-                })
-                .map_err(plan_error_string)?,
-            )
-        } else {
-            None
-        };
+        let prepared = prepare_firmware_op(FirmwareOpRequest {
+            backend: req.backend,
+            tool_path: req.tool_path,
+            sdf_path: req.sdf_path,
+            device: req.device,
+            drive_is_mt1959: probe.safety.mt1959,
+            drive_match: &drive_match,
+            firmware_path: req.firmware_path,
+            firmware_data: req.firmware_data,
+            manifest: req.manifest,
+            image_id: req.image_id,
+            encrypted: req.encrypted,
+            include_boot_loader: req.include_boot_loader,
+            recover: req.recover,
+            wrong_firmware: req.wrong_firmware,
+            recovery_token: req.recovery_token,
+            confirm: req.confirm,
+            lang: req.lang,
+        })?;
 
         Ok(Self {
             probe,
             drive_match,
-            report,
-            plan,
-            would_execute,
+            report: prepared.report,
+            plan: prepared.plan,
+            would_execute: prepared.would_execute,
+            no_manifest_warnings: prepared.no_manifest_warnings,
         })
     }
 
     pub fn execute(&self) -> Result<(), String> {
+        self.execute_with(&NativeRunner)
+    }
+
+    pub fn execute_with(&self, runner: &dyn ProcessRunner) -> Result<(), String> {
         let plan = self.plan.as_ref().ok_or("no plan to execute")?;
-        execute_command(&plan.command)
+        execute_command_with(runner, &plan.command)
     }
 }
 
@@ -225,9 +438,7 @@ pub fn resolve_recovery_token(
 
 /// Validate a flash operation: build the plan and return the dry-run report.
 ///
-/// This is the shared pipeline used by both CLI and GUI.
-/// The report includes advisory warnings that should be shown to the user
-/// but never block the operation.
+/// Shared by CLI and GUI. Advisory warnings never block the operation.
 pub fn validate_flash(
     manifest: &manifest::FirmwareManifest,
     drive: &manifest::DriveMatch,
@@ -260,24 +471,31 @@ pub fn validate_flash(
     Ok(flash::dry_run(&plan, firmware_data, lang))
 }
 
-/// Warn the user when flashing without a manifest (no validation possible).
-///
-/// This is called by the CLI when `--manifest` is not provided. It prints
-/// advisory warnings to stderr but does not block the operation.
-pub fn warn_no_manifest(firmware_data: &[u8]) {
-    eprintln!("WARNING: No manifest provided — skipping firmware validation.");
-    eprintln!("  No model match, checksum, or signature verification will be performed.");
-    eprintln!("  Make sure the firmware is correct for your drive.");
+/// Advisory lines when flashing without a manifest (CLI + GUI).
+pub fn no_manifest_warnings(firmware_data: &[u8]) -> Vec<String> {
+    let mut lines = vec![
+        "No manifest provided — skipping firmware validation.".into(),
+        "No model match, checksum, or signature verification will be performed.".into(),
+        "Make sure the firmware is correct for your drive.".into(),
+    ];
     if let Some(sdf_info) = flash::check_firmware_sdf(firmware_data) {
         if let Some(v) = &sdf_info.vendor {
-            eprintln!("  Firmware vendor: {v}");
+            lines.push(format!("Firmware vendor: {v}"));
         }
         if let Some(m) = &sdf_info.model {
-            eprintln!("  Firmware model:  {m}");
+            lines.push(format!("Firmware model:  {m}"));
         }
         if let Some(fw) = &sdf_info.firmware_version {
-            eprintln!("  Firmware version: {fw}");
+            lines.push(format!("Firmware version: {fw}"));
         }
+    }
+    lines
+}
+
+/// Print no-manifest warnings to stderr (CLI).
+pub fn warn_no_manifest(firmware_data: &[u8]) {
+    for line in no_manifest_warnings(firmware_data) {
+        eprintln!("WARNING: {line}");
     }
 }
 
@@ -317,7 +535,7 @@ mod tests {
     #[test]
     fn parse_drive_identity_full_output() {
         let output = "Vendor: HL-DT-ST\nProduct: BD-RE BU40N\nRevision: 1.03\n";
-        let dm = parse_drive_identity("/dev/sr0", output);
+        let dm = drive::parse_identity_from_info("/dev/sr0", output);
         assert_eq!(dm.vendor, "HL-DT-ST");
         assert_eq!(dm.model, "BD-RE BU40N");
         assert_eq!(dm.revision, "1.03");
@@ -326,7 +544,7 @@ mod tests {
     #[test]
     fn parse_drive_identity_case_insensitive() {
         let output = "vendor: LG\nproduct: BU40N\nfirmware: 1.04\n";
-        let dm = parse_drive_identity("/dev/sr0", output);
+        let dm = drive::parse_identity_from_info("/dev/sr0", output);
         assert_eq!(dm.vendor, "LG");
         assert_eq!(dm.model, "BU40N");
         assert_eq!(dm.revision, "1.04");
@@ -337,14 +555,14 @@ mod tests {
         // Falls back to splitting on '_' only, preserving hyphenated vendor names.
         // "HL-DT-ST_BU40N_1.03" → vendor="HL-DT-ST", model="BU40N_1.03".
         let output = "no useful info here";
-        let dm = parse_drive_identity("HL-DT-ST_BU40N_1.03", output);
+        let dm = drive::parse_identity_from_info("HL-DT-ST_BU40N_1.03", output);
         assert_eq!(dm.vendor, "HL-DT-ST");
         assert_eq!(dm.model, "BU40N_1.03");
     }
 
     #[test]
     fn parse_drive_identity_empty() {
-        let dm = parse_drive_identity("/dev/sr0", "");
+        let dm = drive::parse_identity_from_info("/dev/sr0", "");
         assert!(dm.vendor.is_empty());
         assert!(dm.model.is_empty());
         assert!(dm.revision.is_empty());
@@ -427,7 +645,7 @@ mod tests {
     #[test]
     fn parse_drive_identity_model_key() {
         let output = "Model: BU40N\nRevision: 1.03\n";
-        let dm = parse_drive_identity("/dev/sr0", output);
+        let dm = drive::parse_identity_from_info("/dev/sr0", output);
         assert_eq!(dm.model, "BU40N");
         assert_eq!(dm.revision, "1.03");
     }
@@ -435,21 +653,21 @@ mod tests {
     #[test]
     fn parse_drive_identity_firmware_key() {
         let output = "Firmware: 1.04\n";
-        let dm = parse_drive_identity("/dev/sr0", output);
+        let dm = drive::parse_identity_from_info("/dev/sr0", output);
         assert_eq!(dm.revision, "1.04");
     }
 
     #[test]
     fn parse_drive_identity_fallback_no_underscore() {
         // Device label without '_' — no fallback parsing
-        let dm = parse_drive_identity("/dev/sr0", "");
+        let dm = drive::parse_identity_from_info("/dev/sr0", "");
         assert!(dm.vendor.is_empty());
         assert!(dm.model.is_empty());
     }
 
     #[test]
     fn parse_drive_identity_fallback_single_underscore() {
-        let dm = parse_drive_identity("VENDOR_MODEL", "");
+        let dm = drive::parse_identity_from_info("VENDOR_MODEL", "");
         assert_eq!(dm.vendor, "VENDOR");
         assert_eq!(dm.model, "MODEL");
     }
@@ -457,7 +675,7 @@ mod tests {
     #[test]
     fn parse_drive_identity_underscore_empty_vendor() {
         // "_MODEL" → empty vendor part is skipped, model = "MODEL"
-        let dm = parse_drive_identity("_MODEL", "");
+        let dm = drive::parse_identity_from_info("_MODEL", "");
         assert!(dm.vendor.is_empty());
         assert_eq!(dm.model, "MODEL");
     }
@@ -465,7 +683,7 @@ mod tests {
     #[test]
     fn parse_drive_identity_underscore_empty_model() {
         // "VENDOR_" → vendor = "VENDOR", empty model part is skipped
-        let dm = parse_drive_identity("VENDOR_", "");
+        let dm = drive::parse_identity_from_info("VENDOR_", "");
         assert_eq!(dm.vendor, "VENDOR");
         assert!(dm.model.is_empty());
     }
@@ -543,7 +761,7 @@ mod tests {
     #[test]
     fn parse_drive_identity_whitespace_trimmed() {
         let output = "  Vendor:   HL-DT-ST  \n  Product:   BU40N  \n";
-        let dm = parse_drive_identity("/dev/sr0", output);
+        let dm = drive::parse_identity_from_info("/dev/sr0", output);
         assert_eq!(dm.vendor, "HL-DT-ST");
         assert_eq!(dm.model, "BU40N");
     }
@@ -589,6 +807,7 @@ mod tests {
         run_dump(
             crate::command::Backend::SdfTool,
             &tool.to_string_lossy(),
+            "",
             "/dev/sr0",
             &out_dir.to_string_lossy(),
         )
@@ -661,6 +880,7 @@ mod tests {
             report: None,
             plan: None,
             would_execute: false,
+            no_manifest_warnings: Vec::new(),
         };
         let err = session.execute().unwrap_err();
         assert!(err.contains("no plan to execute"));
@@ -671,6 +891,7 @@ mod tests {
         let err = FlashSession::prepare(FlashSessionRequest {
             backend: crate::command::Backend::SdfTool,
             tool_path: "/usr/bin/sdftool",
+            sdf_path: "",
             device: "/dev/sr0",
             firmware_path: "/tmp/fw.bin",
             firmware_data: &[],
@@ -682,7 +903,7 @@ mod tests {
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
-            confirm: false,
+            confirm: FlashConfirm::None,
             lang: Language::English,
         })
         .unwrap_err();
@@ -690,16 +911,94 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn flash_confirm_flag_and_typed() {
+        assert!(!FlashConfirm::None.is_confirmed("/dev/sr0"));
+        assert!(FlashConfirm::Flag.is_confirmed("/dev/sr0"));
+        assert!(FlashConfirm::Typed("FLASH /dev/sr0".into()).is_confirmed("/dev/sr0"));
+        assert!(!FlashConfirm::Typed("nope".into()).is_confirmed("/dev/sr0"));
+        assert_eq!(
+            FlashConfirm::Flag.plan_confirmation("/dev/sr0"),
+            command::required_flash_confirmation("/dev/sr0")
+        );
+    }
+
+    #[test]
+    fn prepare_firmware_op_no_manifest_requires_confirm() {
+        let drive = test_drive();
+        let prepared = prepare_firmware_op(FirmwareOpRequest {
+            backend: crate::command::Backend::SdfTool,
+            tool_path: "/usr/bin/sdftool",
+            sdf_path: "",
+            device: "/dev/sr0",
+            drive_is_mt1959: true,
+            drive_match: &drive,
+            firmware_path: "/tmp/fw.bin",
+            firmware_data: &[],
+            manifest: None,
+            image_id: None,
+            encrypted: false,
+            include_boot_loader: false,
+            recover: false,
+            wrong_firmware: None,
+            recovery_token: None,
+            confirm: FlashConfirm::None,
+            lang: Language::English,
+        })
+        .expect("prepare");
+        assert!(!prepared.would_execute);
+        assert!(prepared.plan.is_none());
+        assert!(!prepared.no_manifest_warnings.is_empty());
+    }
+
+    #[test]
+    fn prepare_firmware_op_no_manifest_with_flag_plans() {
+        let drive = test_drive();
+        let prepared = prepare_firmware_op(FirmwareOpRequest {
+            backend: crate::command::Backend::SdfTool,
+            tool_path: "/usr/bin/sdftool",
+            sdf_path: "",
+            device: "/dev/sr0",
+            drive_is_mt1959: true,
+            drive_match: &drive,
+            firmware_path: "/tmp/fw.bin",
+            firmware_data: &[],
+            manifest: None,
+            image_id: None,
+            encrypted: false,
+            include_boot_loader: false,
+            recover: false,
+            wrong_firmware: None,
+            recovery_token: None,
+            confirm: FlashConfirm::Flag,
+            lang: Language::English,
+        })
+        .expect("prepare");
+        assert!(prepared.would_execute);
+        assert!(prepared.plan.is_some());
+    }
+
+    #[test]
+    fn probe_from_output_classifies_mt1959() {
+        let probe = probe_from_output(
+            "/dev/sr0",
+            "Drive platform: MT1959\nVendor: HL-DT-ST\nProduct: BU40N\nRevision: 1.03\n",
+        );
+        assert!(probe.safety.mt1959);
+        assert_eq!(probe.identity.vendor, "HL-DT-ST");
+        assert_eq!(probe.identity.model, "BU40N");
+    }
+
     fn warn_no_manifest_with_sdf_firmware() {
         let mut data = Vec::new();
         data.extend_from_slice(b"SDF0");
-        data.extend_from_slice(&1u32.to_le_bytes());
-        data.extend_from_slice(&24u32.to_le_bytes());
-        data.extend_from_slice(&24u32.to_le_bytes());
-        data.extend_from_slice(&0u32.to_le_bytes());
+        data.extend_from_slice(&1u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&0u32.to_be_bytes());
         let metadata = b"Vendor\0LG\0Model\0BU40N\0";
         let payload_offset = 24 + metadata.len() as u32;
-        data.extend_from_slice(&payload_offset.to_le_bytes());
+        data.extend_from_slice(&payload_offset.to_be_bytes());
         data.extend_from_slice(metadata);
         warn_no_manifest(&data);
     }
@@ -735,6 +1034,7 @@ mod tests {
         let session = FlashSession::prepare(FlashSessionRequest {
             backend: crate::command::Backend::SdfTool,
             tool_path: &tool.to_string_lossy(),
+            sdf_path: "",
             device: "/dev/sr0",
             firmware_path: "/tmp/fw.bin",
             firmware_data: &[],
@@ -746,7 +1046,7 @@ mod tests {
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
-            confirm: true,
+            confirm: FlashConfirm::Flag,
             lang: Language::English,
         })
         .expect("prepare should succeed");
@@ -763,6 +1063,7 @@ mod tests {
         let err = FlashSession::prepare(FlashSessionRequest {
             backend: crate::command::Backend::SdfTool,
             tool_path: &tool.to_string_lossy(),
+            sdf_path: "",
             device: "/dev/sr0",
             firmware_path: "/tmp/fw.bin",
             firmware_data: &[],
@@ -774,7 +1075,7 @@ mod tests {
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
-            confirm: false,
+            confirm: FlashConfirm::None,
             lang: Language::English,
         })
         .unwrap_err();
@@ -821,6 +1122,7 @@ mod tests {
         let err = FlashSession::prepare(FlashSessionRequest {
             backend: crate::command::Backend::SdfTool,
             tool_path: &tool.to_string_lossy(),
+            sdf_path: "",
             device: "/dev/sr0",
             firmware_path: "/tmp/fw.bin",
             firmware_data: &vec![0u8; 1024],
@@ -832,7 +1134,7 @@ mod tests {
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
-            confirm: false,
+            confirm: FlashConfirm::None,
             lang: Language::English,
         })
         .unwrap_err();
@@ -850,6 +1152,7 @@ mod tests {
         let session = FlashSession::prepare(FlashSessionRequest {
             backend: crate::command::Backend::SdfTool,
             tool_path: &tool.to_string_lossy(),
+            sdf_path: "",
             device: "/dev/sr0",
             firmware_path: "/tmp/fw.bin",
             firmware_data: &firmware,
@@ -861,7 +1164,7 @@ mod tests {
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
-            confirm: false,
+            confirm: FlashConfirm::None,
             lang: Language::English,
         })
         .expect("prepare with manifest");
@@ -879,6 +1182,7 @@ mod tests {
         let session = FlashSession::prepare(FlashSessionRequest {
             backend: crate::command::Backend::SdfTool,
             tool_path: &tool.to_string_lossy(),
+            sdf_path: "",
             device: "/dev/sr0",
             firmware_path: "/tmp/fw.bin",
             firmware_data: &[],
@@ -890,7 +1194,7 @@ mod tests {
             recover: true,
             wrong_firmware: None,
             recovery_token: Some("ABCDEFGHIJKLMNOP"),
-            confirm: true,
+            confirm: FlashConfirm::Flag,
             lang: Language::English,
         })
         .expect("recover prepare");
@@ -907,6 +1211,7 @@ mod tests {
         let session = FlashSession::prepare(FlashSessionRequest {
             backend: crate::command::Backend::SdfTool,
             tool_path: &tool.to_string_lossy(),
+            sdf_path: "",
             device: "/dev/sr0",
             firmware_path: "/tmp/fw.bin",
             firmware_data: &[],
@@ -918,7 +1223,7 @@ mod tests {
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
-            confirm: true,
+            confirm: FlashConfirm::Flag,
             lang: Language::English,
         })
         .expect("prepare");
@@ -929,13 +1234,13 @@ mod tests {
     fn warn_no_manifest_prints_sdf_firmware_version() {
         let mut data = Vec::new();
         data.extend_from_slice(b"SDF0");
-        data.extend_from_slice(&1u32.to_le_bytes());
-        data.extend_from_slice(&24u32.to_le_bytes());
-        data.extend_from_slice(&24u32.to_le_bytes());
-        data.extend_from_slice(&0u32.to_le_bytes());
+        data.extend_from_slice(&1u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&0u32.to_be_bytes());
         let metadata = b"Vendor\0LG\0Model\0BU40N\0FirmwareVersion\01.04\0";
         let payload_offset = 24 + metadata.len() as u32;
-        data.extend_from_slice(&payload_offset.to_le_bytes());
+        data.extend_from_slice(&payload_offset.to_be_bytes());
         data.extend_from_slice(metadata);
         warn_no_manifest(&data);
     }

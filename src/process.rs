@@ -603,6 +603,48 @@ pub fn format_command(cmd: &crate::command::Command) -> String {
         .join(" ")
 }
 
+/// Seam for backend process execution. Production uses [`NativeRunner`]; tests inject mocks.
+pub trait ProcessRunner: Send + Sync + 'static {
+    fn run_command(
+        &self,
+        program: &str,
+        args: &[String],
+        control: Option<&OperationControl>,
+    ) -> Result<CommandRunOutcome, String>;
+
+    fn run_command_streaming(
+        &self,
+        program: &str,
+        args: &[String],
+        on_line: &dyn Fn(&str),
+        control: Option<&OperationControl>,
+    ) -> Result<CommandRunOutcome, String>;
+}
+
+/// Production adapter that delegates to real process execution.
+pub struct NativeRunner;
+
+impl ProcessRunner for NativeRunner {
+    fn run_command(
+        &self,
+        program: &str,
+        args: &[String],
+        control: Option<&OperationControl>,
+    ) -> Result<CommandRunOutcome, String> {
+        run_command_cancellable(program, args, control)
+    }
+
+    fn run_command_streaming(
+        &self,
+        program: &str,
+        args: &[String],
+        on_line: &dyn Fn(&str),
+        control: Option<&OperationControl>,
+    ) -> Result<CommandRunOutcome, String> {
+        run_command_streaming_cancellable(program, args, on_line, control)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
