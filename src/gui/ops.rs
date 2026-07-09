@@ -292,7 +292,6 @@ pub fn execute_start(
             let Some(drive) = state.selected_drive().cloned() else {
                 return;
             };
-            let firmware_data = state.flash.firmware_data.clone().unwrap_or_default();
             let recover = matches!(state.operation_mode, OperationMode::Recover);
             if !recover && state.flash.firmware_data.is_none() {
                 return;
@@ -307,7 +306,6 @@ pub fn execute_start(
                     device: &drive.device,
                     drive_is_mt1959: state.drive.drive_mt1959,
                     firmware_path: &state.flash.firmware_path,
-                    firmware_data: &firmware_data,
                     encrypted: state.flash.encrypted_write,
                     include_boot_loader: state.flash.include_boot_loader,
                     recover,
@@ -318,7 +316,6 @@ pub fn execute_start(
                         None
                     },
                     confirm,
-                    lang,
                 }) {
                     Ok(p) => p,
                     Err(e) => {

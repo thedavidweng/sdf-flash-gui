@@ -23,7 +23,6 @@ pub enum WorkerMsg {
         drive_idx: usize,
         mt1959: bool,
         encrypted_firmware: bool,
-        identity: Option<crate::drive::DriveIdentity>,
         error: Option<String>,
     },
     OperationComplete {
@@ -64,14 +63,12 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
             drive_idx,
             mt1959,
             encrypted_firmware,
-            identity,
             error,
         } => {
             let success = error.is_none();
             if state.drive.selected_drive == Some(drive_idx) {
                 state.drive.drive_mt1959 = mt1959;
                 state.drive.drive_encrypted_firmware = encrypted_firmware;
-                state.drive.probe_identity = if success { identity } else { None };
                 if success {
                     state.flash.encrypted_write = encrypted_firmware;
                 }
@@ -232,7 +229,6 @@ pub fn spawn_probe(
             drive_idx,
             mt1959: false,
             encrypted_firmware: false,
-            identity: None,
             error: Some(t(L10nKey::ReasonNoBackend, state.chrome.resolved_lang).into()),
         });
         return;
@@ -275,7 +271,6 @@ pub fn spawn_probe(
                     drive_idx,
                     mt1959: probe.safety.mt1959,
                     encrypted_firmware: probe.safety.encrypted_firmware,
-                    identity: Some(probe.identity),
                     error: None,
                 });
             }
@@ -284,7 +279,6 @@ pub fn spawn_probe(
                     drive_idx,
                     mt1959: false,
                     encrypted_firmware: false,
-                    identity: None,
                     error: Some(t(L10nKey::StatusProbeFailed, lang).into()),
                 });
             }
@@ -298,7 +292,6 @@ pub fn spawn_probe(
                     drive_idx,
                     mt1959: false,
                     encrypted_firmware: false,
-                    identity: None,
                     error: Some(e),
                 });
             }
@@ -538,7 +531,6 @@ mod tests {
             drive_idx: 0,
             mt1959: true,
             encrypted_firmware: true,
-            identity: None,
             error: None,
         });
         drop(tx);
@@ -564,7 +556,6 @@ mod tests {
             drive_idx: 0,
             mt1959: false,
             encrypted_firmware: false,
-            identity: None,
             error: Some("probe failed".into()),
         });
         drop(tx);
@@ -586,7 +577,6 @@ mod tests {
             drive_idx: 1, // different from selected
             mt1959: true,
             encrypted_firmware: true,
-            identity: None,
             error: None,
         });
         drop(tx);
@@ -1465,11 +1455,7 @@ mod tests {
         drop(tx);
         assert!(matches!(
             messages.last(),
-            Some(WorkerMsg::ProbeComplete {
-                error: Some(_),
-                identity: None,
-                ..
-            })
+            Some(WorkerMsg::ProbeComplete { error: Some(_), .. })
         ));
     }
 

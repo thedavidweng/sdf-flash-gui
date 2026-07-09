@@ -245,14 +245,6 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
         }
     };
 
-    let firmware_data = match std::fs::read(firmware) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("ERROR: cannot read firmware: {e}");
-            std::process::exit(1);
-        }
-    };
-
     let (backend, path) = find_backend();
     let sdf_path_owned;
     let sdf_path = match args.sdf_path.map(String::as_str) {
@@ -268,7 +260,6 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
         sdf_path,
         device,
         firmware_path: firmware,
-        firmware_data: &firmware_data,
         encrypted: args.encrypted,
         include_boot_loader: args.include_boot_loader,
         recover: args.recover,
@@ -279,7 +270,6 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
         } else {
             orchestration::FlashConfirm::None
         },
-        lang: sdf_flash_gui::i18n::Language::English,
     }) {
         Ok(s) => s,
         Err(e) => {

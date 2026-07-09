@@ -52,7 +52,6 @@ pub struct DriveState {
     pub drive_mt1959: bool,
     pub drive_encrypted_firmware: bool,
     pub drive_probed: bool,
-    pub probe_identity: Option<crate::drive::DriveIdentity>,
 }
 
 #[derive(Debug)]
@@ -124,7 +123,6 @@ impl AppState {
                 drive_mt1959: false,
                 drive_encrypted_firmware: false,
                 drive_probed: false,
-                probe_identity: None,
             },
             flash: FlashWorkflow {
                 include_boot_loader: false,
@@ -192,15 +190,6 @@ impl AppState {
             .and_then(|i| self.drive.drives.get(i))
     }
 
-    #[allow(dead_code)]
-    pub fn drive_match(&self) -> Option<crate::drive::DriveIdentity> {
-        let drive = self.selected_drive()?;
-        Some(drive::drive_match_for_validation(
-            drive,
-            self.drive.probe_identity.as_ref(),
-        ))
-    }
-
     pub fn set_status(&mut self, msg: impl Into<String>, progress: f32) {
         self.runtime.status_message = msg.into();
         self.runtime.progress = progress.clamp(0.0, 100.0);
@@ -235,9 +224,6 @@ impl AppState {
     pub fn record_probe_outcome(&mut self, drive_idx: usize, success: bool) {
         if self.drive.selected_drive == Some(drive_idx) {
             self.drive.drive_probed = success;
-            if !success {
-                self.drive.probe_identity = None;
-            }
             self.drive.last_probed_drive = Some(drive_idx);
         }
     }
@@ -306,25 +292,6 @@ mod tests {
     fn selected_drive_none_when_empty() {
         let state = AppState::new_no_backend();
         assert!(state.selected_drive().is_none());
-    }
-
-    #[test]
-    fn drive_match_uses_probe() {
-        let mut state = AppState::new_no_backend();
-        state.drive.drives.push(Drive {
-            device: "/dev/sr0".into(),
-            vendor: "HL-DT-ST".into(),
-            product: "BU40N".into(),
-            revision: "1.03".into(),
-        });
-        state.drive.selected_drive = Some(0);
-        state.drive.probe_identity = Some(crate::drive::DriveIdentity {
-            vendor: "HL-DT-ST".into(),
-            model: "BD-RE BU40N".into(),
-            revision: "1.03".into(),
-        });
-        let dm = state.drive_match().unwrap();
-        assert_eq!(dm.model, "BD-RE BU40N");
     }
 
     #[test]

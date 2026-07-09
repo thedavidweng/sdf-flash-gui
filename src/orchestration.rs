@@ -211,14 +211,12 @@ pub struct FirmwareOpRequest<'a> {
     pub device: &'a str,
     pub drive_is_mt1959: bool,
     pub firmware_path: &'a str,
-    pub firmware_data: &'a [u8],
     pub encrypted: bool,
     pub include_boot_loader: bool,
     pub recover: bool,
     pub wrong_firmware: Option<&'a str>,
     pub recovery_token: Option<&'a str>,
     pub confirm: FlashConfirm,
-    pub lang: crate::i18n::Language,
 }
 
 #[derive(Debug)]
@@ -288,14 +286,12 @@ pub struct FlashSessionRequest<'a> {
     pub sdf_path: &'a str,
     pub device: &'a str,
     pub firmware_path: &'a str,
-    pub firmware_data: &'a [u8],
     pub encrypted: bool,
     pub include_boot_loader: bool,
     pub recover: bool,
     pub wrong_firmware: Option<&'a str>,
     pub recovery_token: Option<&'a str>,
     pub confirm: FlashConfirm,
-    pub lang: crate::i18n::Language,
 }
 
 #[derive(Debug)]
@@ -333,14 +329,12 @@ impl FlashSession {
             device: req.device,
             drive_is_mt1959: probe.safety.mt1959,
             firmware_path: req.firmware_path,
-            firmware_data: req.firmware_data,
             encrypted: req.encrypted,
             include_boot_loader: req.include_boot_loader,
             recover: req.recover,
             wrong_firmware: req.wrong_firmware,
             recovery_token: req.recovery_token,
             confirm: req.confirm,
-            lang: req.lang,
         })?;
 
         Ok(Self {
@@ -386,7 +380,6 @@ pub fn resolve_recovery_token(
 mod tests {
     use super::*;
     use crate::drive::DriveIdentity;
-    use crate::i18n::Language;
 
     fn test_identity() -> DriveIdentity {
         DriveIdentity {
@@ -620,14 +613,12 @@ mod tests {
             sdf_path: "",
             device: "/dev/sr0",
             firmware_path: "/tmp/fw.bin",
-            firmware_data: &[],
             encrypted: true,
             include_boot_loader: true,
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
             confirm: FlashConfirm::None,
-            lang: Language::English,
         })
         .unwrap_err();
         assert!(err.contains("cannot be combined"));
@@ -848,14 +839,12 @@ mod tests {
             device: "/dev/sr0",
             drive_is_mt1959: true,
             firmware_path: "/tmp/fw.bin",
-            firmware_data: &[],
             encrypted: false,
             include_boot_loader: false,
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
             confirm: FlashConfirm::None,
-            lang: Language::English,
         })
         .expect("prepare");
         assert!(!prepared.would_execute);
@@ -871,14 +860,12 @@ mod tests {
             device: "/dev/sr0",
             drive_is_mt1959: true,
             firmware_path: "/tmp/fw.bin",
-            firmware_data: &[],
             encrypted: false,
             include_boot_loader: false,
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
             confirm: FlashConfirm::Flag,
-            lang: Language::English,
         })
         .expect("prepare");
         assert!(prepared.would_execute);
@@ -905,14 +892,12 @@ mod tests {
             device: "/dev/sr0",
             drive_is_mt1959: false,
             firmware_path: "/tmp/fw.bin",
-            firmware_data: &[],
             encrypted: false,
             include_boot_loader: false,
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
             confirm: FlashConfirm::Flag,
-            lang: Language::English,
         })
         .unwrap_err();
         assert!(err.contains("not MT1959"));
@@ -927,14 +912,12 @@ mod tests {
             device: "/dev/sr0",
             drive_is_mt1959: true,
             firmware_path: "/tmp/fw.bin",
-            firmware_data: &[],
             encrypted: true,
             include_boot_loader: true,
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
             confirm: FlashConfirm::Flag,
-            lang: Language::English,
         })
         .unwrap_err();
         assert!(err.contains("cannot be combined"));
@@ -949,14 +932,12 @@ mod tests {
             device: "/dev/sr0",
             drive_is_mt1959: true,
             firmware_path: "/tmp/fw.bin",
-            firmware_data: &[0u8; 32],
             encrypted: false,
             include_boot_loader: false,
             recover: true,
             wrong_firmware: None,
             recovery_token: Some("ABCDEFGHIJKLMNOP"),
             confirm: FlashConfirm::Flag,
-            lang: Language::English,
         })
         .expect("recover prepare");
         assert!(prepared.would_execute);
@@ -997,14 +978,12 @@ mod tests {
             sdf_path: "",
             device: "/dev/sr0",
             firmware_path: "/tmp/fw.bin",
-            firmware_data: &[],
             encrypted: false,
             include_boot_loader: false,
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
             confirm: FlashConfirm::Flag,
-            lang: Language::English,
         })
         .expect("prepare should succeed");
         assert!(session.probe.safety.mt1959);
@@ -1022,14 +1001,12 @@ mod tests {
             sdf_path: "",
             device: "/dev/sr0",
             firmware_path: "/tmp/fw.bin",
-            firmware_data: &[],
             encrypted: false,
             include_boot_loader: false,
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
             confirm: FlashConfirm::None,
-            lang: Language::English,
         })
         .unwrap_err();
         assert!(err.contains("not MT1959"));
@@ -1077,14 +1054,12 @@ mod tests {
             sdf_path: "",
             device: "/dev/sr0",
             firmware_path: "/tmp/fw.bin",
-            firmware_data: &[],
             encrypted: false,
             include_boot_loader: false,
             recover: true,
             wrong_firmware: None,
             recovery_token: Some("ABCDEFGHIJKLMNOP"),
             confirm: FlashConfirm::Flag,
-            lang: Language::English,
         })
         .expect("recover prepare");
         assert!(session.plan.is_some());
@@ -1103,14 +1078,12 @@ mod tests {
             sdf_path: "",
             device: "/dev/sr0",
             firmware_path: "/tmp/fw.bin",
-            firmware_data: &[],
             encrypted: false,
             include_boot_loader: false,
             recover: false,
             wrong_firmware: None,
             recovery_token: None,
             confirm: FlashConfirm::Flag,
-            lang: Language::English,
         })
         .expect("prepare");
         session.execute().expect("execute");
