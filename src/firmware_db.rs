@@ -564,4 +564,203 @@ mod tests {
         assert_eq!(id.binary_info.form_factor, DriveFormFactor::Unknown);
         assert!(!id.sha256.is_empty());
     }
+
+    #[test]
+    fn extract_pcb_type_empty_after_trim() {
+        // Boot string is "MT1959 Boot " followed by only spaces/nulls
+        let mut data = vec![0u8; 12310];
+        let boot = b"MT1959 Boot     ";
+        data[12288..12288 + boot.len()].copy_from_slice(boot);
+        assert!(extract_pcb_type(&data).is_none());
+    }
+
+    #[test]
+    fn resolve_form_factor_with_sdf_fallback() {
+        let id = FirmwareIdentification {
+            sha256: "unknown".to_string(),
+            known: None,
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: None,
+                model: None,
+                form_factor: DriveFormFactor::Unknown,
+            },
+        };
+        let sdf = crate::flash::FirmwareSdfInfo {
+            vendor: Some("HL-DT-ST".to_string()),
+            model: Some("BU40N".to_string()),
+            firmware_version: Some("1.00".to_string()),
+        };
+        assert_eq!(
+            resolve_form_factor_with_sdf(&id, Some(&sdf)),
+            DriveFormFactor::Slim
+        );
+    }
+
+    #[test]
+    fn resolve_form_factor_with_sdf_no_model() {
+        let id = FirmwareIdentification {
+            sha256: "unknown".to_string(),
+            known: None,
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: None,
+                model: None,
+                form_factor: DriveFormFactor::Unknown,
+            },
+        };
+        let sdf = crate::flash::FirmwareSdfInfo {
+            vendor: None,
+            model: None,
+            firmware_version: None,
+        };
+        assert_eq!(
+            resolve_form_factor_with_sdf(&id, Some(&sdf)),
+            DriveFormFactor::Unknown
+        );
+    }
+
+    #[test]
+    fn resolve_form_factor_with_sdf_none_info() {
+        let id = FirmwareIdentification {
+            sha256: "unknown".to_string(),
+            known: None,
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: None,
+                model: None,
+                form_factor: DriveFormFactor::Unknown,
+            },
+        };
+        assert_eq!(
+            resolve_form_factor_with_sdf(&id, None),
+            DriveFormFactor::Unknown
+        );
+    }
+
+    #[test]
+    fn resolve_model_binary_fallback() {
+        let id = FirmwareIdentification {
+            sha256: "unknown".to_string(),
+            known: None,
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: Some("JB8".to_string()),
+                model: Some("BW-16D1HT".to_string()),
+                form_factor: DriveFormFactor::Desktop,
+            },
+        };
+        assert_eq!(resolve_model(&id).as_deref(), Some("BW-16D1HT"));
+    }
+
+    #[test]
+    fn resolve_model_no_info() {
+        let id = FirmwareIdentification {
+            sha256: "unknown".to_string(),
+            known: None,
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: None,
+                model: None,
+                form_factor: DriveFormFactor::Unknown,
+            },
+        };
+        assert!(resolve_model(&id).is_none());
+    }
+
+    #[test]
+    fn resolve_model_with_sdf_known_takes_priority() {
+        let id = FirmwareIdentification {
+            sha256: "83ea24bb07b8a7a451bba1856d1db18b7f54b1823b9d148e213f25daf2e0a1d2".to_string(),
+            known: lookup_known_firmware(
+                "83ea24bb07b8a7a451bba1856d1db18b7f54b1823b9d148e213f25daf2e0a1d2",
+            ),
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: Some("JB8".to_string()),
+                model: Some("WRONG".to_string()),
+                form_factor: DriveFormFactor::Desktop,
+            },
+        };
+        let sdf = crate::flash::FirmwareSdfInfo {
+            vendor: None,
+            model: Some("ALSO_WRONG".to_string()),
+            firmware_version: None,
+        };
+        assert_eq!(
+            resolve_model_with_sdf(&id, Some(&sdf)).as_deref(),
+            Some("BW-16D1HT")
+        );
+    }
+
+    #[test]
+    fn resolve_model_with_sdf_binary_fallback() {
+        let id = FirmwareIdentification {
+            sha256: "unknown".to_string(),
+            known: None,
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: Some("JB8".to_string()),
+                model: Some("BW-16D1HT".to_string()),
+                form_factor: DriveFormFactor::Desktop,
+            },
+        };
+        let sdf = crate::flash::FirmwareSdfInfo {
+            vendor: None,
+            model: Some("SHOULD_NOT_USE".to_string()),
+            firmware_version: None,
+        };
+        assert_eq!(
+            resolve_model_with_sdf(&id, Some(&sdf)).as_deref(),
+            Some("BW-16D1HT")
+        );
+    }
+
+    #[test]
+    fn resolve_model_with_sdf_sdf_fallback() {
+        let id = FirmwareIdentification {
+            sha256: "unknown".to_string(),
+            known: None,
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: None,
+                model: None,
+                form_factor: DriveFormFactor::Unknown,
+            },
+        };
+        let sdf = crate::flash::FirmwareSdfInfo {
+            vendor: Some("HL-DT-ST".to_string()),
+            model: Some("BU40N".to_string()),
+            firmware_version: Some("1.00".to_string()),
+        };
+        assert_eq!(
+            resolve_model_with_sdf(&id, Some(&sdf)).as_deref(),
+            Some("BU40N")
+        );
+    }
+
+    #[test]
+    fn resolve_model_with_sdf_no_info() {
+        let id = FirmwareIdentification {
+            sha256: "unknown".to_string(),
+            known: None,
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: None,
+                model: None,
+                form_factor: DriveFormFactor::Unknown,
+            },
+        };
+        assert!(resolve_model_with_sdf(&id, None).is_none());
+    }
+
+    #[test]
+    fn resolve_model_with_sdf_sdf_no_model() {
+        let id = FirmwareIdentification {
+            sha256: "unknown".to_string(),
+            known: None,
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: None,
+                model: None,
+                form_factor: DriveFormFactor::Unknown,
+            },
+        };
+        let sdf = crate::flash::FirmwareSdfInfo {
+            vendor: None,
+            model: None,
+            firmware_version: None,
+        };
+        assert!(resolve_model_with_sdf(&id, Some(&sdf)).is_none());
+    }
 }
