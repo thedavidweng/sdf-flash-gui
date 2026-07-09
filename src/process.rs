@@ -643,6 +643,20 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    fn wait_until_child_exited(control: &OperationControl) {
+        use std::time::{Duration, Instant};
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if !control.is_child_running() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        panic!("child did not exit within 5s");
+    }
+
     #[test]
     fn parses_prgv() {
         assert_eq!(parse_progress_percent("PRGV:50,100,0"), Some(50.0));
@@ -1239,7 +1253,7 @@ mod tests {
         let control = OperationControl::new();
         let child = Command::new("true").spawn().unwrap();
         control.register_child_for_test(child);
-        thread::sleep(Duration::from_millis(50));
+        wait_until_child_exited(&control);
         assert!(!control.is_child_running());
         assert!(!control.is_child_running());
     }
@@ -1248,12 +1262,11 @@ mod tests {
     #[cfg(unix)]
     fn child_has_exited_caches_exit_status() {
         use std::process::Command;
-        use std::time::Duration;
 
         let control = OperationControl::new();
         let child = Command::new("true").spawn().unwrap();
         control.register_child_for_test(child);
-        thread::sleep(Duration::from_millis(50));
+        wait_until_child_exited(&control);
         assert!(child_has_exited(&control));
         assert!(child_has_exited(&control));
     }
@@ -1311,12 +1324,11 @@ mod tests {
     #[cfg(unix)]
     fn finish_cancelled_child_completes_when_child_already_exited_without_cancel() {
         use std::process::Command;
-        use std::time::Duration;
 
         let control = OperationControl::new();
         let child = Command::new("true").spawn().expect("spawn true");
         control.register_child(child);
-        thread::sleep(Duration::from_millis(100));
+        wait_until_child_exited(&control);
         let outcome =
             finish_cancelled_child(&control, "stdout".into(), "stderr".into()).expect("completed");
         assert!(matches!(
@@ -1388,12 +1400,11 @@ mod tests {
     #[cfg(unix)]
     fn completed_or_cancelled_after_pipes_completes_when_child_exited() {
         use std::process::Command;
-        use std::time::Duration;
 
         let control = OperationControl::new();
         let child = Command::new("true").spawn().unwrap();
         control.register_child_for_test(child);
-        thread::sleep(Duration::from_millis(50));
+        wait_until_child_exited(&control);
         let outcome =
             completed_or_cancelled_after_pipes(&control, "out".into(), "err".into()).unwrap();
         assert!(matches!(
@@ -1457,12 +1468,11 @@ mod tests {
     #[cfg(unix)]
     fn finish_cancelled_child_returns_completed_when_child_exited() {
         use std::process::Command;
-        use std::time::Duration;
 
         let control = OperationControl::new();
         let child = Command::new("true").spawn().expect("spawn true");
         control.register_child(child);
-        thread::sleep(Duration::from_millis(50));
+        wait_until_child_exited(&control);
         let outcome = finish_cancelled_child(&control, "out".into(), "err".into()).unwrap();
         assert!(matches!(
             outcome,
