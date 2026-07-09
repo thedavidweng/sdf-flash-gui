@@ -25,6 +25,7 @@ pub enum WorkerMsg {
         mt1939: bool,
         encrypted_firmware: bool,
         libredrive: bool,
+        sdf_version: Option<String>,
         error: Option<String>,
     },
     OperationComplete {
@@ -67,6 +68,7 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
             mt1939,
             encrypted_firmware,
             libredrive,
+            sdf_version,
             error,
         } => {
             let success = error.is_none();
@@ -75,6 +77,7 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
                 state.drive.drive_mt1939 = mt1939;
                 state.drive.drive_encrypted_firmware = encrypted_firmware;
                 state.drive.drive_libredrive = libredrive;
+                state.drive.drive_sdf_version = sdf_version;
                 if success {
                     state.flash.encrypted_write = encrypted_firmware;
                 }
@@ -237,6 +240,7 @@ pub fn spawn_probe(
             mt1939: false,
             encrypted_firmware: false,
             libredrive: false,
+            sdf_version: None,
             error: Some(t(L10nKey::ReasonNoBackend, state.chrome.resolved_lang).into()),
         });
         return;
@@ -281,6 +285,7 @@ pub fn spawn_probe(
                     mt1939: probe.safety.mt1939,
                     encrypted_firmware: probe.safety.encrypted_firmware,
                     libredrive: probe.safety.libredrive,
+                    sdf_version: probe.safety.sdf_version.clone(),
                     error: None,
                 });
             }
@@ -291,6 +296,7 @@ pub fn spawn_probe(
                     mt1939: false,
                     encrypted_firmware: false,
                     libredrive: false,
+                    sdf_version: None,
                     error: Some(t(L10nKey::StatusProbeFailed, lang).into()),
                 });
             }
@@ -306,6 +312,7 @@ pub fn spawn_probe(
                     mt1939: false,
                     encrypted_firmware: false,
                     libredrive: false,
+                    sdf_version: None,
                     error: Some(e),
                 });
             }
@@ -547,6 +554,7 @@ mod tests {
             mt1939: false,
             encrypted_firmware: true,
             libredrive: false,
+            sdf_version: None,
             error: None,
         });
         drop(tx);
@@ -562,6 +570,28 @@ mod tests {
     }
 
     #[test]
+    fn drain_probe_complete_forwards_sdf_version() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.runtime.probing = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(WorkerMsg::ProbeComplete {
+            drive_idx: 0,
+            mt1959: true,
+            mt1939: false,
+            encrypted_firmware: false,
+            libredrive: true,
+            sdf_version: Some("0x00A6".into()),
+            error: None,
+        });
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert_eq!(state.drive.drive_sdf_version.as_deref(), Some("0x00A6"));
+        assert!(state.drive.drive_libredrive);
+    }
+
+    #[test]
     fn drain_probe_complete_error() {
         let mut state = AppState::new_no_backend();
         state.drive.drives.push(test_drive());
@@ -574,6 +604,7 @@ mod tests {
             mt1939: false,
             encrypted_firmware: false,
             libredrive: false,
+            sdf_version: None,
             error: Some("probe failed".into()),
         });
         drop(tx);
@@ -597,6 +628,7 @@ mod tests {
             mt1939: false,
             encrypted_firmware: true,
             libredrive: false,
+            sdf_version: None,
             error: None,
         });
         drop(tx);
