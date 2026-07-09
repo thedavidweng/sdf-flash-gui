@@ -6,3 +6,4 @@
 .env
 /test.png
 /align_svg.py
+lcov.info
