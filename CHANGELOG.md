@@ -8,10 +8,15 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 
 - Auto-detect respects user-selected backend
 
+### <!-- 3 -->📚 Documentation
+
+- Fix sdftool is not standalone, both backends bundled with MakeMKV
+
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md for v0.3.0
+- **changelog:** Sync CHANGELOG.md
 ## [0.3.0] - 2026-07-09
 
 ### <!-- 0 -->🚀 Features
