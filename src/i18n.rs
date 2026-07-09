@@ -372,14 +372,7 @@ pub enum L10nKey {
     BtnFlashFailureDismiss,
     LabelNotAvailable,
     BannerNoBackend,
-    BtnBannerOpenSettings,
-    TitleFirstRun,
-    LabelFirstRunMsg,
-    LabelFirstRunStep1,
-    LabelFirstRunStep2,
-    LabelFirstRunStep3,
-    BtnFirstRunOpenSettings,
-    BtnFirstRunDismiss,
+    LinkGetMakeMkv,
     OptionDryRunOnly,
     LogDryRunCommand,
     HintFlashNoCancel,
@@ -664,17 +657,8 @@ fn t_en(key: L10nKey) -> &'static str {
         }
         L10nKey::BtnFlashFailureDismiss => "I Understand",
         L10nKey::LabelNotAvailable => "N/A",
-        L10nKey::BannerNoBackend => {
-            "No backend tool configured. Install MakeMKV or sdftool, then open Settings."
-        }
-        L10nKey::BtnBannerOpenSettings => "Open Settings",
-        L10nKey::TitleFirstRun => "Welcome to SDF Flash GUI",
-        L10nKey::LabelFirstRunMsg => "Before you can dump or flash firmware, install a backend tool.",
-        L10nKey::LabelFirstRunStep1 => "1. Install MakeMKV (includes makemkvcon) or standalone sdftool.",
-        L10nKey::LabelFirstRunStep2 => "2. Open Settings and auto-detect or browse to the backend executable.",
-        L10nKey::LabelFirstRunStep3 => "3. Connect an MT1959 optical drive and click Refresh.",
-        L10nKey::BtnFirstRunOpenSettings => "Open Settings",
-        L10nKey::BtnFirstRunDismiss => "Got It",
+        L10nKey::BannerNoBackend => "No backend tool configured.",
+        L10nKey::LinkGetMakeMkv => "Get MakeMKV",
         L10nKey::OptionDryRunOnly => "Dry-run only (validate and show command, do not write)",
         L10nKey::LogDryRunCommand => "Dry-run — command that would run:\n{command}",
         L10nKey::HintFlashNoCancel => "Flash in progress — do not power off. Stop may brick the drive.",
@@ -4495,14 +4479,7 @@ mod tests {
         L10nKey::BtnFlashFailureDismiss,
         L10nKey::LabelNotAvailable,
         L10nKey::BannerNoBackend,
-        L10nKey::BtnBannerOpenSettings,
-        L10nKey::TitleFirstRun,
-        L10nKey::LabelFirstRunMsg,
-        L10nKey::LabelFirstRunStep1,
-        L10nKey::LabelFirstRunStep2,
-        L10nKey::LabelFirstRunStep3,
-        L10nKey::BtnFirstRunOpenSettings,
-        L10nKey::BtnFirstRunDismiss,
+        L10nKey::LinkGetMakeMkv,
         L10nKey::OptionDryRunOnly,
         L10nKey::LogDryRunCommand,
         L10nKey::HintFlashNoCancel,
@@ -4533,7 +4510,7 @@ mod tests {
     fn test_translation_keys() {
         assert_eq!(
             ALL_KEYS.len(),
-            177,
+            170,
             "L10nKey variant count changed — update ALL_KEYS if intentional"
         );
         for key in ALL_KEYS {

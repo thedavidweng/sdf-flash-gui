@@ -1,3 +1,4 @@
+use crate::branding::MAKEMKV_DOWNLOAD_URL;
 use crate::command;
 use crate::flash::FlashDirection;
 use crate::gui::file_dialog::{FileDialog, NativeDialog};
@@ -25,6 +26,19 @@ pub fn show_main_ui(
     worker_tx: &mpsc::Sender<WorkerMsg>,
     runner: &std::sync::Arc<dyn process::ProcessRunner>,
 ) {
+    let backend_ok = ops::backend_configured(state);
+    let now = ctx.input(|i| i.time);
+    let settings_nudge = ops::settings_nudge_active(state.chrome.settings_nudge_until, now);
+    let settings_highlight = ops::settings_nudge_highlight(state.chrome.settings_nudge_until, now);
+    if settings_nudge {
+        ctx.request_repaint();
+    } else if state.chrome.settings_nudge_until.is_some() {
+        state.chrome.settings_nudge_until = None;
+    }
+
+    let mut settings_btn_rect = egui::Rect::NOTHING;
+    let mut get_makemkv_link_rect = egui::Rect::NOTHING;
+
     ui.horizontal(|ui| {
         let refresh_text = t(L10nKey::TooltipRefresh, state.chrome.resolved_lang);
         let refresh_hint = if cfg!(target_os = "macos") {
@@ -33,7 +47,7 @@ pub fn show_main_ui(
             format!("{refresh_text} (Ctrl+R)")
         };
         let refresh_resp = ui.add_enabled(
-            !state.runtime.busy && !state.runtime.probing,
+            backend_ok && !state.runtime.busy && !state.runtime.probing,
             super::super::toolbar_icon_button(ui, icon::ARROW_CLOCKWISE),
         );
         refresh_resp.widget_info(|| {
@@ -52,7 +66,25 @@ pub fn show_main_ui(
         } else {
             format!("{settings_text} (Ctrl+,)")
         };
-        let settings_resp = ui.add(super::super::toolbar_icon_button(ui, icon::GEAR));
+        // Soft white fill only — no stroke / size change (layout-stable attention pulse).
+        let mut settings_btn = super::super::toolbar_icon_button(ui, icon::GEAR);
+        if settings_highlight > 0.0 {
+            // Cap alpha so the gear stays readable; strength already eases in/out.
+            let alpha = (settings_highlight * 150.0).clamp(0.0, 150.0) as u8;
+            settings_btn = settings_btn.fill(egui::Color32::from_white_alpha(alpha));
+        }
+        let settings_resp = ui.add(settings_btn);
+        settings_btn_rect = settings_resp.rect;
+        // Soft outer glow: fixed-width stroke drawn *outside* the widget (no layout shift).
+        if settings_highlight > 0.05 {
+            let glow_alpha = (settings_highlight * 200.0).clamp(0.0, 200.0) as u8;
+            ui.painter().rect_stroke(
+                settings_resp.rect,
+                ui.visuals().widgets.inactive.corner_radius,
+                egui::Stroke::new(1.5, egui::Color32::from_white_alpha(glow_alpha)),
+                egui::StrokeKind::Outside,
+            );
+        }
         settings_resp.widget_info(|| {
             egui::WidgetInfo::labeled(
                 egui::WidgetType::Button,
@@ -62,6 +94,7 @@ pub fn show_main_ui(
         });
         if settings_resp.on_hover_text(settings_hint).clicked() {
             state.chrome.show_settings = true;
+            state.chrome.settings_nudge_until = None;
         }
         let about_text = t(L10nKey::TooltipAbout, state.chrome.resolved_lang);
         let about_hint = if cfg!(target_os = "macos") {
@@ -143,7 +176,7 @@ pub fn show_main_ui(
         });
     });
 
-    if !ops::backend_configured(state) {
+    if !backend_ok {
         ui.add_space(GAP_SMALL);
         ui.horizontal(|ui| {
             ui.colored_label(
@@ -155,19 +188,16 @@ pub fn show_main_ui(
                     egui::TextStyle::Body,
                 ),
             );
-            if ui
-                .small_button(t(
-                    L10nKey::BtnBannerOpenSettings,
-                    state.chrome.resolved_lang,
-                ))
-                .clicked()
-            {
-                state.chrome.show_settings = true;
-            }
+            let link_resp = ui.hyperlink_to(
+                t(L10nKey::LinkGetMakeMkv, state.chrome.resolved_lang),
+                MAKEMKV_DOWNLOAD_URL,
+            );
+            get_makemkv_link_rect = link_resp.rect;
         });
     }
 
-    let controls_enabled = !state.runtime.busy && !state.runtime.probing;
+    // Operational controls require a configured backend and idle runtime.
+    let controls_enabled = backend_ok && !state.runtime.busy && !state.runtime.probing;
 
     ui.add_enabled_ui(controls_enabled, |ui| {
         section_heading(
@@ -452,6 +482,17 @@ pub fn show_main_ui(
             .small()
             .weak(),
     );
+
+    // Low-intrusion first-run: no modal. Clicks outside Settings / Get MakeMKV pulse the gear.
+    if !backend_ok && ctx.input(|i| i.pointer.primary_clicked()) {
+        if let Some(pos) = ctx.pointer_interact_pos() {
+            let on_settings = settings_btn_rect.contains(pos);
+            let on_get_makemkv = get_makemkv_link_rect.contains(pos);
+            if ops::click_should_nudge_settings(backend_ok, on_settings || on_get_makemkv) {
+                state.chrome.settings_nudge_until = Some(now + ops::SETTINGS_NUDGE_SECONDS);
+            }
+        }
+    }
 }
 
 fn status_indicator(ui: &mut egui::Ui, probing: bool, probed: bool, ok: bool) {

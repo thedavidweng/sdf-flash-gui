@@ -21,8 +21,8 @@ use crate::process_runner::NativeRunner;
 use file_dialog::NativeDialog;
 use state::{AppState, StopDialog};
 use views::{
-    handle_global_shortcuts, show_about_window, show_first_run_dialog, show_flash_failure_dialog,
-    show_force_kill_dialog, show_main_ui, show_quit_confirmation_dialog, show_settings_window,
+    handle_global_shortcuts, show_about_window, show_flash_failure_dialog, show_force_kill_dialog,
+    show_main_ui, show_quit_confirmation_dialog, show_settings_window,
     show_stop_confirmation_dialog,
 };
 use workers::{spawn_probe, WorkerMsg};
@@ -175,7 +175,8 @@ impl eframe::App for App {
 
         handle_global_shortcuts(ctx, &mut self.state, &self.worker_tx, &self.runner);
 
-        if !self.state.runtime.busy
+        if ops::backend_configured(&self.state)
+            && !self.state.runtime.busy
             && !self.state.runtime.probing
             && self.state.drive.selected_drive != self.state.drive.last_probed_drive
         {
@@ -199,7 +200,6 @@ impl eframe::App for App {
 
         let ctx = ui.ctx().clone();
         let modal_open = self.state.chrome.show_quit_confirmation
-            || self.state.chrome.show_first_run_setup
             || self.state.chrome.show_flash_failure_dialog
             || self.state.runtime.stop_dialog != StopDialog::None;
 
@@ -221,6 +221,7 @@ impl eframe::App for App {
             });
 
         if self.state.chrome.show_settings {
+            self.state.chrome.settings_nudge_until = None;
             show_settings_window(
                 &ctx,
                 &mut self.state,
@@ -236,9 +237,6 @@ impl eframe::App for App {
 
         if self.state.chrome.show_quit_confirmation {
             show_quit_confirmation_dialog(&ctx, &mut self.state);
-        }
-        if self.state.chrome.show_first_run_setup {
-            show_first_run_dialog(&ctx, &mut self.state);
         }
         if self.state.chrome.show_flash_failure_dialog {
             show_flash_failure_dialog(&ctx, &mut self.state);
@@ -302,11 +300,18 @@ mod tests {
             clean_title
         );
 
-        let mkv_html = format!("<b>MakeMKV</b> {}", mkv_text);
+        let home = crate::branding::MAKEMKV_HOME_URL;
         assert!(
-            html.contains(&mkv_html),
-            "Backend ack mismatch in HTML. Expected to find: {}",
-            mkv_html
+            html.contains(&format!("href=\"{home}\"")),
+            "Credits.html missing MakeMKV home link ({home})"
+        );
+        assert!(
+            html.contains(mkv_text),
+            "Credits.html missing backend ack text: {mkv_text}"
+        );
+        assert!(
+            html.contains("<b>MakeMKV</b>"),
+            "Credits.html missing MakeMKV brand markup"
         );
 
         let marty_html = format!("<b>MartyMcNuts</b> {}", creator_text);
