@@ -469,6 +469,15 @@ pub fn refresh_drives(state: &mut AppState) {
     finalize_drive_selection(state);
 }
 
+/// Display label for a firmware candidate path (basename, or full path as fallback).
+pub(crate) fn firmware_picker_label(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| path.to_string())
+}
+
 pub fn load_firmware(state: &mut AppState, path: &str) {
     let lang = state.chrome.resolved_lang;
     state.flash.firmware_path = path.to_string();
@@ -515,14 +524,7 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
         .flash
         .firmware_candidates
         .iter()
-        .map(|path| {
-            let name = std::path::Path::new(path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| path.clone());
-            (name, path.clone())
-        })
+        .map(|path| (firmware_picker_label(path), path.clone()))
         .collect();
 
     if let Some(data) = &state.flash.firmware_data {
@@ -1809,8 +1811,27 @@ mod tests {
         state.operation_mode = OperationMode::Write;
         state.flash.firmware_data = Some(vec![0u8; 100]);
         state.flash.firmware_path = "fw.bin".into();
+        // No manifest → confirmation required (CLI parity path).
         let reason = start_disabled_reason(&state);
-        // Should return ReasonRunValidation — not empty, but not an error either
+        assert!(!reason.is_empty());
+        // With manifest → ask user to run validation.
+        state.flash.manifest = Some(crate::manifest::FirmwareManifest {
+            schema_version: 1,
+            vendor: "HL-DT-ST".into(),
+            model: "BU40N".into(),
+            revision_match: "*".into(),
+            capabilities: vec![],
+            category: None,
+            firmware_images: vec![crate::manifest::FirmwareImage {
+                image_id: "main".into(),
+                filename: "fw.bin".into(),
+                target_version: "1.04".into(),
+                size: 100,
+                sha256: "x".into(),
+                signature_present: true,
+            }],
+        });
+        let reason = start_disabled_reason(&state);
         assert!(!reason.is_empty());
         let _ = std::fs::remove_dir_all(temp_dir);
     }
@@ -1947,10 +1968,32 @@ mod tests {
             crate::command::required_flash_confirmation(&test_drive().device);
         validate_flash(&mut state);
         assert!(state.flash.flash_report.is_none());
+        // Confirmed no-manifest prepare logs warnings and Ready.
         assert!(
-            state.runtime.log_text.contains("WARNING")
-                || state.runtime.log_text.contains("Ready")
-                || state.runtime.log_text.to_lowercase().contains("manifest"),
+            state.runtime.log_text.contains("WARNING") && state.runtime.log_text.contains("Ready"),
+            "log: {}",
+            state.runtime.log_text
+        );
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn validate_flash_no_manifest_unconfirmed_logs_hint() {
+        let (mut state, temp_dir) = state_with_valid_paths("nomfhint");
+        state.drive.drives.push(test_drive());
+        state.drive.selected_drive = Some(0);
+        state.drive.drive_mt1959 = true;
+        state.flash.manifest = None;
+        state.flash.firmware_path = "fw.bin".into();
+        state.flash.firmware_data = Some(vec![0u8; 16]);
+        state.flash.confirmation.clear();
+        validate_flash(&mut state);
+        assert!(state.flash.flash_report.is_none());
+        assert!(
+            state
+                .runtime
+                .log_text
+                .contains("load a manifest before validating"),
             "log: {}",
             state.runtime.log_text
         );
@@ -1980,6 +2023,29 @@ mod tests {
             state.runtime.log_text
         );
         let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn firmware_picker_label_basename_and_fallback() {
+        assert_eq!(firmware_picker_label("/tmp/fw.bin"), "fw.bin");
+        assert_eq!(firmware_picker_label(""), "");
+        assert_eq!(firmware_picker_label(".."), "..");
+    }
+
+    #[test]
+    fn confirm_graceful_stop_without_active_operation() {
+        let mut state = AppState::new_no_backend();
+        state.runtime.stop_dialog = StopDialog::ConfirmStop;
+        confirm_graceful_stop(&mut state);
+        assert_eq!(state.runtime.stop_dialog, StopDialog::None);
+    }
+
+    #[test]
+    fn decline_force_kill_without_active_operation() {
+        let mut state = AppState::new_no_backend();
+        state.runtime.waiting_for_backend_stop = false;
+        decline_force_kill(&mut state);
+        assert!(!state.runtime.waiting_for_backend_stop);
     }
 
     #[test]
@@ -2062,10 +2128,11 @@ mod tests {
         state.flash.selected_image_id = Some("nonexistent".into());
         validate_flash(&mut state);
         assert!(state.flash.flash_report.is_none());
+        assert!(!state.runtime.log_text.is_empty());
         assert!(
-            state.runtime.log_text.contains("validation failed")
-                || state.runtime.log_text.contains("not found")
-                || state.runtime.log_text.contains("image"),
+            state.runtime.log_text.to_lowercase().contains("image")
+                || state.runtime.log_text.to_lowercase().contains("validation")
+                || state.runtime.log_text.to_lowercase().contains("not found"),
             "log: {}",
             state.runtime.log_text
         );

@@ -963,6 +963,41 @@ mod tests {
     }
 
     #[test]
+    fn spawn_probe_success_empty_output() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(test_drive());
+        state.config.tool_path = "/usr/bin/sdftool".into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        // Empty stdout/stderr → probe.output empty → skip intermediate Log of output.
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
+        spawn_probe(&tx, &mut state, 0, &runner);
+        let messages = wait_for_probe_complete(&rx);
+        drop(tx);
+        let probe = messages.last().expect("probe complete");
+        match probe {
+            WorkerMsg::ProbeComplete { error, .. } => assert!(error.is_none()),
+            _ => panic!("expected ProbeComplete"),
+        }
+    }
+
+    #[test]
+    fn spawn_list_drives_success_empty_output() {
+        let mut state = AppState::new_no_backend();
+        state.config.tool_path = "/usr/bin/sdftool".into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
+        spawn_list_drives(&tx, &mut state, &runner);
+        let messages = wait_for_drives_listed(&rx);
+        drop(tx);
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, WorkerMsg::DrivesListed(d) if d.is_empty())),
+            "msgs: {messages:?}"
+        );
+    }
+
+    #[test]
     fn spawn_probe_success() {
         let mut state = AppState::new_no_backend();
         state.drive.drives.push(test_drive());
