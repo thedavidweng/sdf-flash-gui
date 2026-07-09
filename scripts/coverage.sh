@@ -5,9 +5,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 IGNORE_FILE="${ROOT}/scripts/coverage-ignore.regex"
-# Strip comments and blank lines; join into one regex.
+# One pattern per non-comment line → join with `|` (never strip newlines only;
+# that would glue `foo` + `bar` into `foobar` if the file grows to multi-line).
 IGNORE_REGEX="$(
-  grep -v '^\s*#' "$IGNORE_FILE" | grep -v '^\s*$' | tr -d '\n'
+  grep -v '^\s*#' "$IGNORE_FILE" | grep -v '^\s*$' | paste -sd '|' -
 )"
 
 usage() {

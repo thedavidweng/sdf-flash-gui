@@ -303,9 +303,6 @@ pub fn validate_flash(state: &mut AppState) {
         lang,
     }) {
         Ok(prepared) => {
-            for w in &prepared.no_manifest_warnings {
-                state.log(&format!("WARNING: {w}"));
-            }
             if let Some(report) = prepared.report {
                 for w in &report.warnings {
                     state.log(&format!("WARNING: {w}"));
@@ -313,12 +310,27 @@ pub fn validate_flash(state: &mut AppState) {
                 state.log(&report.summary);
                 state.flash.flash_report = Some(report);
             } else {
+                // No-manifest path (CLI parity): confirmation is the gate, not
+                // "must load a manifest". Only emit advisory warnings once the
+                // typed confirmation would allow execute — otherwise the log
+                // mixed "Ready"/no-manifest warnings with a contradictory
+                // "load a manifest" error.
                 state.flash.flash_report = None;
                 if prepared.would_execute {
+                    for w in &prepared.no_manifest_warnings {
+                        state.log(&format!("WARNING: {w}"));
+                    }
                     state.log(t(L10nKey::StatusReady, lang));
-                }
-                if !prepared.would_execute && state.flash.manifest.is_none() {
-                    state.log(t(L10nKey::LogErrLoadManifestBeforeValidate, lang));
+                } else if state.flash.manifest.is_none() {
+                    let expected = command::required_flash_confirmation(&drive.device);
+                    state.log(&log_error(
+                        lang,
+                        &t_with_args(
+                            L10nKey::ErrConfirmationMismatch,
+                            lang,
+                            &[("expected", &expected)],
+                        ),
+                    ));
                 }
             }
         }
@@ -1425,9 +1437,19 @@ mod tests {
         state.flash.firmware_data = Some(vec![0u8; 16]);
         validate_flash(&mut state);
         assert!(state.flash.flash_report.is_none());
+        // Unconfirmed no-manifest: confirmation gate, not "must load manifest".
+        let expected = crate::command::required_flash_confirmation(&test_drive().device);
         assert!(
-            state.runtime.log_text.to_lowercase().contains("manifest"),
+            state.runtime.log_text.contains("ERROR") && state.runtime.log_text.contains(&expected),
             "log: {}",
+            state.runtime.log_text
+        );
+        assert!(
+            !state
+                .runtime
+                .log_text
+                .contains("load a manifest before validating"),
+            "must not contradict no-manifest CLI parity; log: {}",
             state.runtime.log_text
         );
     }
@@ -1993,11 +2015,15 @@ mod tests {
         state.flash.confirmation.clear();
         validate_flash(&mut state);
         assert!(state.flash.flash_report.is_none());
+        let expected = crate::command::required_flash_confirmation(&test_drive().device);
         assert!(
-            state
-                .runtime
-                .log_text
-                .contains("load a manifest before validating"),
+            state.runtime.log_text.contains("ERROR") && state.runtime.log_text.contains(&expected),
+            "log: {}",
+            state.runtime.log_text
+        );
+        // No advisory spam until confirmation would allow execute.
+        assert!(
+            !state.runtime.log_text.contains("No manifest provided"),
             "log: {}",
             state.runtime.log_text
         );
