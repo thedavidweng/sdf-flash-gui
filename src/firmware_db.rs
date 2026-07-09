@@ -197,17 +197,17 @@ const KNOWN_MODELS: &[&str] = &[
     "BP60NB10",
     "BU20N",
     "BU30N",
-    "BRUHD-PU3",
 ];
 
 /// Extract the PCB type from the boot string at offset 12288.
 /// The boot string looks like "MT1959 Boot JB8 " or "MT1959 Boot BU5 ".
 fn extract_pcb_type(data: &[u8]) -> Option<String> {
     const BOOT_OFFSET: usize = 12288;
-    if data.len() < BOOT_OFFSET + 16 {
+    const BOOT_LEN: usize = 20; // "MT1959 Boot XXXX" = 20 bytes max
+    if data.len() < BOOT_OFFSET + BOOT_LEN {
         return None;
     }
-    let slice = &data[BOOT_OFFSET..BOOT_OFFSET + 20];
+    let slice = &data[BOOT_OFFSET..BOOT_OFFSET + BOOT_LEN];
     let text = std::str::from_utf8(slice).ok()?;
     if !text.starts_with("MT1959 Boot ") {
         return None;
@@ -232,12 +232,16 @@ fn pcb_to_form_factor(pcb: &str) -> DriveFormFactor {
 }
 
 /// Search for a known drive model name in the firmware binary.
+/// Uses byte-level matching so it works on non-UTF-8 binary data.
 fn extract_model(data: &[u8]) -> Option<String> {
     // Search in the first 256KB where the model string is typically embedded.
     let search_region = &data[..data.len().min(256 * 1024)];
-    let text = std::str::from_utf8(search_region).unwrap_or("");
     for model in KNOWN_MODELS {
-        if text.contains(model) {
+        let model_bytes = model.as_bytes();
+        if search_region
+            .windows(model_bytes.len())
+            .any(|w| w == model_bytes)
+        {
             return Some(model.to_string());
         }
     }
@@ -413,6 +417,23 @@ mod tests {
     }
 
     #[test]
+    fn extract_pcb_type_boundary_length_12307() {
+        // 12307 = BOOT_OFFSET + 19 — one byte short of the 20-byte slice.
+        // Must not panic (regression test for off-by-one in length check).
+        let data = vec![0u8; 12307];
+        assert!(extract_pcb_type(&data).is_none());
+    }
+
+    #[test]
+    fn extract_pcb_type_boundary_length_12308() {
+        // 12308 = BOOT_OFFSET + 20 — exactly enough for the slice.
+        let mut data = vec![0u8; 12308];
+        let boot = b"MT1959 Boot JB8 ";
+        data[12288..12288 + boot.len()].copy_from_slice(boot);
+        assert_eq!(extract_pcb_type(&data).as_deref(), Some("JB8"));
+    }
+
+    #[test]
     fn extract_pcb_type_no_boot_string() {
         let data = vec![0u8; 13000];
         assert!(extract_pcb_type(&data).is_none());
@@ -459,6 +480,31 @@ mod tests {
     fn extract_model_not_found() {
         let data = vec![0u8; 40000];
         assert!(extract_model(&data).is_none());
+    }
+
+    #[test]
+    fn extract_model_works_on_non_utf8_binary() {
+        // Real firmware binaries contain non-UTF-8 bytes (0xFF, etc.).
+        // The byte-level search must still find the model string.
+        let mut data = vec![0xFFu8; 40000]; // 0xFF is invalid UTF-8
+        let model = b"BW-16D1HT";
+        data[37600..37600 + model.len()].copy_from_slice(model);
+        let found = extract_model(&data);
+        assert_eq!(found.as_deref(), Some("BW-16D1HT"));
+    }
+
+    #[test]
+    fn extract_model_works_with_mixed_binary_data() {
+        // Firmware with a mix of valid and invalid UTF-8 bytes before the model.
+        let mut data = vec![0u8; 40000];
+        // Fill early region with non-UTF-8 bytes
+        for i in 0..30000 {
+            data[i] = 0x80 + (i % 100) as u8;
+        }
+        let model = b"BU40N";
+        data[37900..37900 + model.len()].copy_from_slice(model);
+        let found = extract_model(&data);
+        assert_eq!(found.as_deref(), Some("BU40N"));
     }
 
     #[test]
