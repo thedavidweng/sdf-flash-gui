@@ -7,10 +7,14 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 ### <!-- 0 -->🚀 Features
 
 - Detect LibreDrive support from sdftool --info output
+- Show SDF.bin version in Drive Properties panel
 
 ### <!-- 1 -->🐛 Bug Fixes
 
 - Auto-detect respects user-selected backend
+- Forward sdf_version through ProbeComplete to GUI state
+- Use explicit f32 suffix for Stroke width literal
+- Sync mock tool file before exec to avoid ETXTBSY on Linux
 
 ### <!-- 3 -->📚 Documentation
 
@@ -20,6 +24,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md for v0.3.0
+- **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 ## [0.3.0] - 2026-07-09
