@@ -1875,7 +1875,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn can_start_write_rejects_empty_firmware_path() {
         let (mut state, temp_dir) = state_with_valid_paths("emptyfwpath");
         state.drive.drives.push(test_drive());
@@ -1985,6 +1984,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
+    #[test]
     fn can_start_write_without_manifest_with_confirmation() {
         let (mut state, temp_dir) = state_with_valid_paths("canwritenomf");
         state.drive.drives.push(test_drive());

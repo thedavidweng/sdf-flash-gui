@@ -866,8 +866,7 @@ mod tests {
             Language::English,
         )
         .expect("validate");
-        let mut report = None;
-        report = Some(report_val.clone());
+        let report = Some(report_val.clone());
         assert_eq!(
             report.as_ref().map(|r| r.would_execute),
             Some(report_val.would_execute)
