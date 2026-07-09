@@ -1,8 +1,6 @@
 use crate::command::Backend;
 use crate::drive::{self, Drive};
-use crate::flash;
 use crate::i18n::{self, t, L10nKey, Language};
-use crate::manifest;
 use crate::process::OperationControl;
 
 use super::OperationMode;
@@ -54,7 +52,7 @@ pub struct DriveState {
     pub drive_mt1959: bool,
     pub drive_encrypted_firmware: bool,
     pub drive_probed: bool,
-    pub probe_identity: Option<manifest::DriveMatch>,
+    pub probe_identity: Option<crate::drive::DriveIdentity>,
 }
 
 #[derive(Debug)]
@@ -64,13 +62,9 @@ pub struct FlashWorkflow {
     pub firmware_path: String,
     pub firmware_candidates: Vec<String>,
     pub firmware_picker_items: Vec<(String, String)>,
-    pub manifest_path: String,
-    pub manifest: Option<manifest::FirmwareManifest>,
     pub firmware_data: Option<Vec<u8>>,
-    pub selected_image_id: Option<String>,
     pub confirmation: String,
     pub dry_run_only: bool,
-    pub flash_report: Option<flash::FlashReport>,
     pub recovery_token: String,
     pub wrong_firmware_path: String,
     pub pending_recover_browse: bool,
@@ -138,13 +132,9 @@ impl AppState {
                 firmware_path: String::new(),
                 firmware_candidates: Vec::new(),
                 firmware_picker_items: Vec::new(),
-                manifest_path: String::new(),
-                manifest: None,
                 firmware_data: None,
-                selected_image_id: None,
                 confirmation: String::new(),
                 dry_run_only: false,
-                flash_report: None,
                 recovery_token: String::new(),
                 wrong_firmware_path: String::new(),
                 pending_recover_browse: false,
@@ -202,7 +192,8 @@ impl AppState {
             .and_then(|i| self.drive.drives.get(i))
     }
 
-    pub fn drive_match(&self) -> Option<manifest::DriveMatch> {
+    #[allow(dead_code)]
+    pub fn drive_match(&self) -> Option<crate::drive::DriveIdentity> {
         let drive = self.selected_drive()?;
         Some(drive::drive_match_for_validation(
             drive,
@@ -327,7 +318,7 @@ mod tests {
             revision: "1.03".into(),
         });
         state.drive.selected_drive = Some(0);
-        state.drive.probe_identity = Some(manifest::DriveMatch {
+        state.drive.probe_identity = Some(crate::drive::DriveIdentity {
             vendor: "HL-DT-ST".into(),
             model: "BD-RE BU40N".into(),
             revision: "1.03".into(),

@@ -1,5 +1,4 @@
 use crate::command;
-use crate::flash;
 use crate::gui::file_dialog::{FileDialog, NativeDialog};
 use crate::gui::ops;
 use crate::gui::state::{AppState, ThemeChoice};
@@ -540,57 +539,6 @@ fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState, dialog: &
     match state.operation_mode {
         OperationMode::Read => {}
         OperationMode::Write => {
-            ui.add_space(GAP_SMALL);
-            ui.label(icon_rich(
-                ui,
-                icon::FILE,
-                t(L10nKey::SectionManifest, state.chrome.resolved_lang),
-                egui::TextStyle::Body,
-            ));
-            if file_picker(
-                ui,
-                &mut state.flash.manifest_path,
-                "JSON",
-                &["json"],
-                state.chrome.resolved_lang,
-                dialog,
-            ) && !state.flash.manifest_path.is_empty()
-            {
-                let path = state.flash.manifest_path.clone();
-                ops::load_manifest(state, &path);
-            }
-
-            if let Some(manifest) = &state.flash.manifest {
-                if manifest.firmware_images.len() > 1 {
-                    ui.add_space(GAP_TINY);
-                    ui.label(t(L10nKey::LabelImageId, state.chrome.resolved_lang));
-                    let select_img_text =
-                        format!("{}…", t(L10nKey::LabelImageId, state.chrome.resolved_lang));
-                    egui::ComboBox::from_id_salt("image_selector")
-                        .selected_text(
-                            state
-                                .flash
-                                .selected_image_id
-                                .as_deref()
-                                .unwrap_or(&select_img_text),
-                        )
-                        .width(ui.available_width())
-                        .show_ui(ui, |ui| {
-                            for img in &manifest.firmware_images {
-                                let label = format!(
-                                    "{} · {} ({})",
-                                    img.image_id, img.target_version, img.filename
-                                );
-                                ui.selectable_value(
-                                    &mut state.flash.selected_image_id,
-                                    Some(img.image_id.clone()),
-                                    label,
-                                );
-                            }
-                        });
-                }
-            }
-
             if let Some(drive) = state.selected_drive() {
                 let required = command::required_flash_confirmation(&drive.device);
                 ui.add_space(GAP_SMALL);
@@ -604,116 +552,6 @@ fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState, dialog: &
                     egui::TextEdit::singleline(&mut state.flash.confirmation)
                         .desired_width(ui.available_width()),
                 );
-            }
-
-            ui.add_space(GAP_SMALL);
-            let can_validate =
-                state.flash.firmware_data.is_some() && state.flash.manifest.is_some();
-            if ui
-                .add_enabled(
-                    can_validate,
-                    icon_button(
-                        ui,
-                        icon::SHIELD_CHECK,
-                        t(L10nKey::BtnValidateFlashPlan, state.chrome.resolved_lang),
-                    ),
-                )
-                .clicked()
-            {
-                ops::validate_flash(state);
-            }
-
-            if let Some(report) = &state.flash.flash_report {
-                ui.separator();
-                let color = if report.would_execute {
-                    ui.visuals().hyperlink_color
-                } else {
-                    ui.visuals().error_fg_color
-                };
-                ui.colored_label(color, &report.summary);
-                let dir_text = match report.direction {
-                    flash::FlashDirection::Upgrade => {
-                        t(L10nKey::DirUpgrade, state.chrome.resolved_lang)
-                    }
-                    flash::FlashDirection::Downgrade => {
-                        t(L10nKey::DirDowngrade, state.chrome.resolved_lang)
-                    }
-                    flash::FlashDirection::Same => {
-                        t(L10nKey::DirSameVersion, state.chrome.resolved_lang)
-                    }
-                };
-                ui.label(
-                    egui::RichText::new(dir_text)
-                        .small()
-                        .color(ui.visuals().weak_text_color()),
-                );
-                ui.columns(2, |cols| {
-                    let lang = state.chrome.resolved_lang;
-                    let checks = [
-                        (t(L10nKey::CheckModelMatch, lang), report.checks.model_match),
-                        (
-                            t(L10nKey::CheckRevisionCheck, lang),
-                            report.checks.revision_check,
-                        ),
-                        (
-                            t(L10nKey::CheckImageChecksum, lang),
-                            report.checks.image_checksum,
-                        ),
-                        (
-                            t(L10nKey::CheckSignaturePresent, lang),
-                            report.checks.signature_present,
-                        ),
-                        (
-                            t(L10nKey::CheckUserConfirmed, lang),
-                            report.checks.user_confirmed,
-                        ),
-                    ];
-                    let check_size = button_text_size(&cols[0]);
-                    for (label, pass) in checks {
-                        if pass {
-                            cols[0].colored_label(
-                                cols[0].visuals().hyperlink_color,
-                                egui::RichText::new(icon::CHECK).size(check_size),
-                            );
-                        } else {
-                            cols[0].colored_label(
-                                cols[0].visuals().error_fg_color,
-                                egui::RichText::new(icon::X).size(check_size),
-                            );
-                        }
-                        cols[1].label(label);
-                    }
-                });
-
-                if !report.warnings.is_empty() {
-                    ui.add_space(GAP_SMALL);
-                    let warn_color = egui::Color32::from_rgb(255, 180, 0);
-                    ui.colored_label(
-                        warn_color,
-                        icon_rich(
-                            ui,
-                            icon::WARNING,
-                            &t_with_args(
-                                L10nKey::WarnWarningCount,
-                                state.chrome.resolved_lang,
-                                &[("count", &report.warnings.len().to_string())],
-                            ),
-                            egui::TextStyle::Body,
-                        ),
-                    );
-                    for w in &report.warnings {
-                        ui.colored_label(warn_color, format!("  • {w}"));
-                    }
-                    ui.add_space(GAP_TINY);
-                    ui.label(
-                        egui::RichText::new(t(
-                            L10nKey::WarnReviewAdvice,
-                            state.chrome.resolved_lang,
-                        ))
-                        .small()
-                        .italics(),
-                    );
-                }
             }
         }
         OperationMode::Recover => {
@@ -818,15 +656,6 @@ fn show_confirmation_summary(ui: &mut egui::Ui, state: &AppState, drive: &crate:
         lang,
         &[("mode", &ops::flash_mode_label(state))],
     ));
-    if state.operation_mode == OperationMode::Write {
-        ui.add_space(GAP_TINY);
-        ui.label(
-            egui::RichText::new(t(L10nKey::WarnSignaturePresenceOnly, lang))
-                .small()
-                .italics()
-                .color(ui.visuals().weak_text_color()),
-        );
-    }
 }
 
 /// Renders a TextEdit + Browse button row. Returns `true` if the path changed.

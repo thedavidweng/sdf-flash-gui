@@ -23,7 +23,7 @@ pub enum WorkerMsg {
         drive_idx: usize,
         mt1959: bool,
         encrypted_firmware: bool,
-        identity: Option<crate::manifest::DriveMatch>,
+        identity: Option<crate::drive::DriveIdentity>,
         error: Option<String>,
     },
     OperationComplete {
