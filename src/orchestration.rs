@@ -979,11 +979,13 @@ mod tests {
         ));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("mock_sdftool");
-        std::fs::write(
-            &path,
-            format!("#!/bin/sh\nprintf '%s' '{}'\n", info.replace('\'', "'\\''")),
-        )
-        .unwrap();
+        let script = format!("#!/bin/sh\nprintf '%s' '{}'\n", info.replace('\'', "'\\''"));
+        {
+            let mut file = std::fs::File::create(&path).unwrap();
+            use std::io::Write;
+            file.write_all(script.as_bytes()).unwrap();
+            file.sync_all().unwrap();
+        }
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path
     }
