@@ -2,13 +2,14 @@ coverage:
   status:
     project:
       default:
-        target: auto
-        # Allow a small drop vs near-100% baseline when pure domain code grows.
-        threshold: 1%
+        # Fixed floor (not auto) — near-100% auto baselines flake when domain
+        # code grows even if every changed line is covered (patch is the real gate).
+        target: 99%
+        threshold: 0%
     patch:
       default:
-        # Fixed floor for new/changed lines (not auto-locked to baseline %).
-        target: 95%
+        # New/changed lines must be fully covered.
+        target: 100%
         threshold: 0%
 
   comment:
