@@ -18,8 +18,8 @@ Usage: $(basename "$0") [html|lcov|report|gate]
   html    HTML report under target/llvm-cov/html (default)
   lcov    Write lcov.info (same as CI upload)
   report  Text summary with missing lines
-  gate    Run full suite coverage + enforce Codecov-equivalent gates:
-            - project line coverage >= 99% (codecov.yml)
+  gate    Run full suite coverage + enforce gates (same as codecov.yml floors):
+            - project line coverage >= 99% (absolute; not “no drop vs main”)
             - patch: 100% of changed executable lines under src/ (non-ignored)
 
 Ignore regex (from scripts/coverage-ignore.regex):

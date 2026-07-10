@@ -124,10 +124,17 @@ jobs:
           fi
           python3 scripts/coverage-gate.py --lcov lcov.info --base "$BASE"
 
+      - name: Coverage ignore lists in sync
+        if: matrix.os == 'ubuntu-latest'
+        run: python3 scripts/coverage-ignore-sync-check.py
+
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          # Only the llvm-cov artifact (same file coverage-gate.py just checked).
+          # disable_search avoids accidentally uploading scripts/*.regex as "coverage".
           files: lcov.info
+          disable_search: true
           fail_ci_if_error: false

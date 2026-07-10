@@ -2,13 +2,17 @@ coverage:
   status:
     project:
       default:
-        # Fixed floor (not auto) — near-100% auto baselines flake when domain
-        # code grows even if every changed line is covered (patch is the real gate).
+        # Absolute floor only — same as scripts/coverage-gate.py PROJECT_MIN (99%).
+        # Do NOT use threshold: 0% as a “no drop from base” rule: when previously
+        # ignored code enters the metric (e.g. drive/parse after split), overall %
+        # can fall while still staying above 99%. Local/CI gate ignores base drop.
         target: 99%
-        threshold: 0%
+        # Max allowed drop from base commit (Codecov semantics). 100% = never fail
+        # solely due to decrease vs base; absolute `target` is the real floor.
+        threshold: 100%
     patch:
       default:
-        # New/changed lines must be fully covered.
+        # New/changed lines must be fully covered (same as coverage-gate.py patch).
         target: 100%
         threshold: 0%
 
@@ -19,9 +23,10 @@ coverage:
 
 # Paths excluded from Codecov metrics.
 # Keep in sync with scripts/coverage-ignore.regex (llvm-cov) and Agents.md.
+# CI: `scripts/coverage-ignore-sync-check.py` fails if these diverge.
 #
 # Do NOT ignore domain logic: command, flash, orchestration, process (lifecycle),
-# sdf, manifest, gui/ops, gui/workers, gui/state, gui/validation, i18n.
+# sdf, drive/parse, gui/ops, gui/workers, gui/state, gui/validation, i18n.
 ignore:
   # Binary entry: eframe launch + CLI process::exit
   - "src/main.rs"
@@ -35,9 +40,3 @@ ignore:
   - "src/gui/file_dialog.rs"
   # NativeRunner thin OS process adapter (mocked at ProcessRunner trait)
   - "src/process_runner.rs"
-
-flags:
-  unit:
-    paths:
-      - src/
-    carryforward: true
