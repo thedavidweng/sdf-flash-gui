@@ -31,6 +31,6 @@ mod tests {
     #[test]
     fn app_version_matches_cargo_package_version() {
         assert_eq!(env!("CARGO_PKG_VERSION"), crate::gui::APP_VERSION);
-        assert_eq!(env!("CARGO_PKG_VERSION"), "0.3.0");
+        assert_eq!(env!("CARGO_PKG_VERSION"), "0.4.0");
     }
 }
