@@ -465,6 +465,16 @@ mod tests {
             detect_system_language_from_locale(Some("xx-pt")),
             Language::Portuguese
         );
+        // Underscore separator + German suffix (covers rsplit fallback return).
+        assert_eq!(
+            detect_system_language_from_locale(Some("zz_de")),
+            Language::German
+        );
+        // Unknown primary and region → English primary after exhausted fallbacks.
+        assert_eq!(
+            detect_system_language_from_locale(Some("zz-yy")),
+            Language::English
+        );
     }
 
     #[test]

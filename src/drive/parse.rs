@@ -592,10 +592,10 @@ mod mac_parsers {
                 continue;
             }
             let mut parts = trimmed.split_whitespace();
-            let Some(index) = parts.next() else {
-                continue;
-            };
-            if !index.chars().all(|c| c.is_ascii_digit()) {
+            // Non-empty trimmed lines always yield a first token; keep empty check
+            // for a single early-continue path (digit validation).
+            let index = parts.next().unwrap_or("");
+            if index.is_empty() || !index.chars().all(|c| c.is_ascii_digit()) {
                 continue;
             }
             let Some(vendor) = parts.next() else {
@@ -1087,5 +1087,61 @@ Found 1 drives(s)
     fn parse_drutil_list_skips_header_only() {
         let output = "   Vendor   Product           Rev   Bus       SupportLevel\n";
         assert!(parse_drutil_list(output).is_empty());
+    }
+
+    #[test]
+    fn parse_drutil_list_skips_noise_and_incomplete_rows() {
+        let output = "\
+   Vendor   Product           Rev   Bus       SupportLevel
+
+not-a-number  junk
+2
+3  ONLYVENDOR
+4  V  USB
+5  V  Prod  USB
+6  V  ProdName  1.0  NOTABUS  Unsupported
+7  HL-DT-ST  BD-RE  BU50N  GE03  USB  Unsupported
+";
+        let drives = parse_drutil_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "drutil:7");
+        assert_eq!(drives[0].product, "BD-RE BU50N");
+    }
+
+    #[test]
+    fn parse_ioreg_skips_missing_quotes_and_empty_vendor_product() {
+        // No Device Characteristics marker → first-chunk continue path.
+        assert!(parse_ioreg_optical_services("no dict here", "IOBDServices").is_empty());
+        // Key present but value is not a quoted string.
+        let unquoted = r#"
+Device Characteristics
+  "Vendor Name"=HL-DT-ST
+  "Product Name"=BU40N
+"#;
+        assert!(parse_ioreg_optical_services(unquoted, "IOBDServices").is_empty());
+        // Empty vendor+product after quotes.
+        let empty = r#"
+Device Characteristics
+  "Vendor Name"=""
+  "Product Name"=""
+"#;
+        assert!(parse_ioreg_optical_services(empty, "IOBDServices").is_empty());
+    }
+
+    #[test]
+    fn parse_ioreg_caps_at_max_optical_drives() {
+        let mut sample = String::new();
+        for i in 0..(MAX_OPTICAL_DRIVES + 3) {
+            sample.push_str(&format!(
+                r#"
+Device Characteristics
+  "Vendor Name"="V{i}"
+  "Product Name"="P{i}"
+  "Product Revision Level"="R{i}"
+"#
+            ));
+        }
+        let drives = parse_ioreg_optical_services(&sample, "IOBDServices");
+        assert_eq!(drives.len(), MAX_OPTICAL_DRIVES);
     }
 }
