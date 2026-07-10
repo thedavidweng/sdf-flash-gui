@@ -62,7 +62,7 @@ Download the latest installer from [Releases](https://github.com/thedavidweng/sd
 cargo build --release
 ```
 
-Output: `target/release/sdf-flash-gui` (single binary; size depends on platform features).
+Output: `target/release/sdf-flash-gui`.
 
 Local quality gate (matches Ubuntu CI):
 
