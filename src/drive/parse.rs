@@ -514,7 +514,132 @@ pub fn parse_drive_list(output: &str) -> Vec<Drive> {
     cap_drive_list(drives)
 }
 
-/// Enumerate all optical drives on the system.
+/// Extract `"Key"="Value"` pairs from an IORegistry property dump block.
+fn ioreg_quoted_value(block: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{key}\"=");
+    let idx = block.find(&needle)?;
+    let rest = &block[idx + needle.len()..];
+    let rest = rest.trim_start();
+    if !rest.starts_with('"') {
+        return None;
+    }
+    let end = rest[1..].find('"')?;
+    Some(rest[1..1 + end].to_string())
+}
+
+/// Parse `ioreg -r -c <Class> -l` for Device Characteristics (Vendor/Product/Rev).
+///
+/// MakeMKV/sdftool open these services via IOSCSITaskDeviceInterface; the true
+/// `/IOBDServices/<hash>` path is supplied by backend `-l`. OS enum uses
+/// BuildDriveId as a stable selectable id (works with `sdftool -d`).
+pub(crate) fn parse_ioreg_optical_services(output: &str, service_class: &str) -> Vec<Drive> {
+    let mut drives = Vec::new();
+    // Each matching service block usually contains one Device Characteristics dict.
+    for chunk in output.split("Device Characteristics") {
+        if chunk.len() == output.len() {
+            // No split match — try whole buffer once for a single dict form.
+            continue;
+        }
+        // Limit scan to the dict-ish region after the key.
+        let region = chunk.get(..500).unwrap_or(chunk);
+        let vendor = ioreg_quoted_value(region, "Vendor Name").unwrap_or_default();
+        let product = ioreg_quoted_value(region, "Product Name").unwrap_or_default();
+        let revision = ioreg_quoted_value(region, "Product Revision Level").unwrap_or_default();
+        if vendor.is_empty() && product.is_empty() {
+            continue;
+        }
+        let mut drive = Drive {
+            device: String::new(),
+            vendor,
+            product,
+            revision,
+            ..Default::default()
+        };
+        // Prefer a path MakeMKV-style; BuildDriveId is a valid -d target.
+        drive.device = format!("/{service_class}/{}", drive.build_drive_id());
+        drives.push(drive);
+        if drives.len() >= MAX_OPTICAL_DRIVES {
+            break;
+        }
+    }
+    drives
+}
+
+/// Parse `drutil list` stdout into drives.
+///
+/// Example:
+/// ```text
+///    Vendor   Product           Rev   Bus       SupportLevel
+/// 1  HL-DT-ST BD-RE BU50N       GE03  USB       Unsupported
+/// ```
+///
+/// Device paths from drutil are 1-based indices (not MakeMKV `/IOBDServices/…`
+/// paths). Prefer backend `-l` when a tool is configured so flash/probe get
+/// the path sdftool actually accepts.
+pub(crate) fn parse_drutil_list(output: &str) -> Vec<Drive> {
+    let mut drives = Vec::new();
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // Skip header: "Vendor   Product ..."
+        if trimmed.starts_with("Vendor") {
+            continue;
+        }
+        let mut parts = trimmed.split_whitespace();
+        let Some(index) = parts.next() else {
+            continue;
+        };
+        if !index.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let Some(vendor) = parts.next() else {
+            continue;
+        };
+        let rest: Vec<&str> = parts.collect();
+        // rest: product… rev bus supportLevel — bus is USB/ATAPI/FireWire/etc.
+        let bus_idx = rest.iter().position(|t| {
+            matches!(
+                *t,
+                "USB" | "ATAPI" | "FireWire" | "SCSI" | "SATA" | "Thunderbolt"
+            )
+        });
+        let Some(bus_i) = bus_idx else {
+            continue;
+        };
+        if bus_i == 0 {
+            continue;
+        }
+        // revision is the token immediately before bus
+        let rev_i = bus_i - 1;
+        let product = rest[..rev_i].join(" ");
+        let revision = rest[rev_i].to_string();
+        if product.is_empty() {
+            continue;
+        }
+        drives.push(Drive {
+            // Stable placeholder until backend list supplies /IOBDServices/…
+            device: format!("drutil:{index}"),
+            vendor: vendor.to_string(),
+            product,
+            revision,
+            ..Default::default()
+        });
+    }
+    drives
+}
+
+pub(crate) fn parse_vendor_product(name: &str) -> (String, String) {
+    // Try to split "VENDOR PRODUCT" or "VENDOR_MODEL"
+    if let Some(idx) = name.find('_') {
+        (name[..idx].to_string(), name[idx + 1..].to_string())
+    } else if let Some(idx) = name.find(' ') {
+        (name[..idx].to_string(), name[idx + 1..].to_string())
+    } else {
+        (String::new(), name.to_string())
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -895,5 +1020,62 @@ Found 1 drives(s)
         }
         let drives = parse_drive_list(&out);
         assert_eq!(drives.len(), MAX_OPTICAL_DRIVES);
+    }
+    #[test]
+    fn parse_vendor_product_underscore() {
+        let (v, p) = parse_vendor_product("HL-DT-ST_BU40N");
+        assert_eq!(v, "HL-DT-ST");
+        assert_eq!(p, "BU40N");
+    }
+
+    #[test]
+    fn parse_vendor_product_space() {
+        let (v, p) = parse_vendor_product("HL-DT-ST BU40N");
+        assert_eq!(v, "HL-DT-ST");
+        assert_eq!(p, "BU40N");
+    }
+
+    #[test]
+    fn parse_vendor_product_no_separator() {
+        let (v, p) = parse_vendor_product("BU40N");
+        assert!(v.is_empty());
+        assert_eq!(p, "BU40N");
+    }
+
+    #[test]
+    fn parse_ioreg_device_characteristics() {
+        let sample = r#"
++-o IOBDServices
+  | {
+  |   "Device Characteristics" = {"Product Name"="BD-RE BU50N","Vendor Name"="HL-DT-ST","Product Revision Level"="GE03"}
+  | }
+"#;
+        let drives = parse_ioreg_optical_services(sample, "IOBDServices");
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BD-RE BU50N");
+        assert_eq!(drives[0].revision, "GE03");
+        assert!(drives[0].device.contains("IOBDServices"));
+        assert!(drives[0].device.contains("HL-DT-ST_BD-RE_BU50N_GE03"));
+    }
+
+    #[test]
+    fn parse_drutil_list_usb_bd() {
+        let output = "\
+   Vendor   Product           Rev   Bus       SupportLevel
+1  HL-DT-ST BD-RE BU50N       GE03  USB       Unsupported
+";
+        let drives = parse_drutil_list(output);
+        assert_eq!(drives.len(), 1);
+        assert_eq!(drives[0].device, "drutil:1");
+        assert_eq!(drives[0].vendor, "HL-DT-ST");
+        assert_eq!(drives[0].product, "BD-RE BU50N");
+        assert_eq!(drives[0].revision, "GE03");
+    }
+
+    #[test]
+    fn parse_drutil_list_skips_header_only() {
+        let output = "   Vendor   Product           Rev   Bus       SupportLevel\n";
+        assert!(parse_drutil_list(output).is_empty());
     }
 }
