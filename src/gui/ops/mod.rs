@@ -853,6 +853,7 @@ mod tests {
         state.drive.selected_drive = Some(0);
         state.drive.last_probed_drive = Some(0);
         state.drive.drive_probed = true;
+        state.drive.drive_mt1959 = true;
         let filler = crate::drive::Drive {
             device: "/dev/sr9".into(),
             vendor: "OTHER".into(),
@@ -864,6 +865,40 @@ mod tests {
         assert_eq!(state.drive.selected_drive, Some(1));
         assert!(state.drive.last_probed_drive.is_none());
         assert!(!state.drive.drive_probed);
+        assert!(!state.drive.drive_mt1959);
+    }
+
+    #[test]
+    fn apply_drive_list_same_path_new_identity_invalidates_probe() {
+        // Same /dev/sr0 after re-enum, but vendor/product changed → must not keep
+        // previous MT1959/encrypted probe results (would skip re-probe gates).
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(crate::drive::Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+            ..Default::default()
+        });
+        state.drive.selected_drive = Some(0);
+        state.drive.last_probed_drive = Some(0);
+        state.drive.drive_probed = true;
+        state.drive.drive_mt1959 = true;
+        state.drive.drive_encrypted_firmware = true;
+        state.drive.drive_sdf_version = Some("0x00A6".into());
+        state.apply_drive_list(vec![crate::drive::Drive {
+            device: "/dev/sr0".into(),
+            vendor: "PIONEER".into(),
+            product: "BD-RW".into(),
+            revision: "1.00".into(),
+            ..Default::default()
+        }]);
+        assert_eq!(state.drive.selected_drive, Some(0));
+        assert!(state.drive.last_probed_drive.is_none());
+        assert!(!state.drive.drive_probed);
+        assert!(!state.drive.drive_mt1959);
+        assert!(!state.drive.drive_encrypted_firmware);
+        assert!(state.drive.drive_sdf_version.is_none());
     }
 
     #[test]
