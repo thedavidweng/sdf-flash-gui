@@ -35,10 +35,10 @@ cargo test
 
 Matches CI on Linux. Codecov (and the local/CI gate) enforce:
 
-- **project** line coverage ≥ **99%** (`codecov.yml`)
+- **project** line coverage ≥ **99%** absolute floor (`codecov.yml` + `coverage-gate.py`; not “no drop vs main”)
 - **patch** coverage **100%** on changed executable lines in non-ignored `src/`
 
-Ignore set is centralized:
+Ignore set is centralized (CI runs `scripts/coverage-ignore-sync-check.py`):
 
 - `scripts/coverage-ignore.regex` — llvm-cov (CI + local)
 - `codecov.yml` `ignore:` — Codecov upload (must list the same paths)
