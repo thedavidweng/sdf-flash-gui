@@ -16,43 +16,52 @@ impl DriveFormFactor {
     }
 }
 
+/// Slim / laptop-style optical drive models (substring match).
+pub const SLIM_MODELS: &[&str] = &[
+    "BU40N", "BU50N", "BP71N", "WP50NB40", "BP50NB40", "BP55EB40", "BP60NB10", "BU20N", "BU30N",
+];
+
+/// Desktop optical drive models (substring match).
+pub const DESKTOP_MODELS: &[&str] = &[
+    "BW-16D1HT",
+    "BW-16D1X-U",
+    "BC-12D2HT",
+    "BC-12B1ST",
+    "BW-12B1ST",
+    "WH16NS60",
+    "BH16NS60",
+    "WH16NS40",
+    "BH16NS40",
+    "WH14NS40",
+    "BH14NS40",
+    "BH16NS55",
+    "BH16NS50",
+    "BH14NS50",
+    "BH14NS58",
+    "BH16NS58",
+    "WH16NS58",
+    "UH12NS40",
+    "CH12NS40",
+    "BH40N",
+    "BH50N",
+    "BE16NU50",
+    "BH14NS48",
+    "BH16NS48",
+];
+
+/// All known model substrings used for firmware binary scanning and classification.
+pub fn known_models() -> impl Iterator<Item = &'static str> {
+    DESKTOP_MODELS.iter().chain(SLIM_MODELS.iter()).copied()
+}
+
 /// Classify a drive from its product/model name.
 pub fn classify_drive(model: &str) -> DriveFormFactor {
-    let slim_models = [
-        "BU40N", "BU50N", "BP71N", "WP50NB40", "BP50NB40", "BP55EB40", "BP60NB10", "BU20N", "BU30N",
-    ];
-    let desktop_models = [
-        "BW-16D1HT",
-        "BW-16D1X-U",
-        "BC-12D2HT",
-        "BC-12B1ST",
-        "BW-12B1ST",
-        "WH16NS60",
-        "BH16NS60",
-        "WH16NS40",
-        "BH16NS40",
-        "WH14NS40",
-        "BH14NS40",
-        "BH16NS55",
-        "BH16NS50",
-        "BH14NS50",
-        "BH14NS58",
-        "BH16NS58",
-        "WH16NS58",
-        "UH12NS40",
-        "CH12NS40",
-        "BH40N",
-        "BH50N",
-        "BE16NU50",
-        "BH14NS48",
-        "BH16NS48",
-    ];
-    for s in &slim_models {
+    for s in SLIM_MODELS {
         if model.contains(s) {
             return DriveFormFactor::Slim;
         }
     }
-    for d in &desktop_models {
+    for d in DESKTOP_MODELS {
         if model.contains(d) {
             return DriveFormFactor::Desktop;
         }
@@ -136,5 +145,19 @@ mod tests {
         assert_eq!(DriveFormFactor::Desktop.label(), "desktop");
         assert_eq!(DriveFormFactor::Slim.label(), "slim");
         assert_eq!(DriveFormFactor::Unknown.label(), "unknown");
+    }
+
+    #[test]
+    fn known_models_covers_classification_tables() {
+        let models: Vec<_> = known_models().collect();
+        assert_eq!(models.len(), DESKTOP_MODELS.len() + SLIM_MODELS.len());
+        for m in DESKTOP_MODELS {
+            assert!(models.contains(m), "missing desktop model {m}");
+        }
+        for m in SLIM_MODELS {
+            assert!(models.contains(m), "missing slim model {m}");
+        }
+        // Desktop-only model remains classifiable after list unification.
+        assert_eq!(classify_drive("BW-16D1X-U"), DriveFormFactor::Desktop);
     }
 }

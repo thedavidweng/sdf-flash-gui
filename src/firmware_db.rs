@@ -161,44 +161,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
     },
 ];
 
-/// Known drive model patterns to search for in firmware binary content.
-const KNOWN_MODELS: &[&str] = &[
-    // Desktop
-    "BW-16D1HT",
-    "BC-12D2HT",
-    "BC-12B1ST",
-    "BW-12B1ST",
-    "WH16NS60",
-    "BH16NS60",
-    "WH16NS40",
-    "BH16NS40",
-    "WH14NS40",
-    "BH14NS40",
-    "BH16NS55",
-    "BH16NS50",
-    "BH14NS50",
-    "BH14NS58",
-    "BH16NS58",
-    "WH16NS58",
-    "UH12NS40",
-    "CH12NS40",
-    "BH40N",
-    "BH50N",
-    "BE16NU50",
-    "BH14NS48",
-    "BH16NS48",
-    // Slim
-    "BU40N",
-    "BU50N",
-    "BP71N",
-    "WP50NB40",
-    "BP50NB40",
-    "BP55EB40",
-    "BP60NB10",
-    "BU20N",
-    "BU30N",
-];
-
 /// Extract the PCB type from the boot string at offset 12288.
 /// The boot string looks like "MT1959 Boot JB8 " or "MT1959 Boot BU5 ".
 fn extract_pcb_type(data: &[u8]) -> Option<String> {
@@ -236,7 +198,8 @@ fn pcb_to_form_factor(pcb: &str) -> DriveFormFactor {
 fn extract_model(data: &[u8]) -> Option<String> {
     // Search in the first 256KB where the model string is typically embedded.
     let search_region = &data[..data.len().min(256 * 1024)];
-    for model in KNOWN_MODELS {
+    // Single source of model names: platform classification tables.
+    for model in crate::platform::known_models() {
         let model_bytes = model.as_bytes();
         if search_region
             .windows(model_bytes.len())

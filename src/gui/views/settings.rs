@@ -1,7 +1,7 @@
 use crate::command::Backend;
 use crate::drive;
 use crate::gui::file_dialog::FileDialog;
-use crate::gui::state::{self, AppState};
+use crate::gui::state::AppState;
 use crate::gui::validation;
 use crate::gui::workers::{spawn_list_drives, WorkerMsg};
 use crate::i18n::{self, t, t_with_args, L10nKey, Language};
@@ -155,7 +155,7 @@ pub fn show_settings_window(
                                     ))
                                     .clicked()
                                 {
-                                    let found = state::find_sdf_bin();
+                                    let found = crate::drive::find_sdf_bin();
                                     state.config.sdf_detect_failed = found.is_empty();
                                     state.config.sdf_path = found;
                                 }

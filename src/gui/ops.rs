@@ -149,54 +149,9 @@ fn cross_flash_confirmation_required(state: &AppState) -> bool {
         && drive_ff != fw_ff
 }
 
+/// Whether Start is enabled. Single source of rules: [`start_disabled_reason`].
 pub fn can_start(state: &AppState) -> bool {
-    if state.runtime.busy
-        || state.runtime.probing
-        || state.selected_drive().is_none()
-        || !state.drive.drive_mt1959
-    {
-        return false;
-    }
-    if validate_tool_path(
-        &state.config.tool_path,
-        state.config.backend,
-        crate::i18n::Language::English,
-    )
-    .is_err()
-    {
-        return false;
-    }
-    if validate_sdf_path(&state.config.sdf_path, crate::i18n::Language::English).is_err() {
-        return false;
-    }
-    match state.operation_mode {
-        OperationMode::Read => true,
-        OperationMode::Write => {
-            if state.flash.firmware_data.is_none() || state.flash.firmware_path.is_empty() {
-                return false;
-            }
-            if command::write_modes_conflict(
-                state.flash.encrypted_write,
-                state.flash.include_boot_loader,
-            ) {
-                return false;
-            }
-            if cross_flash_confirmation_required(state) && !state.flash.cross_flash_confirmed {
-                return false;
-            }
-            // Confirmation is the gate (same as CLI flash without manifest).
-            state.selected_drive().is_some_and(|d| {
-                command::confirmation_matches(&d.device, &state.flash.confirmation)
-            })
-        }
-        OperationMode::Recover => {
-            !state.flash.firmware_path.is_empty()
-                && state.flash.recovery_token.len() == 16
-                && state.selected_drive().is_some_and(|d| {
-                    command::confirmation_matches(&d.device, &state.flash.confirmation)
-                })
-        }
-    }
+    start_disabled_reason(state).is_empty()
 }
 
 pub fn start_disabled_reason(state: &AppState) -> String {
@@ -225,7 +180,7 @@ pub fn start_disabled_reason(state: &AppState) -> String {
     match state.operation_mode {
         OperationMode::Read => String::new(),
         OperationMode::Write => {
-            if state.flash.firmware_data.is_none() {
+            if state.flash.firmware_data.is_none() || state.flash.firmware_path.is_empty() {
                 return t(L10nKey::ReasonNoFirmware, lang).to_string();
             }
             if command::write_modes_conflict(
@@ -1720,6 +1675,10 @@ mod tests {
         state.flash.firmware_data = Some(vec![0u8; 8]);
         state.flash.firmware_path.clear();
         assert!(!can_start(&state));
+        assert_eq!(
+            start_disabled_reason(&state),
+            t(L10nKey::ReasonNoFirmware, Language::English)
+        );
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 

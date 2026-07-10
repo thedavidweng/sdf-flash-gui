@@ -272,11 +272,6 @@ fn resolved_discovered_backend(found: Option<(Backend, String)>) -> (Backend, St
     }
 }
 
-/// Locate `sdf.bin` (re-export for GUI callers; logic lives in `drive`).
-pub fn find_sdf_bin() -> String {
-    drive::find_sdf_bin()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,12 +349,6 @@ mod tests {
         assert!(!state.drive.drive_probed);
         assert!(!state.runtime.probing);
         assert!(state.runtime.probe_control.is_none());
-    }
-
-    #[test]
-    fn find_sdf_bin_matches_drive_module() {
-        // Re-export must stay in sync with drive::find_sdf_bin.
-        assert_eq!(find_sdf_bin(), drive::find_sdf_bin());
     }
 
     #[test]
