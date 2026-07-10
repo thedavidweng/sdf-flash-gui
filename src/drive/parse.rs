@@ -1,6 +1,4 @@
 //! Drive model, list parsing, and selection helpers (pure / no OS I/O).
-#[cfg(target_os = "linux")]
-use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 

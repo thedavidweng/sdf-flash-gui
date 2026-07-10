@@ -102,7 +102,14 @@ pub fn evaluate(input: &StartGateInput<'_>) -> Option<StartBlock> {
             if input.firmware_path.is_empty() {
                 return Some(StartBlock::NoFirmware);
             }
-            if input.recovery_token.len() != 16 {
+            // Match plan_command / extract_recovery_boot_token: 16 printable ASCII bytes.
+            if input.recovery_token.len() != 16
+                || !input
+                    .recovery_token
+                    .as_bytes()
+                    .iter()
+                    .all(u8::is_ascii_graphic)
+            {
                 return Some(StartBlock::NeedConfirmation);
             }
             if !command::confirmation_matches(input.device, input.confirmation) {
@@ -231,6 +238,21 @@ mod tests {
             assert_eq!(evaluate(&i), Some(StartBlock::NeedConfirmation));
             i.recovery_token = "0123456789ABCDEF";
             assert_eq!(evaluate(&i), None);
+        });
+    }
+
+    #[test]
+    fn recover_rejects_non_graphic_token() {
+        with_tool(|tool| {
+            let mut i = base(tool);
+            i.mode = StartMode::Recover;
+            i.firmware_path = "fw.bin";
+            i.confirmation = "FLASH /dev/sr0";
+            // 16 spaces: len ok, plan would reject as non-graphic.
+            i.recovery_token = "                ";
+            assert_eq!(evaluate(&i), Some(StartBlock::NeedConfirmation));
+            i.recovery_token = "ABCDEFGHIJKLMNO\0";
+            assert_eq!(evaluate(&i), Some(StartBlock::NeedConfirmation));
         });
     }
 

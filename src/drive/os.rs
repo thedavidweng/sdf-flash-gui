@@ -3,6 +3,8 @@
 
 use super::parse::{cap_drive_list, Drive, MAX_OPTICAL_DRIVES};
 use crate::command::Backend;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 
 pub fn enumerate_drives() -> Vec<Drive> {
     #[cfg(target_os = "macos")]
@@ -645,7 +647,6 @@ pub(crate) fn which(name: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::Backend;
 
     #[test]
     fn other_backend_swaps() {
