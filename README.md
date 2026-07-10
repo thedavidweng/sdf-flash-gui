@@ -17,19 +17,19 @@ Cross-platform GUI for optical drive firmware dump/flash. Inspired by the Window
 
 ## Features
 
-- **Drive enumeration** — auto-detects optical drives on macOS, Linux, and Windows
-- **Drive info** — vendor, model, firmware revision, MT1959 platform detection, encrypted firmware detection
-- **Firmware dump** — saves drive firmware to file via the selected backend
-- **Firmware flash** — multi-gate safety validation before execution:
-  - Model/revision matching against firmware manifest (glob patterns)
-  - SHA-256 payload verification
-  - Signature presence check (presence only — not cryptographic validity)
-  - User confirmation string required
-- **Multi-image manifests** — image selector when a manifest contains multiple firmware images
-- **Encrypted / full boot-loader rawflash** — mutually exclusive flash modes
-- **Recovery flash** — boot token entry or extraction from a wrong firmware dump (offset `0x3000`)
-- **SDF0 container parsing** — reads `sdf.bin` metadata (vendor, model, firmware version, encryption, compression)
-- **Dual backend support** — works with both `sdftool` and `makemkvcon` (both bundled with [MakeMKV](https://www.makemkv.com/)); auto-detected via PATH or common install locations
+- **Drive enumeration** — optical drives on macOS, Linux, and Windows (IOKit / sysfs / drive letters), with MakeMKV-style backend `-l` list when a tool is configured
+- **Drive properties** — vendor, model, revision, firmware date, MT1959 / MT1939 detection, encrypted firmware, LibreDrive status, SDF.bin version
+- **Firmware dump** — read drive firmware via the selected backend
+- **Firmware flash** — multi-gate safety before write/recover:
+  - MT1959 platform check (probe)
+  - Typed confirmation (`FLASH <device>`)
+  - Mutually exclusive encrypted vs boot-loader rawflash modes
+  - Cross form-factor warning + explicit confirm when slim/desktop mismatch
+- **Firmware identification** — SHA-256 lookup in a known-firmware table plus binary content scan (PCB type / embedded model); no reliance on filenames
+- **Recovery flash** — 16-byte boot token entry or extraction from a wrong firmware dump
+- **SDF0 parsing** — `sdf.bin` / firmware containers (vendor, model, version, flags)
+- **Dual backends** — `sdftool` and `makemkvcon` (both from [MakeMKV](https://www.makemkv.com/)); auto-detected on PATH and common install paths
+- **CLI** — `list`, `info`, `dump`, `flash`, `sdf-info` share the same planning path as the GUI
 
 ## Install
 
@@ -45,20 +45,16 @@ Download the latest installer from [Releases](https://github.com/thedavidweng/sd
 
 ## Requirements
 
-- [MakeMKV](https://www.makemkv.com/) installed on the system (provides both `sdftool` and `makemkvcon`)
-- `sdf.bin` from the SDFtool/MKV firmware pack (optional, for SDF container parsing)
+- [MakeMKV](https://www.makemkv.com/) installed (provides `sdftool` and `makemkvcon`)
+- `sdf.bin` from the SDFtool/MKV firmware pack (optional; improves probe/flash when present)
 
 ### Platform permissions
 
 | Platform | Notes |
 |----------|-------|
-| **Linux** | Optical drive access often requires membership in the `cdrom` group or running with sufficient permissions to open `/dev/sr*`. |
+| **Linux** | Optical drive access often needs the `cdrom` group (or equivalent rights) to open `/dev/sr*` / `/dev/sg*`. |
 | **macOS** | Drive access is usually available to the logged-in user. |
-| **Windows** | Some raw device operations may require running as Administrator. |
-
-## Firmware manifests
-
-Manifest `sha256` fields must be the hash of the **complete firmware file** selected for flashing, not an extracted payload inside a multi-image pack. See `SECURITY.md` for vulnerability reporting.
+| **Windows** | Some raw device paths may require running as Administrator. |
 
 ## Build
 
@@ -66,29 +62,57 @@ Manifest `sha256` fields must be the hash of the **complete firmware file** sele
 cargo build --release
 ```
 
-Output: `target/release/sdf-flash-gui` (~4 MB, single binary, no runtime deps beyond the backend).
+Output: `target/release/sdf-flash-gui` (single binary; size depends on platform features).
+
+Local quality gate (matches Ubuntu CI):
+
+```bash
+cargo fmt -- --check
+cargo clippy -- -D warnings
+cargo test
+./scripts/coverage.sh gate   # project ≥99%, patch 100% on changed domain lines
+```
 
 ## Architecture
 
 ```
 src/
-  main.rs            CLI entry (no-args launches GUI)
-  orchestration.rs   Shared flash pipeline: probe → validate → plan → execute
-  command.rs         Backend argv planner (no shell strings)
-  process.rs         Process run/stream/cancel + ProcessRunner seam
-  flash.rs           Manifest safety gates + advisory warnings
-  manifest.rs        Firmware manifest parser + drive matching
-  drive/             Drive parse (pure) + os enumerate/discovery
-  sdf.rs             SDF0 container parser
-  gui/               egui shell (state, ops, workers, views) — uses orchestration
+  main.rs              CLI entry (no args → GUI)
+  lib.rs               library crate for tests
+  command.rs           Backend argv planner (no shell strings)
+  orchestration.rs     Shared probe / list / flash session (CLI + GUI)
+  process.rs           Run / stream / cancel / reap + ProcessRunner trait
+  process_runner.rs    NativeRunner (OS process adapter; coverage-ignored)
+  flash.rs             SHA-256, SDF peek, version compare
+  firmware_db.rs       Known-hash table + binary firmware ID
+  platform.rs          Slim/desktop model tables, form-factor helpers
+  drive/
+    parse.rs           Pure list/identity/selection parsers (covered)
+    os.rs              OS enumerate + find_backend / find_sdf_bin (ignored)
+  sdf.rs               SDF0 container parser + presentation helpers
+  i18n/                Language keys, English + locale tables
+  gui/
+    state.rs           AppState (drive list apply, probe cache)
+    start_gate.rs      Structured Start enablement reasons
+    ops/               Lifecycle, start, firmware load, drives, nudge, labels
+    workers.rs         Background probe / list / streaming
+    views/             egui paint only
+    validation.rs      Tool / sdf.bin path checks
+    file_dialog.rs     rfd adapter (coverage-ignored)
 ```
 
-CLI and GUI share the same flash/probe planning logic via `orchestration`.
+CLI and GUI share probe/list/flash planning through `orchestration` and `command`. GUI Start rules live in `start_gate`; i18n maps them at the edge.
+
+Coverage ignore set is shared: `scripts/coverage-ignore.regex` ↔ `codecov.yml` (checked in CI).
+
+## Security
+
+See `SECURITY.md` for vulnerability reporting.
 
 ## Acknowledgements
 
 - **MakeMKV**
-- **MartyMcNuts** for creating the original Windows-based SDFtool Flasher. See the release thread here: [https://forum.makemkv.com/forum/viewtopic.php?f=16&t=22896](https://forum.makemkv.com/forum/viewtopic.php?f=16&t=22896)
+- **MartyMcNuts** for the original Windows SDFtool Flasher: [forum thread](https://forum.makemkv.com/forum/viewtopic.php?f=16&t=22896)
 
 ## License
 
