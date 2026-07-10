@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
-## [Unreleased]
+## [0.4.0] - 2026-07-10
 
 ### <!-- 0 -->🚀 Features
 
@@ -20,10 +20,27 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Eliminate Linux ETXTBSY flake in orchestration tests
 - Align probe invalidate rules and enforce local Codecov gates
 - Harden patch coverage gate and close residual project gaps
+- Invalidate probe cache when drive identity changes
+- Validate recovery token graphics; restore PathBuf for Linux OS
+- Compile pure macOS drive parsers on all targets
+- Move pure macOS drive parsers into drive/parse
+- Cfg-gate mac drive parsers for test or macos
+- Import mac drive parsers only on macOS
+- Cover mac drive parser edge cases for patch gate
+- Run parse_drive_list_four_fields on all platforms
+- Un-nest codecov comment so yaml validates
+
+### <!-- 2 -->🚜 Refactor
+
+- Drop dead i18n keys and duplicate helpers
+- Deepen modules per architecture review
 
 ### <!-- 3 -->📚 Documentation
 
 - Fix sdftool is not standalone, both backends bundled with MakeMKV
+- Note absolute coverage floor matches Codecov + gate
+- Refresh README for post-refactor architecture
+- Drop binary size note from README
 
 ### <!-- 6 -->🧪 Testing
 
@@ -38,6 +55,9 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 - Stop tracking generated lcov.info
+- **changelog:** Sync CHANGELOG.md
+- Align Codecov project status with coverage-gate absolute floor
+- **release:** V0.4.0
 ## [0.3.0] - 2026-07-09
 
 ### <!-- 0 -->🚀 Features
