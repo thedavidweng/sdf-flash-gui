@@ -99,7 +99,6 @@ fn enumerate_macos() -> Vec<Drive> {
 }
 
 /// Extract `"Key"="Value"` pairs from an IORegistry property dump block.
-#[cfg(target_os = "macos")]
 fn ioreg_quoted_value(block: &str, key: &str) -> Option<String> {
     let needle = format!("\"{key}\"=");
     let idx = block.find(&needle)?;
@@ -117,7 +116,6 @@ fn ioreg_quoted_value(block: &str, key: &str) -> Option<String> {
 /// MakeMKV/sdftool open these services via IOSCSITaskDeviceInterface; the true
 /// `/IOBDServices/<hash>` path is supplied by backend `-l`. OS enum uses
 /// BuildDriveId as a stable selectable id (works with `sdftool -d`).
-#[cfg(target_os = "macos")]
 pub(crate) fn parse_ioreg_optical_services(output: &str, service_class: &str) -> Vec<Drive> {
     let mut drives = Vec::new();
     // Each matching service block usually contains one Device Characteristics dict.
@@ -192,7 +190,6 @@ fn enumerate_macos_ioreg() -> Vec<Drive> {
 /// Device paths from drutil are 1-based indices (not MakeMKV `/IOBDServices/…`
 /// paths). Prefer backend `-l` when a tool is configured so flash/probe get
 /// the path sdftool actually accepts.
-#[cfg(target_os = "macos")]
 pub(crate) fn parse_drutil_list(output: &str) -> Vec<Drive> {
     let mut drives = Vec::new();
     for line in output.lines() {
@@ -494,7 +491,6 @@ fn enumerate_windows() -> Vec<Drive> {
     cap_drive_list(drives)
 }
 
-#[cfg(target_os = "macos")]
 pub(crate) fn parse_vendor_product(name: &str) -> (String, String) {
     // Try to split "VENDOR PRODUCT" or "VENDOR_MODEL"
     if let Some(idx) = name.find('_') {
@@ -702,7 +698,6 @@ mod tests {
         assert_eq!(p, "BU40N");
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn parse_vendor_product_space() {
         let (v, p) = parse_vendor_product("HL-DT-ST BU40N");
@@ -710,7 +705,6 @@ mod tests {
         assert_eq!(p, "BU40N");
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn parse_vendor_product_no_separator() {
         let (v, p) = parse_vendor_product("BU40N");
@@ -748,7 +742,6 @@ mod tests {
         assert!(drives[0].device.contains("HL-DT-ST_BD-RE_BU50N_GE03"));
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn parse_drutil_list_usb_bd() {
         let output = "\
@@ -763,7 +756,6 @@ mod tests {
         assert_eq!(drives[0].revision, "GE03");
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn parse_drutil_list_skips_header_only() {
         let output = "   Vendor   Product           Rev   Bus       SupportLevel\n";
