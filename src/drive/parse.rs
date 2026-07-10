@@ -685,9 +685,9 @@ mod tests {
         assert!(dm.revision.is_empty());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn parse_drive_list_four_fields() {
+        // Cross-platform pure parser — must run on Linux/Windows CI too.
         let output = "0:/dev/sr0 HL-DT-ST BU40N 1.03\n";
         let drives = parse_drive_list(output);
         assert_eq!(drives.len(), 1);
