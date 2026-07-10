@@ -29,8 +29,8 @@ ignore:
   - "src/gui/mod.rs"
   # egui view rendering only (logic is in ops/workers)
   - "src/gui/views/**"
-  # OS-specific drive enumerate + backend discovery
-  - "src/drive.rs"
+  # OS-specific drive enumerate + backend discovery (pure parse is covered)
+  - "src/drive/os.rs"
   # rfd native file dialog adapter (mocked at FileDialog trait)
   - "src/gui/file_dialog.rs"
   # NativeRunner thin OS process adapter (mocked at ProcessRunner trait)

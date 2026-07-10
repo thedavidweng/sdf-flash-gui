@@ -255,6 +255,38 @@ impl AppState {
         self.runtime.probing_drive = None;
     }
 
+    /// Replace the drive list and re-select by path / identity (stable after re-enum).
+    ///
+    /// Single implementation for ops refresh and worker `DrivesListed` (avoids
+    /// ops↔workers cycle and dual probe-cache rules).
+    pub fn apply_drive_list(&mut self, drives: Vec<Drive>) {
+        let previous = self
+            .drive
+            .selected_drive
+            .and_then(|i| self.drive.drives.get(i))
+            .cloned();
+        let prev_idx = self.drive.selected_drive;
+        let old_device = previous.as_ref().map(|d| d.device.clone());
+        self.drive.drives = drives;
+        self.drive.selected_drive =
+            drive::resolve_selection(&self.drive.drives, previous.as_ref(), prev_idx);
+        let new_device = self
+            .drive
+            .selected_drive
+            .and_then(|i| self.drive.drives.get(i))
+            .map(|d| d.device.clone());
+        // Invalidate probe cache when device path or selection index changed.
+        if old_device != new_device || self.drive.selected_drive != prev_idx {
+            self.drive.last_probed_drive = None;
+            self.drive.drive_probed = false;
+        }
+        if self.drive.drives.is_empty() {
+            self.set_status_key(L10nKey::StatusNoDrives, 0.0);
+        } else {
+            self.set_status_key(L10nKey::StatusReady, 0.0);
+        }
+    }
+
     #[cfg(test)]
     pub fn new_no_backend() -> Self {
         Self::defaults()

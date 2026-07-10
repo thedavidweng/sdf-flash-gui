@@ -1,576 +1,44 @@
 // Pure helpers that operate on AppState — no UI rendering or thread spawning.
 
+mod drives;
+mod firmware;
 mod labels;
+mod lifecycle;
+mod nudge;
+mod start;
 
+pub use drives::refresh_drives;
+pub use firmware::{
+    extract_recovery_token_from_wrong_firmware, load_firmware, prompt_recovery_wrong_firmware,
+};
 pub use labels::{drive_label, firmware_basename, firmware_sha_prefix, flash_mode_label};
-
-use crate::command;
-use crate::drive;
-use crate::flash;
-use crate::i18n::{log_error, t, t_with_args, L10nKey, Language};
-use crate::orchestration;
-use crate::process;
-
-use super::file_dialog::FileDialog;
-use super::state::{AppState, StopDialog};
-use super::validation::{validate_sdf_path, validate_tool_path};
-use super::workers::{spawn_streaming_command, WorkerMsg};
-use super::OperationMode;
-use crate::process::ProcessRunner;
-
-use std::sync::mpsc::Sender;
-
-fn begin_app_shutdown(state: &mut AppState) {
-    state.chrome.exiting = true;
-    state.chrome.show_settings = false;
-    state.chrome.show_about = false;
-    state.chrome.show_quit_confirmation = false;
-    state.runtime.stop_dialog = StopDialog::None;
-    if let Some(control) = state.runtime.probe_control.take() {
-        control.request_force_kill();
-        control.reap_registered_child();
-    }
-    state.runtime.probing = false;
-}
-
-fn close_child_viewports(ctx: &eframe::egui::Context) {
-    use eframe::egui::{ViewportCommand, ViewportId};
-    ctx.send_viewport_cmd_to(
-        ViewportId::from_hash_of("settings_viewport"),
-        ViewportCommand::Close,
-    );
-    ctx.send_viewport_cmd_to(
-        ViewportId::from_hash_of("about_viewport"),
-        ViewportCommand::Close,
-    );
-}
-
-fn prepare_app_exit(ctx: &eframe::egui::Context, state: &mut AppState) {
-    if state.chrome.exiting {
-        return;
-    }
-    begin_app_shutdown(state);
-    close_child_viewports(ctx);
-    ctx.request_repaint();
-}
-
-pub fn request_app_quit(ctx: &eframe::egui::Context, state: &mut AppState) {
-    if state.runtime.busy {
-        state.chrome.show_quit_confirmation = true;
-    } else {
-        prepare_app_exit(ctx, state);
-        ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Close);
-    }
-}
-
-pub fn on_viewport_close_requested(ctx: &eframe::egui::Context, state: &mut AppState) {
-    if state.runtime.busy {
-        ctx.send_viewport_cmd(eframe::egui::ViewportCommand::CancelClose);
-        state.chrome.show_quit_confirmation = true;
-    } else {
-        prepare_app_exit(ctx, state);
-    }
-}
-
-/// Force-kill any running backend and close immediately.
-///
-/// Clears `busy` before requesting close so `on_viewport_close_requested` does not
-/// re-issue `CancelClose` while the worker is still winding down.
-pub fn confirm_force_quit_exit(ctx: &eframe::egui::Context, state: &mut AppState) {
-    if let Some(control) = state.runtime.probe_control.as_ref() {
-        control.request_force_kill();
-    }
-    if let Some(control) = state.runtime.active_operation.as_ref() {
-        control.request_force_kill();
-    }
-    state.finish_probe();
-    state.finish_operation();
-    prepare_app_exit(ctx, state);
-    ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Close);
-}
-
-pub fn request_stop(state: &mut AppState) {
-    if !state.runtime.busy {
-        return;
-    }
-    state.runtime.stop_dialog = if state.runtime.waiting_for_backend_stop {
-        StopDialog::ConfirmForceKill
-    } else {
-        StopDialog::ConfirmStop
-    };
-}
-
-pub fn confirm_graceful_stop(state: &mut AppState) {
-    if let Some(control) = &state.runtime.active_operation {
-        control.request_graceful_cancel();
-        state.set_status_key(L10nKey::StatusCancelling, state.runtime.progress);
-    }
-    state.runtime.stop_dialog = StopDialog::None;
-}
-
-pub fn confirm_force_kill(state: &mut AppState) {
-    if let Some(control) = state.runtime.probe_control.as_ref() {
-        control.request_force_kill();
-    }
-    if let Some(control) = state.runtime.active_operation.as_ref() {
-        control.request_force_kill();
-    }
-    state.log(t(L10nKey::LogOpCancelled, state.chrome.resolved_lang));
-    if state.runtime.probe_control.is_some() {
-        state.finish_probe_failure();
-    }
-    if state.runtime.busy {
-        state.finish_operation();
-        state.set_status_key(L10nKey::StatusOpCancelled, 0.0);
-    } else {
-        state.runtime.stop_dialog = StopDialog::None;
-    }
-}
-
-pub fn decline_force_kill(state: &mut AppState) {
-    // User chose to wait: keep busy + active_operation (or an active probe) so another
-    // flash cannot start while the backend is still mutating the drive. Leave the
-    // force-kill dialog open so the user can retry a hard stop if needed.
-    if state.runtime.active_operation.is_some() {
-        state.runtime.waiting_for_backend_stop = true;
-        state.set_status_key(L10nKey::StatusCancelling, state.runtime.progress);
-    }
-}
-
-/// Returns true when a platform mismatch is detected between drive and firmware.
-fn cross_flash_confirmation_required(state: &AppState) -> bool {
-    let Some(drive) = state.selected_drive() else {
-        return false;
-    };
-    let drive_ff = crate::platform::classify_drive(&drive.product);
-    let fw_ff = state.flash.firmware_form_factor;
-    drive_ff != crate::platform::DriveFormFactor::Unknown
-        && fw_ff != crate::platform::DriveFormFactor::Unknown
-        && drive_ff != fw_ff
-}
-
-/// Whether Start is enabled. Single source of rules: [`start_disabled_reason`].
-pub fn can_start(state: &AppState) -> bool {
-    start_disabled_reason(state).is_empty()
-}
-
-pub fn start_disabled_reason(state: &AppState) -> String {
-    let lang = state.chrome.resolved_lang;
-    if state.runtime.busy {
-        return t(L10nKey::ReasonBusy, lang).to_string();
-    }
-    if state.runtime.probing {
-        return t(L10nKey::ReasonProbing, lang).to_string();
-    }
-    if state.selected_drive().is_none() {
-        return t(L10nKey::ReasonNoDrive, lang).to_string();
-    }
-    if !state.drive.drive_mt1959 {
-        if state.drive.drive_mt1939 {
-            return t(L10nKey::ReasonMt1939NotCompatible, lang).to_string();
-        }
-        return t(L10nKey::ReasonNotMt1959, lang).to_string();
-    }
-    if let Err(e) = validate_tool_path(&state.config.tool_path, state.config.backend, lang) {
-        return t_with_args(L10nKey::ReasonInvalidToolPath, lang, &[("error", &e)]);
-    }
-    if let Err(e) = validate_sdf_path(&state.config.sdf_path, lang) {
-        return t_with_args(L10nKey::ReasonInvalidSdfPath, lang, &[("error", &e)]);
-    }
-    match state.operation_mode {
-        OperationMode::Read => String::new(),
-        OperationMode::Write => {
-            if state.flash.firmware_data.is_none() || state.flash.firmware_path.is_empty() {
-                return t(L10nKey::ReasonNoFirmware, lang).to_string();
-            }
-            if command::write_modes_conflict(
-                state.flash.encrypted_write,
-                state.flash.include_boot_loader,
-            ) {
-                return t(L10nKey::ReasonConflict, lang).to_string();
-            }
-            if cross_flash_confirmation_required(state) && !state.flash.cross_flash_confirmed {
-                return t(L10nKey::ReasonCrossFlashNotConfirmed, lang).to_string();
-            }
-            let device = state
-                .selected_drive()
-                .map(|d| d.device.as_str())
-                .unwrap_or("");
-            if !command::confirmation_matches(device, &state.flash.confirmation) {
-                return t(L10nKey::ReasonEnterToken, lang).to_string();
-            }
-            String::new()
-        }
-        OperationMode::Recover => {
-            if state.flash.firmware_path.is_empty() {
-                return t(L10nKey::ReasonNoFirmware, lang).to_string();
-            }
-            if state.flash.recovery_token.len() != 16 {
-                return t(L10nKey::ReasonEnterToken, lang).to_string();
-            }
-            let device = state
-                .selected_drive()
-                .map(|d| d.device.as_str())
-                .unwrap_or("");
-            if !command::confirmation_matches(device, &state.flash.confirmation) {
-                return t(L10nKey::ReasonEnterToken, lang).to_string();
-            }
-            String::new()
-        }
-    }
-}
-
-/// Returns true when a valid backend executable is configured.
-pub fn backend_configured(state: &AppState) -> bool {
-    validate_tool_path(
-        &state.config.tool_path,
-        state.config.backend,
-        Language::English,
-    )
-    .is_ok()
-}
-
-/// Total nudge window (seconds, egui time).
-///
-/// Timing follows the common “attention double-pulse” pattern (≈ Animate.css flash
-/// cadence, but with soft half-sine envelopes instead of hard on/off).
-pub const SETTINGS_NUDGE_SECONDS: f64 = 0.90;
-
-/// First soft pulse: start offset and duration within the nudge window.
-const NUDGE_PULSE1_START: f32 = 0.0;
-const NUDGE_PULSE1_DUR: f32 = 0.34;
-/// Second softer pulse (decayed amplitude — less strobe-y than two equal flashes).
-const NUDGE_PULSE2_START: f32 = 0.42;
-const NUDGE_PULSE2_DUR: f32 = 0.34;
-const NUDGE_PULSE2_GAIN: f32 = 0.55;
-
-/// True when a primary click should pulse the Settings button (no backend, not on allowed controls).
-pub fn click_should_nudge_settings(backend_ok: bool, click_on_allowed_control: bool) -> bool {
-    !backend_ok && !click_on_allowed_control
-}
-
-/// Whether the settings-button nudge animation is still running at `now` (egui time).
-pub fn settings_nudge_active(until: Option<f64>, now: f64) -> bool {
-    until.is_some_and(|t| now < t)
-}
-
-/// Soft white-highlight strength `0.0..=1.0` for the Settings button during a nudge.
-///
-/// Two half-sine “bell” pulses (smooth fade in/out). Second peak is weaker.
-/// Intensity only — callers must not change widget size or stroke width.
-pub fn settings_nudge_highlight(until: Option<f64>, now: f64) -> f32 {
-    let Some(until) = until else {
-        return 0.0;
-    };
-    if now >= until {
-        return 0.0;
-    }
-    let start = until - SETTINGS_NUDGE_SECONDS;
-    let elapsed = (now - start) as f32;
-    if elapsed < 0.0 {
-        return 0.0;
-    }
-    let a = half_sine_bell(elapsed, NUDGE_PULSE1_START, NUDGE_PULSE1_DUR);
-    let b = NUDGE_PULSE2_GAIN * half_sine_bell(elapsed, NUDGE_PULSE2_START, NUDGE_PULSE2_DUR);
-    (a + b).min(1.0)
-}
-
-/// Unit half-sine envelope over `[start, start+duration]`: 0 → 1 → 0.
-///
-/// Same soft pulse shape used widely for attention fades (raised half-sine / sin(πu)).
-fn half_sine_bell(t: f32, start: f32, duration: f32) -> f32 {
-    if duration <= f32::EPSILON {
-        return 0.0;
-    }
-    let u = (t - start) / duration;
-    if !(0.0..=1.0).contains(&u) {
-        0.0
-    } else {
-        (u * std::f32::consts::PI).sin()
-    }
-}
-
-pub fn on_operation_mode_changed(state: &mut AppState, mode: OperationMode) {
-    state.flash.confirmation.clear();
-    match mode {
-        OperationMode::Read => {
-            state.set_status_key(L10nKey::StatusHintRead, 0.0);
-        }
-        OperationMode::Write => {
-            state.set_status_key(L10nKey::StatusHintWrite, 0.0);
-        }
-        OperationMode::Recover => {
-            state.set_status_key(L10nKey::StatusHintRecover, 0.0);
-            state.flash.pending_recover_browse = true;
-        }
-    }
-}
-
-pub fn execute_start(
-    state: &mut AppState,
-    worker_tx: &Sender<WorkerMsg>,
-    dialog: &impl FileDialog,
-    runner: &std::sync::Arc<dyn ProcessRunner>,
-) {
-    let lang = state.chrome.resolved_lang;
-
-    match state.operation_mode {
-        OperationMode::Read => {
-            let Some(drive) = state.selected_drive() else {
-                return;
-            };
-            let Some(folder) = dialog.pick_folder() else {
-                return;
-            };
-            let output_dir = folder.to_string_lossy().to_string();
-            match orchestration::plan_read(
-                state.config.backend,
-                &state.config.tool_path,
-                &state.config.sdf_path,
-                &drive.device,
-                &output_dir,
-                state.drive.drive_mt1959,
-            ) {
-                Ok(plan) => {
-                    let status = t(L10nKey::StatusReadingFirmware, lang);
-                    let control = state.begin_operation(status);
-                    spawn_streaming_command(worker_tx, plan.command, status, runner, lang, control);
-                }
-                Err(e) => state.log(&log_error(lang, &e)),
-            }
-        }
-        OperationMode::Write | OperationMode::Recover => {
-            let Some(drive) = state.selected_drive().cloned() else {
-                return;
-            };
-            let recover = matches!(state.operation_mode, OperationMode::Recover);
-            if !recover && state.flash.firmware_data.is_none() {
-                return;
-            }
-            let confirm = orchestration::FlashConfirm::Typed(state.flash.confirmation.clone());
-
-            let prepared =
-                match orchestration::prepare_firmware_op(orchestration::FirmwareOpRequest {
-                    backend: state.config.backend,
-                    tool_path: &state.config.tool_path,
-                    sdf_path: &state.config.sdf_path,
-                    device: &drive.device,
-                    drive_is_mt1959: state.drive.drive_mt1959,
-                    firmware_path: &state.flash.firmware_path,
-                    encrypted: state.flash.encrypted_write,
-                    include_boot_loader: state.flash.include_boot_loader,
-                    recover,
-                    wrong_firmware: None,
-                    recovery_token: if recover {
-                        Some(state.flash.recovery_token.as_str())
-                    } else {
-                        None
-                    },
-                    confirm,
-                }) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        state.log(&log_error(lang, &e));
-                        return;
-                    }
-                };
-
-            // prepare_firmware_op only yields a plan when would_execute is true.
-            let Some(plan) = prepared.plan else {
-                return;
-            };
-
-            if !recover && state.flash.dry_run_only {
-                state.log(&t_with_args(
-                    L10nKey::LogDryRunCommand,
-                    lang,
-                    &[("command", &process::format_command(&plan.command))],
-                ));
-                state.set_status_key(L10nKey::StatusReady, 100.0);
-                return;
-            }
-
-            let status = if recover {
-                t(L10nKey::StatusRecoveringDrive, lang)
-            } else {
-                t(L10nKey::StatusWritingFirmware, lang)
-            };
-            let control = state.begin_operation(status);
-            spawn_streaming_command(worker_tx, plan.command, status, runner, lang, control);
-        }
-    }
-}
-
-/// Replace the drive list and re-select by path / identity (stable after re-enum).
-pub fn apply_drive_list(state: &mut AppState, drives: Vec<drive::Drive>) {
-    let previous = state
-        .drive
-        .selected_drive
-        .and_then(|i| state.drive.drives.get(i))
-        .cloned();
-    let prev_idx = state.drive.selected_drive;
-    let old_device = previous.as_ref().map(|d| d.device.clone());
-    state.drive.drives = drives;
-    state.drive.selected_drive =
-        drive::resolve_selection(&state.drive.drives, previous.as_ref(), prev_idx);
-    // Invalidate probe cache when the selected device path changed or vanished.
-    let new_device = state
-        .drive
-        .selected_drive
-        .and_then(|i| state.drive.drives.get(i))
-        .map(|d| d.device.clone());
-    // Must match workers DrivesListed: index can change with the same path
-    // (new drive inserted above) — keep probe cache consistent with selection.
-    if old_device != new_device || state.drive.selected_drive != prev_idx {
-        state.drive.last_probed_drive = None;
-        state.drive.drive_probed = false;
-    }
-    if state.drive.drives.is_empty() {
-        state.set_status_key(L10nKey::StatusNoDrives, 0.0);
-    } else {
-        state.set_status_key(L10nKey::StatusReady, 0.0);
-    }
-}
-
-pub fn refresh_drives(state: &mut AppState) {
-    let lang = state.chrome.resolved_lang;
-    let drives = drive::enumerate_drives();
-    let count = drives.len();
-    apply_drive_list(state, drives);
-    state.log(&t_with_args(
-        L10nKey::StatusDrivesFound,
-        lang,
-        &[("count", &count.to_string())],
-    ));
-}
-
-/// Display label for a firmware candidate path (basename, or full path as fallback).
-pub(crate) fn firmware_picker_label(path: &str) -> String {
-    std::path::Path::new(path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(str::to_string)
-        .unwrap_or_else(|| path.to_string())
-}
-
-pub fn load_firmware(state: &mut AppState, path: &str) {
-    let lang = state.chrome.resolved_lang;
-    state.flash.firmware_path = path.to_string();
-    state.flash.cross_flash_confirmed = false;
-    state.flash.firmware_sdf_info = None;
-    state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Unknown;
-    state.flash.firmware_identification = None;
-    state.flash.encrypted_write = state.drive.drive_encrypted_firmware;
-    match std::fs::read(path) {
-        Ok(data) => {
-            if data.is_empty() {
-                state.log(&t_with_args(
-                    L10nKey::LogFirmwareEmpty,
-                    lang,
-                    &[("path", path)],
-                ));
-                state.flash.firmware_data = None;
-            } else {
-                let sdf_info = flash::check_firmware_sdf(&data);
-
-                // Identify firmware by hash + binary content analysis (no filename dependency).
-                let id = crate::firmware_db::identify_firmware(&data);
-                state.flash.firmware_form_factor =
-                    crate::firmware_db::resolve_form_factor_with_sdf(&id, sdf_info.as_ref());
-                state.flash.firmware_identification = Some(id);
-                state.flash.firmware_sdf_info = sdf_info;
-
-                state.flash.firmware_data = Some(data);
-            }
-        }
-        Err(e) => {
-            state.log(&t_with_args(
-                L10nKey::LogFirmwareReadFailed,
-                lang,
-                &[("path", path), ("error", &e.to_string())],
-            ));
-            state.flash.firmware_data = None;
-        }
-    }
-
-    if let Some(parent) = std::path::Path::new(path).parent() {
-        state.flash.firmware_candidates = std::fs::read_dir(parent)
-            .map(|entries| {
-                let mut files: Vec<String> = entries
-                    .filter_map(|e| e.ok())
-                    .map(|e| e.path())
-                    .filter(|p| p.extension().is_some_and(|ext| ext == "bin"))
-                    .map(|p| p.to_string_lossy().to_string())
-                    .collect();
-                files.sort();
-                files
-            })
-            .unwrap_or_default();
-    }
-
-    state.flash.firmware_picker_items = state
-        .flash
-        .firmware_candidates
-        .iter()
-        .map(|path| (firmware_picker_label(path), path.clone()))
-        .collect();
-
-    if let Some(data) = &state.flash.firmware_data {
-        state.log(&t_with_args(
-            L10nKey::LogFirmwareLoaded,
-            lang,
-            &[
-                ("path", path),
-                ("size", &data.len().to_string()),
-                ("hash", &flash::sha256_hex(data)[..16]),
-            ],
-        ));
-    }
-}
-
-pub fn prompt_recovery_wrong_firmware(state: &mut AppState, dialog: &impl FileDialog) {
-    if !state.flash.wrong_firmware_path.is_empty() {
-        return;
-    }
-    let lang = state.chrome.resolved_lang;
-    state.log(t(L10nKey::LogRecoverSelectWrongFw, lang));
-    if let Some(file) = dialog.pick_file_with_title(
-        t(L10nKey::DialogTitleWrongFirmware, lang),
-        "Firmware",
-        &["bin"],
-        None,
-    ) {
-        state.flash.wrong_firmware_path = file.to_string_lossy().to_string();
-        extract_recovery_token_from_wrong_firmware(state);
-    }
-}
-
-pub fn extract_recovery_token_from_wrong_firmware(state: &mut AppState) {
-    if state.flash.wrong_firmware_path.is_empty() {
-        return;
-    }
-    let lang = state.chrome.resolved_lang;
-    let path = state.flash.wrong_firmware_path.clone();
-    match orchestration::resolve_recovery_token(Some(&path), None) {
-        Ok(token) => {
-            state.flash.recovery_token = token.clone();
-            state.log(&t_with_args(
-                L10nKey::LogRecoveryTokenExtracted,
-                lang,
-                &[("token", &token)],
-            ));
-        }
-        Err(e) => state.log(&log_error(lang, &e)),
-    }
-}
+pub use lifecycle::{
+    confirm_force_kill, confirm_force_quit_exit, confirm_graceful_stop, decline_force_kill,
+    on_viewport_close_requested, request_app_quit, request_stop,
+};
+pub use nudge::{
+    click_should_nudge_settings, settings_nudge_active, settings_nudge_highlight,
+    SETTINGS_NUDGE_SECONDS,
+};
+pub use start::{
+    backend_configured, can_start, execute_start, on_operation_mode_changed, start_disabled_reason,
+};
 
 #[cfg(test)]
 mod tests {
     use super::super::file_dialog::FileDialog;
-    use super::super::state::AppState;
+    use super::super::state::{AppState, StopDialog};
     use super::super::OperationMode;
+    use super::firmware::firmware_picker_label;
+    use super::lifecycle::begin_app_shutdown;
+    use super::nudge::{
+        half_sine_bell, NUDGE_PULSE1_DUR, NUDGE_PULSE1_START, NUDGE_PULSE2_DUR, NUDGE_PULSE2_GAIN,
+        NUDGE_PULSE2_START,
+    };
+    use super::start::cross_flash_confirmation_required;
     use super::*;
     use crate::drive::Drive;
+    use crate::i18n::{t, L10nKey, Language};
     use std::path::PathBuf;
     use std::sync::Mutex;
 
@@ -875,7 +343,7 @@ mod tests {
         state.chrome.show_settings = true;
         state.chrome.show_about = true;
 
-        super::begin_app_shutdown(&mut state);
+        begin_app_shutdown(&mut state);
 
         assert!(state.chrome.exiting);
         assert!(!state.chrome.show_settings);
@@ -889,7 +357,7 @@ mod tests {
         let mut state = AppState::new_no_backend();
         let control = std::sync::Arc::new(crate::process::OperationControl::new());
         state.runtime.probe_control = Some(control.clone());
-        super::begin_app_shutdown(&mut state);
+        begin_app_shutdown(&mut state);
         assert!(control.is_force_kill_requested());
         assert!(state.runtime.probe_control.is_none());
     }
@@ -1332,7 +800,7 @@ mod tests {
     fn apply_drive_list_selects_first_when_unselected() {
         let mut state = AppState::new_no_backend();
         state.drive.selected_drive = None;
-        apply_drive_list(&mut state, vec![test_drive()]);
+        state.apply_drive_list(vec![test_drive()]);
         assert_eq!(state.drive.selected_drive, Some(0));
         let status = &state.runtime.status_message;
         assert!(status.to_lowercase().contains("ready"), "status: {status}");
@@ -1343,7 +811,7 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.drive.drives.push(test_drive());
         state.drive.selected_drive = Some(0);
-        apply_drive_list(&mut state, vec![]);
+        state.apply_drive_list(vec![]);
         assert_eq!(state.drive.selected_drive, None);
         assert!(state.drive.drives.is_empty());
     }
@@ -1359,16 +827,13 @@ mod tests {
             ..Default::default()
         });
         state.drive.selected_drive = Some(0);
-        apply_drive_list(
-            &mut state,
-            vec![crate::drive::Drive {
-                device: "/dev/sg9".into(),
-                vendor: "HL-DT-ST".into(),
-                product: "BU40N".into(),
-                revision: "1.03".into(),
-                ..Default::default()
-            }],
-        );
+        state.apply_drive_list(vec![crate::drive::Drive {
+            device: "/dev/sg9".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+            ..Default::default()
+        }]);
         assert_eq!(state.drive.selected_drive, Some(0));
         assert_eq!(state.drive.drives[0].device, "/dev/sg9");
     }
@@ -1395,7 +860,7 @@ mod tests {
             revision: "0".into(),
             ..Default::default()
         };
-        apply_drive_list(&mut state, vec![filler, target]);
+        state.apply_drive_list(vec![filler, target]);
         assert_eq!(state.drive.selected_drive, Some(1));
         assert!(state.drive.last_probed_drive.is_none());
         assert!(!state.drive.drive_probed);
@@ -1953,7 +1418,7 @@ mod tests {
         let d = test_drive();
         state.drive.drives.push(d.clone());
         state.drive.selected_drive = Some(0);
-        apply_drive_list(&mut state, vec![d]);
+        state.apply_drive_list(vec![d]);
         assert_eq!(state.drive.selected_drive, Some(0));
     }
 

@@ -78,7 +78,7 @@ src/
   process.rs         Process run/stream/cancel + ProcessRunner seam
   flash.rs           Manifest safety gates + advisory warnings
   manifest.rs        Firmware manifest parser + drive matching
-  drive.rs           Drive enumeration, identity, backend/sdf.bin discovery
+  drive/             Drive parse (pure) + os enumerate/discovery
   sdf.rs             SDF0 container parser
   gui/               egui shell (state, ops, workers, views) — uses orchestration
 ```

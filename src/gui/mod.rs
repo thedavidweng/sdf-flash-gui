@@ -5,6 +5,7 @@
 
 pub mod file_dialog;
 mod ops;
+mod start_gate;
 mod state;
 mod validation;
 mod views;

@@ -1,436 +1,12 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Language {
-    Auto,
-    English,
-    Bulgarian,
-    Croatian,
-    Czech,
-    Danish,
-    Dutch,
-    Estonian,
-    Finnish,
-    French,
-    Galician,
-    German,
-    Greek,
-    Hungarian,
-    Indonesian,
-    Italian,
-    Latvian,
-    Lithuanian,
-    Malay,
-    Norwegian,
-    Polish,
-    Portuguese,
-    PortugueseBrazilian,
-    Romanian,
-    Russian,
-    Slovak,
-    Slovenian,
-    Spanish,
-    Swedish,
-    Turkish,
-    Ukrainian,
-}
-
-impl Language {
-    pub const ALL: &[Language] = &[
-        Language::Auto,
-        Language::English,
-        Language::Bulgarian,
-        Language::Croatian,
-        Language::Czech,
-        Language::Danish,
-        Language::Dutch,
-        Language::Estonian,
-        Language::Finnish,
-        Language::French,
-        Language::Galician,
-        Language::German,
-        Language::Greek,
-        Language::Hungarian,
-        Language::Indonesian,
-        Language::Italian,
-        Language::Latvian,
-        Language::Lithuanian,
-        Language::Malay,
-        Language::Norwegian,
-        Language::Polish,
-        Language::Portuguese,
-        Language::PortugueseBrazilian,
-        Language::Romanian,
-        Language::Russian,
-        Language::Slovak,
-        Language::Slovenian,
-        Language::Spanish,
-        Language::Swedish,
-        Language::Turkish,
-        Language::Ukrainian,
-    ];
-
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Auto => "Auto-detect",
-            Self::English => "English (English)",
-            Self::Bulgarian => "Български (Bulgarian)",
-            Self::Croatian => "Hrvatski (Croatian)",
-            Self::Czech => "Čeština (Czech)",
-            Self::Danish => "Dansk (Danish)",
-            Self::Dutch => "Nederlands (Dutch)",
-            Self::Estonian => "Eesti (Estonian)",
-            Self::Finnish => "Suomi (Finnish)",
-            Self::French => "Français (French)",
-            Self::Galician => "Galego (Galician)",
-            Self::German => "Deutsch (German)",
-            Self::Greek => "Ελληνικά (Greek)",
-            Self::Hungarian => "Magyar (Hungarian)",
-            Self::Indonesian => "Bahasa Indonesia (Indonesian)",
-            Self::Italian => "Italiano (Italian)",
-            Self::Latvian => "Latviešu (Latvian)",
-            Self::Lithuanian => "Lietuvių (Lithuanian)",
-            Self::Malay => "Bahasa Melayu (Malay)",
-            Self::Norwegian => "Norsk (Norwegian)",
-            Self::Polish => "Polski (Polish)",
-            Self::Portuguese => "Português (Portuguese)",
-            Self::PortugueseBrazilian => "Português do Brasil (Brazilian Portuguese)",
-            Self::Romanian => "Română (Romanian)",
-            Self::Russian => "Русский (Russian)",
-            Self::Slovak => "Slovenčina (Slovak)",
-            Self::Slovenian => "Slovenščina (Slovenian)",
-            Self::Spanish => "Español (Spanish)",
-            Self::Swedish => "Svenska (Swedish)",
-            Self::Turkish => "Türkçe (Turkish)",
-            Self::Ukrainian => "Українська (Ukrainian)",
-        }
-    }
-}
-
-/// Map a BCP-47 locale string (case-insensitive) to a supported language.
-/// Returns `English` for any unrecognized prefix.
-pub fn locale_to_language(locale: &str) -> Language {
-    let locale = locale.to_lowercase();
-    if locale.starts_with("bg") {
-        Language::Bulgarian
-    } else if locale.starts_with("hr") {
-        Language::Croatian
-    } else if locale.starts_with("cs") {
-        Language::Czech
-    } else if locale.starts_with("da") {
-        Language::Danish
-    } else if locale.starts_with("nl") {
-        Language::Dutch
-    } else if locale.starts_with("et") {
-        Language::Estonian
-    } else if locale.starts_with("fi") {
-        Language::Finnish
-    } else if locale.starts_with("fr") {
-        Language::French
-    } else if locale.starts_with("gl") {
-        Language::Galician
-    } else if locale.starts_with("de") {
-        Language::German
-    } else if locale.starts_with("el") {
-        Language::Greek
-    } else if locale.starts_with("hu") {
-        Language::Hungarian
-    } else if locale.starts_with("id") {
-        Language::Indonesian
-    } else if locale.starts_with("it") {
-        Language::Italian
-    } else if locale.starts_with("lv") {
-        Language::Latvian
-    } else if locale.starts_with("lt") {
-        Language::Lithuanian
-    } else if locale.starts_with("ms") {
-        Language::Malay
-    } else if locale.starts_with("nb") || locale.starts_with("no") || locale.starts_with("nn") {
-        Language::Norwegian
-    } else if locale.starts_with("pl") {
-        Language::Polish
-    } else if locale.starts_with("pt-br") {
-        Language::PortugueseBrazilian
-    } else if locale.starts_with("pt") {
-        Language::Portuguese
-    } else if locale.starts_with("ro") {
-        Language::Romanian
-    } else if locale.starts_with("ru") {
-        Language::Russian
-    } else if locale.starts_with("sk") {
-        Language::Slovak
-    } else if locale.starts_with("sl") {
-        Language::Slovenian
-    } else if locale.starts_with("es") {
-        Language::Spanish
-    } else if locale.starts_with("sv") {
-        Language::Swedish
-    } else if locale.starts_with("tr") {
-        Language::Turkish
-    } else if locale.starts_with("uk") {
-        Language::Ukrainian
-    } else {
-        Language::English
-    }
-}
-
-pub(crate) fn detect_system_language_from_locale(locale: Option<&str>) -> Language {
-    if let Some(locale) = locale {
-        let primary = locale_to_language(locale);
-        if primary != Language::English {
-            return primary;
-        }
-        // Region/script fallback: e.g. pt-PT → pt, zh-Hant-TW → zh (when translations exist).
-        let mut remainder = locale;
-        while let Some((_, rest)) = remainder.rsplit_once(['-', '_']) {
-            remainder = rest;
-            let fallback = locale_to_language(remainder);
-            if fallback != Language::English {
-                return fallback;
-            }
-        }
-        primary
-    } else {
-        Language::English
-    }
-}
-
-pub fn detect_system_language() -> Language {
-    detect_system_language_from_locale(sys_locale::get_locale().as_deref())
-}
-
-pub fn resolve_language(lang: Language) -> Language {
-    if lang == Language::Auto {
-        detect_system_language()
-    } else {
-        lang
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum L10nKey {
-    TitleDriveProperties,
-    LabelDevice,
-    SectionOperation,
-    TabWrite,
-    TabRead,
-    TabRecover,
-    OptionBootloader,
-    OptionEncrypted,
-    SectionFirmwareImage,
-    BtnBrowse,
-    SectionStatus,
-    LabelTypeToConfirm,
-    LabelWrongFw,
-    BtnExtract,
-    BtnStart,
-    BtnStop,
-    MenuQuit,
-    TooltipStop,
-    TitleStopWarning,
-    LabelStopWarningMsg,
-    LabelStopWarningDesc,
-    LabelStopWarningAsk,
-    BtnStopNo,
-    BtnStopYes,
-    TitleForceKillWarning,
-    LabelForceKillMsg,
-    LabelForceKillDesc,
-    LabelForceKillAsk,
-    BtnForceKillNo,
-    BtnForceKillYes,
-    StatusCancelling,
-    StatusOpCancelled,
-    LogOpCancelled,
-    StatusReady,
-    StatusNoDrives,
-    StatusProbing,
-    StatusProbeFailed,
-    StatusOpSuccess,
-    TooltipRefresh,
-    TooltipSettings,
-    TooltipAbout,
-    TooltipStartEnabled,
-    TitleExitWarning,
-    LabelExitWarningMsg,
-    LabelExitWarningDesc,
-    LabelExitWarningAsk,
-    BtnNoCancel,
-    BtnYesForce,
-    TitleSettings,
-    LabelBackend,
-    LabelToolPath,
-    LabelSdfPath,
-    BtnListDrives,
-    BtnParseSdf,
-    LabelAutodetected,
-    LabelLanguage,
-    AboutDescription,
-    AboutBuiltWith,
-    AboutAcknowledgementsTitle,
-    AboutBackendAckText,
-    AboutCreatorAckText,
-    ReasonBusy,
-    ReasonProbing,
-    ReasonNoDrive,
-    ReasonNotMt1959,
-    ReasonNoBackend,
-    ReasonNoFirmware,
-    ReasonConflict,
-    ReasonEnterToken,
-    // gui/mod.rs — drive properties
-    LabelManufacturer,
-    LabelProduct,
-    LabelRevision,
-    LabelSerial,
-    LabelFirmwareDate,
-    LabelMt1959Platform,
-    LabelEncryptedFirmware,
-    LabelLibreDrive,
-    LibreDriveEnabled,
-    LibreDrivePossible,
-    LibreDriveNotAvailable,
-    LibreDriveUnknown,
-    LabelSdfVersion,
-    WarnCannotCombine,
-    StatusReadyText,
-    LogReady,
-    StatusNoDrivesFound,
-    StatusDrivesFound,
-    LabelToken,
-    WarnFirmwareLoadFailed,
-    LabelAppName,
-    LabelGithubRepo,
-    LabelVersion,
-    BackendSdftool,
-    BackendMakeMkv,
-    BtnAutoDetect,
-    StatusNotFound,
-    StatusPathValid,
-    StatusOptional,
-    // gui/ops.rs
-    StatusHintRead,
-    StatusHintWrite,
-    StatusHintRecover,
-    ReasonInvalidToolPath,
-    ReasonInvalidSdfPath,
-    StatusReadingFirmware,
-    StatusWritingFirmware,
-    StatusRecoveringDrive,
-    DialogTitleWrongFirmware,
-    // gui/workers.rs
-    StatusOpFinished,
-    StatusOpFailed,
-    StatusListingDrives,
-    StatusDriveListFailed,
-    // gui/validation.rs
-    ValPathEmpty,
-    ValFileNotExist,
-    ValPathNotFile,
-    ValMustContainSdftool,
-    ValMustContainMakemkv,
-    ValExtMustBeBin,
-    // flash.rs
-    ThemeSystem,
-    ThemeDark,
-    ThemeLight,
-    // gui log messages (GUI-generated only; backend stdout is shown as-is)
-    LogErrGeneric,
-    LogFirmwareEmpty,
-    LogFirmwareReadFailed,
-    LogFirmwareLoaded,
-    LogRecoverSelectWrongFw,
-    LogRecoveryTokenExtracted,
-    LogProbeResult,
-    LogParsedDrivesFromOutput,
-    LogSdfHeader,
-    LogSdfVendor,
-    LogSdfModel,
-    LogSdfFirmware,
-    LogSdfFlags,
-    LogSdfExtraField,
-    LogSdfReadFailed,
-    ErrMissingToolPath,
-    ErrMissingDrive,
-    ErrUnsupportedPlatform,
-    ErrMissingFirmware,
-    ErrMissingOutputDirectory,
-    ErrMissingRecoveryBootToken,
-    ErrInvalidRecoveryBootToken,
-    ErrConfirmationMismatch,
-    ErrConflictingWriteModes,
-    // flash confirmation summary & failure recovery
-    LabelFlashSummaryTitle,
-    LabelFlashSummaryDrive,
-    LabelFlashSummaryFirmware,
-    LabelFlashSummaryMode,
-    FlashModeStandard,
-    FlashModeEncrypted,
-    FlashModeBootloader,
-    FlashModeRecover,
-    TitleFlashFailure,
-    LabelFlashFailureMsg,
-    LabelFlashFailureStep1,
-    LabelFlashFailureStep2,
-    LabelFlashFailureStep3,
-    BtnFlashFailureDismiss,
-    LabelNotAvailable,
-    BannerNoBackend,
-    LinkGetMakeMkv,
-    OptionDryRunOnly,
-    LogDryRunCommand,
-    HintFlashNoCancel,
-    HelpEmptyDrives,
-    LabelTokenLength,
-    // Platform safety warnings
-    WarnPlatformMismatch,
-    WarnCrossFlashConfirm,
-    ReasonCrossFlashNotConfirmed,
-    InfoTwoStepFlash,
-    WarnFirmwareDowngrade,
-    InfoFirmwareModelMismatch,
-    ReasonMt1939NotCompatible,
-}
-
-pub fn t(key: L10nKey, lang: Language) -> &'static str {
-    match lang {
-        Language::Auto => t_en(key),
-        Language::English => t_en(key),
-        Language::Bulgarian => t_bg(key),
-        Language::Croatian => t_hr(key),
-        Language::Czech => t_cs(key),
-        Language::Danish => t_da(key),
-        Language::Dutch => t_nl(key),
-        Language::Estonian => t_et(key),
-        Language::Finnish => t_fi(key),
-        Language::French => t_fr(key),
-        Language::Galician => t_gl(key),
-        Language::German => t_de(key),
-        Language::Greek => t_el(key),
-        Language::Hungarian => t_hu(key),
-        Language::Indonesian => t_id(key),
-        Language::Italian => t_it(key),
-        Language::Latvian => t_lv(key),
-        Language::Lithuanian => t_lt(key),
-        Language::Malay => t_ms(key),
-        Language::Norwegian => t_nb(key),
-        Language::Polish => t_pl(key),
-        Language::Portuguese => t_pt(key),
-        Language::PortugueseBrazilian => t_pt_br(key),
-        Language::Romanian => t_ro(key),
-        Language::Russian => t_ru(key),
-        Language::Slovak => t_sk(key),
-        Language::Slovenian => t_sl(key),
-        Language::Spanish => t_es(key),
-        Language::Swedish => t_sv(key),
-        Language::Turkish => t_tr(key),
-        Language::Ukrainian => t_uk(key),
-    }
-}
+//! Non-English locale tables. Unspecified keys fall back to English via the macro.
+use super::en::t_en;
+use super::L10nKey;
 
 /// Creates a translation function that falls back to English for unspecified keys.
 macro_rules! translations {
     (fn $name:ident { $($key:pat => $value:expr,)* }) => {
         #[allow(unreachable_patterns)]
-        fn $name(key: L10nKey) -> &'static str {
+        pub(super) fn $name(key: L10nKey) -> &'static str {
             match key {
                 $($key => $value,)*
                 _ => t_en(key),
@@ -438,250 +14,6 @@ macro_rules! translations {
         }
     };
 }
-
-pub fn t_with_args(key: L10nKey, lang: Language, args: &[(&str, &str)]) -> String {
-    let mut text = t(key, lang).to_string();
-    for (k, v) in args {
-        text = text.replace(&format!("{{{k}}}"), v);
-    }
-    text
-}
-
-/// Prefix a message with the localized ERROR label (for GUI-generated log lines).
-pub fn log_error(lang: Language, message: &str) -> String {
-    t_with_args(L10nKey::LogErrGeneric, lang, &[("message", message)])
-}
-
-pub fn plan_error_message(err: &crate::command::PlanError, lang: Language) -> String {
-    match err {
-        crate::command::PlanError::MissingToolPath => t(L10nKey::ErrMissingToolPath, lang).into(),
-        crate::command::PlanError::MissingDrive => t(L10nKey::ErrMissingDrive, lang).into(),
-        crate::command::PlanError::UnsupportedPlatform => {
-            t(L10nKey::ErrUnsupportedPlatform, lang).into()
-        }
-        crate::command::PlanError::MissingFirmware => t(L10nKey::ErrMissingFirmware, lang).into(),
-        crate::command::PlanError::MissingOutputDirectory => {
-            t(L10nKey::ErrMissingOutputDirectory, lang).into()
-        }
-        crate::command::PlanError::MissingRecoveryBootToken => {
-            t(L10nKey::ErrMissingRecoveryBootToken, lang).into()
-        }
-        crate::command::PlanError::InvalidRecoveryBootToken => {
-            t(L10nKey::ErrInvalidRecoveryBootToken, lang).into()
-        }
-        crate::command::PlanError::ConfirmationMismatch { expected } => t_with_args(
-            L10nKey::ErrConfirmationMismatch,
-            lang,
-            &[("expected", expected)],
-        ),
-        crate::command::PlanError::ConflictingWriteModes => {
-            t(L10nKey::ErrConflictingWriteModes, lang).into()
-        }
-    }
-}
-
-fn t_en(key: L10nKey) -> &'static str {
-    match key {
-        L10nKey::TitleDriveProperties => "Drive Properties",
-        L10nKey::LabelDevice => "Device",
-        L10nKey::SectionOperation => "Operation",
-        L10nKey::TabWrite => "WRITE Firmware",
-        L10nKey::TabRead => "READ Firmware",
-        L10nKey::TabRecover => "RECOVER Drive",
-        L10nKey::OptionBootloader => "Include boot-loader (dangerous)",
-        L10nKey::OptionEncrypted => "Encrypted rawflash",
-        L10nKey::SectionFirmwareImage => "Firmware Image",
-        L10nKey::BtnBrowse => "Browse…",
-        L10nKey::SectionStatus => "Status",
-        L10nKey::LabelTypeToConfirm => "Type \"{required}\" to confirm:",
-        L10nKey::LabelWrongFw => "Wrong FW",
-        L10nKey::BtnExtract => "Extract",
-        L10nKey::BtnStart => "START",
-        L10nKey::BtnStop => "STOP",
-        L10nKey::MenuQuit => "Quit",
-        L10nKey::TooltipStop => "Stop the current operation",
-        L10nKey::TitleStopWarning => "Stop Warning",
-        L10nKey::LabelStopWarningMsg => "⚠️ Warning: An operation is in progress!",
-        L10nKey::LabelStopWarningDesc => "Stopping now may interrupt the flashing process and brick your optical drive.",
-        L10nKey::LabelStopWarningAsk => "Are you sure you want to stop this operation?",
-        L10nKey::BtnStopNo => "No, Keep Running",
-        L10nKey::BtnStopYes => "Yes, Stop",
-        L10nKey::TitleForceKillWarning => "Force Stop",
-        L10nKey::LabelForceKillMsg => "⚠️ The backend did not stop!",
-        L10nKey::LabelForceKillDesc => "Force-killing the backend may corrupt the drive. Only continue if the operation appears hung.",
-        L10nKey::LabelForceKillAsk => "Force kill the backend process?",
-        L10nKey::BtnForceKillNo => "No, Wait",
-        L10nKey::BtnForceKillYes => "Yes, Force Kill",
-        L10nKey::StatusCancelling => "Cancelling…",
-        L10nKey::StatusOpCancelled => "Operation cancelled",
-        L10nKey::LogOpCancelled => "Operation cancelled by user.",
-        L10nKey::StatusReady => "Ready",
-        L10nKey::StatusNoDrives => "No optical drives detected",
-        L10nKey::StatusProbing => "Probing drive",
-        L10nKey::StatusProbeFailed => "Drive probe failed",
-        L10nKey::StatusOpSuccess => "Operation completed successfully.",
-        L10nKey::TooltipRefresh => "Refresh drives",
-        L10nKey::TooltipSettings => "Settings",
-        L10nKey::TooltipAbout => "About",
-        L10nKey::TooltipStartEnabled => "Start the selected operation",
-        L10nKey::TitleExitWarning => "Exit Warning",
-        L10nKey::LabelExitWarningMsg => "⚠️ Warning: An operation is in progress!",
-        L10nKey::LabelExitWarningDesc => "Closing the application now may interrupt the flashing process and brick your optical drive.",
-        L10nKey::LabelExitWarningAsk => "Are you sure you want to force exit?",
-        L10nKey::BtnNoCancel => "No, Cancel",
-        L10nKey::BtnYesForce => "Yes, Force Exit",
-        L10nKey::TitleSettings => "Settings",
-        L10nKey::LabelBackend => "Backend:",
-        L10nKey::LabelToolPath => "Tool path:",
-        L10nKey::LabelSdfPath => "sdf.bin:",
-        L10nKey::BtnListDrives => "List drives via backend",
-        L10nKey::BtnParseSdf => "Parse sdf.bin",
-        L10nKey::LabelAutodetected => "(auto-detected)",
-        L10nKey::LabelLanguage => "Language:",
-        L10nKey::AboutDescription => "A cross-platform GUI for flashing optical drives.",
-        L10nKey::AboutBuiltWith => "Built with Rust and egui.",
-        L10nKey::AboutAcknowledgementsTitle => "Acknowledgements:",
-        L10nKey::AboutBackendAckText => "for providing the sdftool/makemkvcon backend.",
-        L10nKey::AboutCreatorAckText => "for creating the original SDFtool Flasher.",
-        L10nKey::ReasonBusy => "Operation in progress",
-        L10nKey::ReasonProbing => "Probing drive",
-        L10nKey::ReasonNoDrive => "Select a drive first",
-        L10nKey::ReasonNotMt1959 => "Drive is not MT1959 platform",
-        L10nKey::ReasonNoBackend => "Configure backend in Settings",
-        L10nKey::ReasonNoFirmware => "Select a firmware file",
-        L10nKey::ReasonConflict => "Encrypted and boot-loader modes conflict",
-        L10nKey::ReasonEnterToken => "Enter recovery token and confirmation",
-        // gui/mod.rs
-        L10nKey::LabelManufacturer => "Manufacturer:",
-        L10nKey::LabelProduct => "Product:",
-        L10nKey::LabelRevision => "Revision:",
-        L10nKey::LabelSerial => "Serial:",
-        L10nKey::LabelFirmwareDate => "Firmware date:",
-        L10nKey::LabelMt1959Platform => "MT1959 Platform:",
-        L10nKey::LabelEncryptedFirmware => "Encrypted Firmware:",
-        L10nKey::LabelLibreDrive => "LibreDrive:",
-        L10nKey::LibreDriveEnabled => "Enabled",
-        L10nKey::LibreDrivePossible => "Possible, not yet enabled",
-        L10nKey::LibreDriveNotAvailable => "Not available",
-        L10nKey::LibreDriveUnknown => "Unknown",
-        L10nKey::LabelSdfVersion => "SDF Version:",
-        L10nKey::WarnCannotCombine => "⚠ Cannot combine encrypted + boot-loader",
-        L10nKey::StatusReadyText => "READY",
-        L10nKey::LogReady => "Ready.",
-        L10nKey::StatusNoDrivesFound => "No drives found",
-        L10nKey::StatusDrivesFound => "{count} drive(s) found",
-        L10nKey::LabelToken => "Token:",
-        L10nKey::WarnFirmwareLoadFailed => "⚠ Failed to load or invalid firmware file",
-        L10nKey::LabelAppName => "SDF Flash GUI",
-        L10nKey::LabelGithubRepo => "GitHub Repository",
-        L10nKey::LabelVersion => "Version {version}",
-        L10nKey::BackendSdftool => "SDFtool",
-        L10nKey::BackendMakeMkv => "MakeMKV (makemkvcon)",
-        L10nKey::BtnAutoDetect => "Auto-detect",
-        L10nKey::StatusNotFound => "✗ Not found",
-        L10nKey::StatusPathValid => "✓ Path is valid",
-        L10nKey::StatusOptional => "Optional",
-        // gui/ops.rs
-        L10nKey::StatusHintRead => "Select output folder when you start",
-        L10nKey::StatusHintWrite => "Load firmware, then confirm",
-        L10nKey::StatusHintRecover => "Recovery needs boot token from wrong firmware",
-        L10nKey::ReasonInvalidToolPath => "Invalid tool path: {error}",
-        L10nKey::ReasonInvalidSdfPath => "Invalid sdf.bin: {error}",
-        L10nKey::StatusReadingFirmware => "Reading firmware",
-        L10nKey::StatusWritingFirmware => "Writing firmware",
-        L10nKey::StatusRecoveringDrive => "Recovering drive",
-        L10nKey::DialogTitleWrongFirmware => "Wrong firmware (for token extraction)",
-        // gui/workers.rs
-        L10nKey::StatusOpFinished => "100% Operation finished. Please wait…",
-        L10nKey::StatusOpFailed => "Operation failed",
-        L10nKey::StatusListingDrives => "Listing drives",
-        L10nKey::StatusDriveListFailed => "Drive list failed",
-        // gui/validation.rs
-        L10nKey::ValPathEmpty => "Path is empty",
-        L10nKey::ValFileNotExist => "File does not exist",
-        L10nKey::ValPathNotFile => "Path is not a file",
-        L10nKey::ValMustContainSdftool => "Filename must contain 'sdftool'",
-        L10nKey::ValMustContainMakemkv => "Filename must contain 'makemkvcon' or 'makemkv'",
-        L10nKey::ValExtMustBeBin => "File extension must be '.bin'",
-        // flash.rs
-        L10nKey::ThemeSystem => "System",
-        L10nKey::ThemeDark => "Dark",
-        L10nKey::ThemeLight => "Light",
-        L10nKey::LogErrGeneric => "ERROR: {message}",
-        L10nKey::LogFirmwareEmpty => "ERROR: firmware file is empty: {path}",
-        L10nKey::LogFirmwareReadFailed => "ERROR: cannot read firmware file {path}: {error}",
-        L10nKey::LogFirmwareLoaded => {
-            "Loaded firmware: {path} ({size} bytes, sha256 {hash})"
-        }
-        L10nKey::LogRecoverSelectWrongFw => {
-            "RECOVER: select the wrong firmware file to extract boot token"
-        }
-        L10nKey::LogRecoveryTokenExtracted => "Extracted recovery boot token: {token}",
-        L10nKey::LogProbeResult => "MT1959: {mt1959} | Encrypted FW: {encrypted}",
-        L10nKey::LogParsedDrivesFromOutput => "Parsed {count} drive(s) from output.",
-        L10nKey::LogSdfHeader => {
-            "SDF0 v{version} | header_size={header_size} | payload_offset={offset}"
-        }
-        L10nKey::LogSdfVendor => "  Vendor: {vendor}",
-        L10nKey::LogSdfModel => "  Model: {model}",
-        L10nKey::LogSdfFirmware => "  Firmware: {firmware}",
-        L10nKey::LogSdfFlags => "  Encrypted: {encrypted} | Compressed: {compressed}",
-        L10nKey::LogSdfExtraField => "  {key}: {value}",
-        L10nKey::LogSdfReadFailed => "ERROR: cannot read sdf.bin: {error}",
-        L10nKey::ErrMissingToolPath => "SDFtool executable path is required",
-        L10nKey::ErrMissingDrive => "drive must be selected before planning a firmware operation",
-        L10nKey::ErrUnsupportedPlatform => "selected drive is not an MT1959 drive",
-        L10nKey::ErrMissingFirmware => "firmware path is required for this operation",
-        L10nKey::ErrMissingOutputDirectory => "output directory is required for firmware dump",
-        L10nKey::ErrMissingRecoveryBootToken => {
-            "recover mode requires a 16-byte boot token from the currently installed wrong firmware"
-        }
-        L10nKey::ErrInvalidRecoveryBootToken => {
-            "recover mode boot token must be exactly 16 printable ASCII bytes"
-        }
-        L10nKey::ErrConfirmationMismatch => "confirmation mismatch: type '{expected}' to continue",
-        L10nKey::ErrConflictingWriteModes => {
-            "encrypted rawflash and boot-loader rawflash cannot be combined"
-        }
-        L10nKey::LabelFlashSummaryTitle => "Operation summary",
-        L10nKey::LabelFlashSummaryDrive => "Drive: {label} ({device})",
-        L10nKey::LabelFlashSummaryFirmware => "Firmware: {file} (SHA-256 {hash}…)",
-        L10nKey::LabelFlashSummaryMode => "Mode: {mode}",
-        L10nKey::FlashModeStandard => "Standard write",
-        L10nKey::FlashModeEncrypted => "Encrypted rawflash",
-        L10nKey::FlashModeBootloader => "Boot-loader rawflash (dangerous)",
-        L10nKey::FlashModeRecover => "Recovery flash",
-        L10nKey::TitleFlashFailure => "Flash Operation Failed",
-        L10nKey::LabelFlashFailureMsg => {
-            "⚠️ The firmware write may have left your drive in an inconsistent state."
-        }
-        L10nKey::LabelFlashFailureStep1 => "Do not power off or eject the drive.",
-        L10nKey::LabelFlashFailureStep2 => "Check the log below for error details.",
-        L10nKey::LabelFlashFailureStep3 => {
-            "If the drive is unresponsive, switch to RECOVER Drive mode and use a recovery token."
-        }
-        L10nKey::BtnFlashFailureDismiss => "I Understand",
-        L10nKey::LabelNotAvailable => "N/A",
-        L10nKey::BannerNoBackend => "No backend tool configured.",
-        L10nKey::LinkGetMakeMkv => "Get MakeMKV",
-        L10nKey::OptionDryRunOnly => "Dry-run only (validate and show command, do not write)",
-        L10nKey::LogDryRunCommand => "Dry-run — command that would run:\n{command}",
-        L10nKey::HintFlashNoCancel => "Flash in progress — do not power off. Stop may brick the drive.",
-        L10nKey::HelpEmptyDrives => {
-            "No optical drives detected. Check the connection, permissions (Linux: cdrom group), and refresh."
-        }
-        L10nKey::LabelTokenLength => "{current}/16",
-        L10nKey::WarnPlatformMismatch => "WARNING: This firmware is for {firmware} drives but your drive is {drive}. Flashing wrong form factor firmware can BRICK your drive.",
-        L10nKey::WarnCrossFlashConfirm => "I understand this is a cross-flash and want to proceed",
-        L10nKey::ReasonCrossFlashNotConfirmed => "Confirm cross-flash to proceed",
-        L10nKey::InfoTwoStepFlash => "This drive model (BP50NB40/WP50NB40/BP55EB40) requires two-step flashing. Step 1: Flash the intermediate MK firmware (e.g. DE_LG_BP50NB40-NB50_1.03_MK.bin) in Write mode. Step 2: Switch to Recover mode and flash your target firmware.",
-        L10nKey::WarnFirmwareDowngrade => "This is a firmware downgrade (current: {current}, target: {target}). If downgrading from encrypted firmware, ensure 'Encrypted' is checked.",
-        L10nKey::InfoFirmwareModelMismatch => "Firmware is for {firmware}, your drive is {drive}. This is normal for cross-flashing.",
-        L10nKey::ReasonMt1939NotCompatible => "This drive uses the older MT1939 chip and is NOT compatible with OmniDrive or MK firmware. See: https://wiki.redump.info/index.php?title=Flashing_Older_HLDS_Drives",
-    }
-}
-
-// Each language function defines a full translation table.
 
 translations! { fn t_bg {
     L10nKey::TitleDriveProperties => r#"Свойства на устройството"#,
@@ -791,15 +123,6 @@ translations! { fn t_bg {
     L10nKey::LogSdfFlags => r#"  Криптиран: {encrypted} | Компресиран: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"ГРЕШКА: не може да се прочете sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Изисква се път до изпълнимия файл на SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"Трябва да изберете устройство преди планиране на операция с фърмуер"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Избраното устройство не е MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Изисква се път до фърмуер за тази операция"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Изисква се изходна папка за дамп на фърмуер"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Режимът за възстановяване изисква 16-байтов boot token от текущо инсталирания грешен фърмуер"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Boot token за възстановяване трябва да е точно 16 печатаеми ASCII байта"#,
-    L10nKey::ErrConfirmationMismatch => r#"Несъответствие при потвърждение: въведете „{expected}“ за продължаване"#,
-    L10nKey::ErrConflictingWriteModes => r#"Криптиран rawflash и rawflash с boot-loader не могат да се комбинират"#,
 } }
 
 translations! { fn t_hr {
@@ -910,15 +233,6 @@ translations! { fn t_hr {
     L10nKey::LogSdfFlags => r#"  Šifrirano: {encrypted} | Komprimirano: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"GREŠKA: nije moguće pročitati sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Potreban je put do izvršne datoteke SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"Morate odabrati pogon prije planiranja operacije s firmwareom"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Odabrani pogon nije MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Za ovu operaciju potreban je put do firmwarea"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Za dump firmwarea potreban je izlazni direktorij"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Način oporavka zahtijeva 16-bajtni boot token iz trenutno instaliranog pogrešnog firmwarea"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Boot token za oporavak mora imati točno 16 ispisivih ASCII bajtova"#,
-    L10nKey::ErrConfirmationMismatch => r#"Nepodudaranje potvrde: upišite „{expected}“ za nastavak"#,
-    L10nKey::ErrConflictingWriteModes => r#"Šifrirani rawflash i rawflash s boot-loaderom ne mogu se kombinirati"#,
 } }
 
 translations! { fn t_cs {
@@ -1029,15 +343,6 @@ translations! { fn t_cs {
     L10nKey::LogSdfFlags => r#"  Šifrováno: {encrypted} | Komprimováno: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"CHYBA: nelze přečíst sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Je vyžadována cesta k spustitelnému souboru SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"Před plánováním operace s firmwarem musíte vybrat jednotku"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Vybraná jednotka není MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Pro tuto operaci je vyžadována cesta k firmwaru"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Pro dump firmwaru je vyžadován výstupní adresář"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Režim obnovy vyžaduje 16bajtový boot token z aktuálně nainstalovaného špatného firmwaru"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Boot token pro obnovu musí mít přesně 16 tisknutelných ASCII bajtů"#,
-    L10nKey::ErrConfirmationMismatch => r#"Neshoda potvrzení: pro pokračování zadejte „{expected}“"#,
-    L10nKey::ErrConflictingWriteModes => r#"Šifrovaný rawflash a rawflash s boot-loaderem nelze kombinovat"#,
 } }
 
 translations! { fn t_da {
@@ -1148,15 +453,6 @@ translations! { fn t_da {
     L10nKey::LogSdfFlags => r#"  Krypteret: {encrypted} | Komprimeret: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"FEJL: kan ikke læse sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Sti til SDFtool-kørbar fil er påkrævet"#,
-    L10nKey::ErrMissingDrive => r#"Et drev skal vælges før planlægning af en firmwareoperation"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Det valgte drev er ikke et MT1959-drev"#,
-    L10nKey::ErrMissingFirmware => r#"Firmwaresti er påkrævet for denne operation"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Outputmappe er påkrævet for firmware-dump"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Gendannelsestilstand kræver et 16-byte boot-token fra den aktuelt installerede forkerte firmware"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Gendannelses-boot-token skal være præcis 16 udskrivbare ASCII-bytes"#,
-    L10nKey::ErrConfirmationMismatch => r#"Bekræftelses-uoverensstemmelse: skriv „{expected}“ for at fortsætte"#,
-    L10nKey::ErrConflictingWriteModes => r#"Krypteret rawflash og boot-loader rawflash kan ikke kombineres"#,
 } }
 
 translations! { fn t_nl {
@@ -1267,15 +563,6 @@ translations! { fn t_nl {
     L10nKey::LogSdfFlags => r#"  Versleuteld: {encrypted} | Gecomprimeerd: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"FOUT: kan sdf.bin niet lezen: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Pad naar SDFtool-uitvoerbaar bestand is vereist"#,
-    L10nKey::ErrMissingDrive => r#"Er moet een station worden geselecteerd voordat een firmwareoperatie wordt gepland"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Geselecteerd station is geen MT1959-station"#,
-    L10nKey::ErrMissingFirmware => r#"Firmwarepad is vereist voor deze operatie"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Uitvoermap is vereist voor firmware-dump"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Herstelmodus vereist een 16-byte boot-token van de huidig geïnstalleerde verkeerde firmware"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Herstel-boot-token moet precies 16 afdrukbare ASCII-bytes zijn"#,
-    L10nKey::ErrConfirmationMismatch => r#"Bevestiging komt niet overeen: typ „{expected}“ om door te gaan"#,
-    L10nKey::ErrConflictingWriteModes => r#"Versleutelde rawflash en boot-loader rawflash kunnen niet worden gecombineerd"#,
 } }
 
 translations! { fn t_et {
@@ -1386,15 +673,6 @@ translations! { fn t_et {
     L10nKey::LogSdfFlags => r#"  Krüpteeritud: {encrypted} | Pakitud: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"VIGA: sdf.bin ei saa lugeda: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"SDFtooli käivitatava faili tee on nõutav"#,
-    L10nKey::ErrMissingDrive => r#"Enne püsivara toimingu planeerimist tuleb valida seade"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Valitud seade ei ole MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Selle toimingu jaoks on vajalik püsivara tee"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Püsivara dumpi jaoks on vajalik väljundkaust"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Taasterežiim nõuab 16-baidist boot-tokenit praegu installitud valest püsivarast"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Taastamise boot-token peab olema täpselt 16 trükitavat ASCII baiti"#,
-    L10nKey::ErrConfirmationMismatch => r#"Kinnituse mittevastavus: jätkamiseks sisestage „{expected}“"#,
-    L10nKey::ErrConflictingWriteModes => r#"Krüpteeritud rawflash ja boot-loader rawflash ei saa kombineerida"#,
 } }
 
 translations! { fn t_fi {
@@ -1505,15 +783,6 @@ translations! { fn t_fi {
     L10nKey::LogSdfFlags => r#"  Salattu: {encrypted} | Pakattu: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"VIRHE: sdf.bin-tiedostoa ei voi lukea: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"SDFtool-suoritettavan tiedoston polku vaaditaan"#,
-    L10nKey::ErrMissingDrive => r#"Asema on valittava ennen laiteohjelmisto-operaation suunnittelua"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Valittu asema ei ole MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Tähän operaatioon vaaditaan laiteohjelmiston polku"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Laiteohjelmiston dumpiin vaaditaan tulostehakemisto"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Palautustila vaatii 16-tavuisen boot-tokenin nykyisin asennetusta väärästä laiteohjelmistosta"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Palautuksen boot-tokenin on oltava täsmälleen 16 tulostettavaa ASCII-tavua"#,
-    L10nKey::ErrConfirmationMismatch => r#"Vahvistus ei täsmää: jatka kirjoittamalla „{expected}“"#,
-    L10nKey::ErrConflictingWriteModes => r#"Salattua rawflashia ja boot-loader rawflashia ei voi yhdistää"#,
 } }
 
 translations! { fn t_fr {
@@ -1624,15 +893,6 @@ translations! { fn t_fr {
     L10nKey::LogSdfFlags => r#"  Chiffré : {encrypted} | Compressé : {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key} : {value}"#,
     L10nKey::LogSdfReadFailed => r#"ERREUR : impossible de lire sdf.bin : {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Le chemin de l'exécutable SDFtool est requis"#,
-    L10nKey::ErrMissingDrive => r#"Un lecteur doit être sélectionné avant de planifier une opération micrologiciel"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Le lecteur sélectionné n'est pas un lecteur MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Le chemin du micrologiciel est requis pour cette opération"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Un dossier de sortie est requis pour l'export du micrologiciel"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Le mode récupération nécessite un jeton de démarrage de 16 octets du micrologiciel erroné actuellement installé"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Le jeton de démarrage de récupération doit comporter exactement 16 octets ASCII imprimables"#,
-    L10nKey::ErrConfirmationMismatch => r#"Confirmation incorrecte : tapez « {expected} » pour continuer"#,
-    L10nKey::ErrConflictingWriteModes => r#"Le rawflash chiffré et le rawflash avec chargeur de démarrage ne peuvent pas être combinés"#,
 } }
 
 translations! { fn t_gl {
@@ -1743,15 +1003,6 @@ translations! { fn t_gl {
     L10nKey::LogSdfFlags => r#"  Cifrado: {encrypted} | Comprimido: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"ERRO: non se pode ler sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Requírese a ruta do executable SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"Debe seleccionarse unha unidade antes de planificar unha operación de firmware"#,
-    L10nKey::ErrUnsupportedPlatform => r#"A unidade seleccionada non é MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Requírese a ruta do firmware para esta operación"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Requírese un cartafol de saída para o volcado de firmware"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"O modo de recuperación require un token de arranque de 16 bytes do firmware incorrecto instalado actualmente"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"O token de arranque de recuperación debe ter exactamente 16 bytes ASCII imprimibles"#,
-    L10nKey::ErrConfirmationMismatch => r#"Confirmación incorrecta: escribe «{expected}» para continuar"#,
-    L10nKey::ErrConflictingWriteModes => r#"Non se poden combinar rawflash cifrado e rawflash con cargador de arranque"#,
 } }
 
 translations! { fn t_de {
@@ -1862,15 +1113,6 @@ translations! { fn t_de {
     L10nKey::LogSdfFlags => r#"  Verschlüsselt: {encrypted} | Komprimiert: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"FEHLER: sdf.bin kann nicht gelesen werden: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Pfad zur SDFtool-Ausführungsdatei ist erforderlich"#,
-    L10nKey::ErrMissingDrive => r#"Ein Laufwerk muss ausgewählt werden, bevor ein Firmware-Vorgang geplant wird"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Das ausgewählte Laufwerk ist kein MT1959-Laufwerk"#,
-    L10nKey::ErrMissingFirmware => r#"Firmware-Pfad ist für diesen Vorgang erforderlich"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Ausgabeordner ist für Firmware-Dump erforderlich"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Der Wiederherstellungsmodus erfordert ein 16-Byte-Boot-Token der aktuell installierten falschen Firmware"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Das Wiederherstellungs-Boot-Token muss genau 16 druckbare ASCII-Bytes haben"#,
-    L10nKey::ErrConfirmationMismatch => r#"Bestätigung stimmt nicht überein: Geben Sie „{expected}“ ein, um fortzufahren"#,
-    L10nKey::ErrConflictingWriteModes => r#"Verschlüsseltes Rawflash und Bootloader-Rawflash können nicht kombiniert werden"#,
 } }
 
 translations! { fn t_el {
@@ -1981,15 +1223,6 @@ translations! { fn t_el {
     L10nKey::LogSdfFlags => r#"  Κρυπτογραφημένο: {encrypted} | Συμπιεσμένο: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"ΣΦΑΛΜΑ: δεν είναι δυνατή η ανάγνωση του sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Απαιτείται διαδρομή στο εκτελέσιμο SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"Πρέπει να επιλεγεί οδηγός πριν τον σχεδιασμό λειτουργίας firmware"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Ο επιλεγμένος οδηγός δεν είναι MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Απαιτείται διαδρομή firmware για αυτή τη λειτουργία"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Απαιτείται φάκελος εξόδου για dump firmware"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Η λειτουργία ανάκτησης απαιτεί boot token 16 byte από το τρέχον λάθος firmware"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Το boot token ανάκτησης πρέπει να είναι ακριβώς 16 εκτυπώσιμα ASCII bytes"#,
-    L10nKey::ErrConfirmationMismatch => r#"Αναντιστοιχία επιβεβαίωσης: πληκτρολογήστε „{expected}“ για συνέχεια"#,
-    L10nKey::ErrConflictingWriteModes => r#"Το κρυπτογραφημένο rawflash και το rawflash bootloader δεν μπορούν να συνδυαστούν"#,
 } }
 
 translations! { fn t_hu {
@@ -2100,15 +1333,6 @@ translations! { fn t_hu {
     L10nKey::LogSdfFlags => r#"  Titkosított: {encrypted} | Tömörített: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"HIBA: az sdf.bin nem olvasható: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Az SDFtool futtatható fájl elérési útja kötelező"#,
-    L10nKey::ErrMissingDrive => r#"Firmware művelet tervezése előtt ki kell választani egy meghajtót"#,
-    L10nKey::ErrUnsupportedPlatform => r#"A kiválasztott meghajtó nem MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Ehhez a művelethez firmware elérési út szükséges"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Firmware dumphez kimeneti mappa szükséges"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"A helyreállítási mód 16 bájtos boot tokent igényel a jelenleg telepített rossz firmwareből"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"A helyreállítási boot token pontosan 16 nyomtatható ASCII bájt legyen"#,
-    L10nKey::ErrConfirmationMismatch => r#"Megerősítés eltérés: a folytatáshoz írja be: „{expected}“"#,
-    L10nKey::ErrConflictingWriteModes => r#"A titkosított rawflash és a boot-loader rawflash nem kombinálható"#,
 } }
 
 translations! { fn t_id {
@@ -2219,15 +1443,6 @@ translations! { fn t_id {
     L10nKey::LogSdfFlags => r#"  Terenkripsi: {encrypted} | Terkompresi: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"KESALAHAN: tidak dapat membaca sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Path executable SDFtool diperlukan"#,
-    L10nKey::ErrMissingDrive => r#"Drive harus dipilih sebelum merencanakan operasi firmware"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Drive yang dipilih bukan MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Path firmware diperlukan untuk operasi ini"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Folder output diperlukan untuk dump firmware"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Mode pemulihan memerlukan boot token 16 byte dari firmware salah yang terpasang saat ini"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Boot token pemulihan harus tepat 16 byte ASCII yang dapat dicetak"#,
-    L10nKey::ErrConfirmationMismatch => r#"Konfirmasi tidak cocok: ketik „{expected}“ untuk melanjutkan"#,
-    L10nKey::ErrConflictingWriteModes => r#"Rawflash terenkripsi dan rawflash boot-loader tidak dapat digabungkan"#,
 } }
 
 translations! { fn t_it {
@@ -2338,15 +1553,6 @@ translations! { fn t_it {
     L10nKey::LogSdfFlags => r#"  Crittografato: {encrypted} | Compresso: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"ERRORE: impossibile leggere sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"È richiesto il percorso dell'eseguibile SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"È necessario selezionare un drive prima di pianificare un'operazione firmware"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Il drive selezionato non è MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Per questa operazione è richiesto il percorso del firmware"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Per il dump del firmware è richiesta una cartella di output"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"La modalità recupero richiede un boot token di 16 byte dal firmware errato attualmente installato"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Il boot token di recupero deve essere esattamente 16 byte ASCII stampabili"#,
-    L10nKey::ErrConfirmationMismatch => r#"Conferma non corrispondente: digita „{expected}“ per continuare"#,
-    L10nKey::ErrConflictingWriteModes => r#"Rawflash crittografato e rawflash con boot-loader non possono essere combinati"#,
 } }
 
 translations! { fn t_lv {
@@ -2457,15 +1663,6 @@ translations! { fn t_lv {
     L10nKey::LogSdfFlags => r#"  Šifrēts: {encrypted} | Saspiests: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"KĻŪDA: nevar nolasīt sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Nepieciešams ceļš uz SDFtool izpildāmo failu"#,
-    L10nKey::ErrMissingDrive => r#"Pirms programmaparatūras operācijas plānošanas jāizvēlas diskdzinis"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Izvēlētais diskdzinis nav MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Šai operācijai nepieciešams programmaparatūras ceļš"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Programmaparatūras dempam nepieciešama izvades mape"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Atjaunošanas režīmam nepieciešams 16 baitu boot token no pašlaik instalētās nepareizās programmaparatūras"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Atjaunošanas boot token jābūt tieši 16 drukājamiem ASCII baitiem"#,
-    L10nKey::ErrConfirmationMismatch => r#"Apstiprinājuma neatbilstība: turpināšanai ierakstiet „{expected}“"#,
-    L10nKey::ErrConflictingWriteModes => r#"Šifrētu rawflash un boot-loader rawflash nevar apvienot"#,
 } }
 
 translations! { fn t_lt {
@@ -2576,15 +1773,6 @@ translations! { fn t_lt {
     L10nKey::LogSdfFlags => r#"  Šifruota: {encrypted} | Suspausta: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"KLAIDA: nepavyko perskaityti sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Reikalingas kelias į SDFtool vykdomąjį failą"#,
-    L10nKey::ErrMissingDrive => r#"Prieš planuojant programinės įrangos operaciją reikia pasirinkti diską"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Pasirinktas diskas nėra MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Šiai operacijai reikalingas programinės įrangos kelias"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Programinės įrangos kopijai reikalingas išvesties katalogas"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Atkūrimo režimui reikia 16 baitų boot token iš šiuo metu įdiegtos neteisingos programinės įrangos"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Atkūrimo boot token turi būti tiksliai 16 spausdinamų ASCII baitų"#,
-    L10nKey::ErrConfirmationMismatch => r#"Patvirtinimo neatitikimas: tęsti įveskite „{expected}“"#,
-    L10nKey::ErrConflictingWriteModes => r#"Šifruoto rawflash ir boot-loader rawflash negalima derinti"#,
 } }
 
 translations! { fn t_ms {
@@ -2695,15 +1883,6 @@ translations! { fn t_ms {
     L10nKey::LogSdfFlags => r#"  Disulitkan: {encrypted} | Dimampatkan: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"RALAT: tidak dapat membaca sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Laluan boleh laku SDFtool diperlukan"#,
-    L10nKey::ErrMissingDrive => r#"Pemacu mesti dipilih sebelum merancang operasi firmware"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Pemacu yang dipilih bukan MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Laluan firmware diperlukan untuk operasi ini"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Folder output diperlukan untuk dump firmware"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Mod pemulihan memerlukan boot token 16 bait daripada firmware salah yang dipasang sekarang"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Boot token pemulihan mesti tepat 16 bait ASCII yang boleh dicetak"#,
-    L10nKey::ErrConfirmationMismatch => r#"Pengesahan tidak sepadan: taip „{expected}“ untuk meneruskan"#,
-    L10nKey::ErrConflictingWriteModes => r#"Rawflash disulitkan dan rawflash boot-loader tidak boleh digabungkan"#,
 } }
 
 translations! { fn t_nb {
@@ -2814,15 +1993,6 @@ translations! { fn t_nb {
     L10nKey::LogSdfFlags => r#"  Kryptert: {encrypted} | Komprimert: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"FEIL: kan ikke lese sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Sti til SDFtool-kjørbar fil er påkrevd"#,
-    L10nKey::ErrMissingDrive => r#"En stasjon må velges før planlegging av firmwareoperasjon"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Valgt stasjon er ikke MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Firmwaresti er påkrevd for denne operasjonen"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Outputmappe er påkrevd for firmware-dump"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Gjenopprettingsmodus krever et 16-byte boot-token fra feil firmware som er installert nå"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Gjenopprettings-boot-token må være nøyaktig 16 utskrivbare ASCII-byte"#,
-    L10nKey::ErrConfirmationMismatch => r#"Bekreftelse stemmer ikke: skriv „{expected}“ for å fortsette"#,
-    L10nKey::ErrConflictingWriteModes => r#"Kryptert rawflash og boot-loader rawflash kan ikke kombineres"#,
 } }
 
 translations! { fn t_pl {
@@ -2933,15 +2103,6 @@ translations! { fn t_pl {
     L10nKey::LogSdfFlags => r#"  Szyfrowane: {encrypted} | Skompresowane: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"BŁĄD: nie można odczytać sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Wymagana jest ścieżka do pliku wykonywalnego SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"Przed zaplanowaniem operacji firmware należy wybrać napęd"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Wybrany napęd nie jest MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Dla tej operacji wymagana jest ścieżka firmware"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Do zrzutu firmware wymagany jest folder wyjściowy"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Tryb odzyskiwania wymaga 16-bajtowego boot token z aktualnie zainstalowanego złego firmware"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Boot token odzyskiwania musi mieć dokładnie 16 drukowalnych bajtów ASCII"#,
-    L10nKey::ErrConfirmationMismatch => r#"Niezgodność potwierdzenia: wpisz „{expected}“, aby kontynuować"#,
-    L10nKey::ErrConflictingWriteModes => r#"Nie można łączyć szyfrowanego rawflash i rawflash z boot-loaderem"#,
 } }
 
 translations! { fn t_pt {
@@ -3052,15 +2213,6 @@ translations! { fn t_pt {
     L10nKey::LogSdfFlags => r#"  Encriptado: {encrypted} | Comprimido: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"ERRO: não é possível ler sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"É necessário o caminho do executável SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"É necessário selecionar uma unidade antes de planear uma operação de firmware"#,
-    L10nKey::ErrUnsupportedPlatform => r#"A unidade selecionada não é MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"É necessário o caminho do firmware para esta operação"#,
-    L10nKey::ErrMissingOutputDirectory => r#"É necessária uma pasta de saída para o dump de firmware"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"O modo de recuperação requer um boot token de 16 bytes do firmware errado atualmente instalado"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"O boot token de recuperação deve ter exatamente 16 bytes ASCII imprimíveis"#,
-    L10nKey::ErrConfirmationMismatch => r#"Confirmação incorreta: escreva „{expected}“ para continuar"#,
-    L10nKey::ErrConflictingWriteModes => r#"Não é possível combinar rawflash encriptado e rawflash com boot-loader"#,
 } }
 
 translations! { fn t_pt_br {
@@ -3171,15 +2323,6 @@ translations! { fn t_pt_br {
     L10nKey::LogSdfFlags => r#"  Criptografado: {encrypted} | Comprimido: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"ERRO: não é possível ler sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"O caminho do executável SDFtool é obrigatório"#,
-    L10nKey::ErrMissingDrive => r#"É necessário selecionar uma unidade antes de planejar uma operação de firmware"#,
-    L10nKey::ErrUnsupportedPlatform => r#"A unidade selecionada não é MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"O caminho do firmware é obrigatório para esta operação"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Uma pasta de saída é obrigatória para o dump de firmware"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"O modo de recuperação requer um boot token de 16 bytes do firmware errado atualmente instalado"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"O boot token de recuperação deve ter exatamente 16 bytes ASCII imprimíveis"#,
-    L10nKey::ErrConfirmationMismatch => r#"Confirmação incorreta: digite „{expected}“ para continuar"#,
-    L10nKey::ErrConflictingWriteModes => r#"Não é possível combinar rawflash criptografado e rawflash com boot-loader"#,
 } }
 
 translations! { fn t_ro {
@@ -3290,15 +2433,6 @@ translations! { fn t_ro {
     L10nKey::LogSdfFlags => r#"  Criptat: {encrypted} | Comprimat: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"EROARE: nu se poate citi sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Este necesară calea către executabilul SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"Trebuie selectată o unitate înainte de planificarea operației firmware"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Unitatea selectată nu este MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Pentru această operație este necesară calea firmware"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Pentru dump-ul firmware este necesar un folder de ieșire"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Modul de recuperare necesită un boot token de 16 octeți din firmware-ul greșit instalat în prezent"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Boot token-ul de recuperare trebuie să aibă exact 16 octeți ASCII imprimabili"#,
-    L10nKey::ErrConfirmationMismatch => r#"Confirmare incorectă: tastați „{expected}“ pentru a continua"#,
-    L10nKey::ErrConflictingWriteModes => r#"Rawflash criptat și rawflash cu boot-loader nu pot fi combinate"#,
 } }
 
 translations! { fn t_ru {
@@ -3409,15 +2543,6 @@ translations! { fn t_ru {
     L10nKey::LogSdfFlags => r#"  Зашифровано: {encrypted} | Сжато: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"ОШИБКА: не удалось прочитать sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Требуется путь к исполняемому файлу SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"Перед планированием операции с прошивкой необходимо выбрать привод"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Выбранный привод не является MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Для этой операции требуется путь к прошивке"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Для дампа прошивки требуется папка вывода"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Режим восстановления требует 16-байтовый boot token из текущей установленной неверной прошивки"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Boot token восстановления должен содержать ровно 16 печатаемых ASCII-байт"#,
-    L10nKey::ErrConfirmationMismatch => r#"Несовпадение подтверждения: введите „{expected}“ для продолжения"#,
-    L10nKey::ErrConflictingWriteModes => r#"Нельзя сочетать зашифрованный rawflash и rawflash с загрузчиком"#,
 } }
 
 translations! { fn t_sk {
@@ -3528,15 +2653,6 @@ translations! { fn t_sk {
     L10nKey::LogSdfFlags => r#"  Šifrované: {encrypted} | Komprimované: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"CHYBA: nemožno prečítať sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Vyžaduje sa cesta k spustiteľnému súboru SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"Pred plánovaním operácie s firmvérom musíte vybrať jednotku"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Vybraná jednotka nie je MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Pre túto operáciu je potrebná cesta k firmvéru"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Pre dump firmvéru je potrebný výstupný adresár"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Režim obnovy vyžaduje 16-bajtový boot token z aktuálne nainštalovaného nesprávneho firmvéru"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Boot token obnovy musí mať presne 16 tlačiteľných ASCII bajtov"#,
-    L10nKey::ErrConfirmationMismatch => r#"Nesúlad potvrdenia: na pokračovanie zadajte „{expected}“"#,
-    L10nKey::ErrConflictingWriteModes => r#"Šifrovaný rawflash a rawflash s boot-loaderom nemožno kombinovať"#,
 } }
 
 translations! { fn t_sl {
@@ -3647,15 +2763,6 @@ translations! { fn t_sl {
     L10nKey::LogSdfFlags => r#"  Šifrirano: {encrypted} | Stisnjeno: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"NAPAKA: sdf.bin ni mogoče prebrati: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Pot do izvršljive datoteke SDFtool je obvezna"#,
-    L10nKey::ErrMissingDrive => r#"Pred načrtovanjem operacije firmware morate izbrati pogon"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Izbrani pogon ni MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Za to operacijo je potrebna pot do firmware"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Za izpis firmware je potrebna izhodna mapa"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Način obnovitve zahteva 16-bajtni boot žeton iz trenutno nameščenega napačnega firmware"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Boot žeton za obnovitev mora imeti natanko 16 tiskljivih ASCII bajtov"#,
-    L10nKey::ErrConfirmationMismatch => r#"Potrditev se ne ujema: za nadaljevanje vnesite „{expected}“"#,
-    L10nKey::ErrConflictingWriteModes => r#"Šifriranega rawflash in rawflash z boot-loaderjem ni mogoče kombinirati"#,
 } }
 
 translations! { fn t_es {
@@ -3766,15 +2873,6 @@ translations! { fn t_es {
     L10nKey::LogSdfFlags => r#"  Cifrado: {encrypted} | Comprimido: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"ERROR: no se puede leer sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Se requiere la ruta del ejecutable SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"Debe seleccionarse una unidad antes de planificar una operación de firmware"#,
-    L10nKey::ErrUnsupportedPlatform => r#"La unidad seleccionada no es MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Se requiere la ruta del firmware para esta operación"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Se requiere una carpeta de salida para el volcado de firmware"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"El modo de recuperación requiere un token de arranque de 16 bytes del firmware incorrecto instalado actualmente"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"El token de arranque de recuperación debe tener exactamente 16 bytes ASCII imprimibles"#,
-    L10nKey::ErrConfirmationMismatch => r#"Confirmación incorrecta: escriba „{expected}“ para continuar"#,
-    L10nKey::ErrConflictingWriteModes => r#"No se pueden combinar rawflash cifrado y rawflash con cargador de arranque"#,
 } }
 
 translations! { fn t_sv {
@@ -3885,15 +2983,6 @@ translations! { fn t_sv {
     L10nKey::LogSdfFlags => r#"  Krypterad: {encrypted} | Komprimerad: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"FEL: kan inte läsa sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Sökväg till SDFtool-körbar fil krävs"#,
-    L10nKey::ErrMissingDrive => r#"En enhet måste väljas innan en firmwareoperation planeras"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Vald enhet är inte MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Firmwaresökväg krävs för denna operation"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Utmapp krävs för firmware-dump"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Återställningsläge kräver ett 16-byte boot-token från felaktig firmware som är installerad nu"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Återställnings-boot-token måste vara exakt 16 utskrivbara ASCII-byte"#,
-    L10nKey::ErrConfirmationMismatch => r#"Bekräftelse stämmer inte: skriv „{expected}“ för att fortsätta"#,
-    L10nKey::ErrConflictingWriteModes => r#"Krypterad rawflash och boot-loader rawflash kan inte kombineras"#,
 } }
 
 translations! { fn t_tr {
@@ -4004,15 +3093,6 @@ translations! { fn t_tr {
     L10nKey::LogSdfFlags => r#"  Şifreli: {encrypted} | Sıkıştırılmış: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"HATA: sdf.bin okunamıyor: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"SDFtool yürütülebilir dosya yolu gerekli"#,
-    L10nKey::ErrMissingDrive => r#"Ürün yazılımı işlemi planlanmadan önce bir sürücü seçilmelidir"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Seçilen sürücü MT1959 değil"#,
-    L10nKey::ErrMissingFirmware => r#"Bu işlem için ürün yazılımı yolu gerekli"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Ürün yazılımı dökümü için çıktı klasörü gerekli"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Kurtarma modu, şu anda yüklü yanlış ürün yazılımından 16 baytlık boot token gerektirir"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Kurtarma boot token tam olarak 16 yazdırılabilir ASCII bayt olmalıdır"#,
-    L10nKey::ErrConfirmationMismatch => r#"Onay uyuşmuyor: devam etmek için „{expected}“ yazın"#,
-    L10nKey::ErrConflictingWriteModes => r#"Şifreli rawflash ve önyükleyici rawflash birleştirilemez"#,
 } }
 
 translations! { fn t_uk {
@@ -4123,567 +3203,4 @@ translations! { fn t_uk {
     L10nKey::LogSdfFlags => r#"  Зашифровано: {encrypted} | Стиснуто: {compressed}"#,
     L10nKey::LogSdfExtraField => r#"  {key}: {value}"#,
     L10nKey::LogSdfReadFailed => r#"ПОМИЛКА: не вдалося прочитати sdf.bin: {error}"#,
-    L10nKey::ErrMissingToolPath => r#"Потрібен шлях до виконуваного файлу SDFtool"#,
-    L10nKey::ErrMissingDrive => r#"Перед плануванням операції з прошивкою потрібно вибрати привід"#,
-    L10nKey::ErrUnsupportedPlatform => r#"Вибраний привід не є MT1959"#,
-    L10nKey::ErrMissingFirmware => r#"Для цієї операції потрібен шлях до прошивки"#,
-    L10nKey::ErrMissingOutputDirectory => r#"Для дампу прошивки потрібна папка виводу"#,
-    L10nKey::ErrMissingRecoveryBootToken => r#"Режим відновлення потребує 16-байтовий boot token з поточної встановленої неправильної прошивки"#,
-    L10nKey::ErrInvalidRecoveryBootToken => r#"Boot token відновлення має містити рівно 16 друкованих ASCII-байт"#,
-    L10nKey::ErrConfirmationMismatch => r#"Підтвердження не збігається: введіть „{expected}“ для продовження"#,
-    L10nKey::ErrConflictingWriteModes => r#"Неможливо поєднати зашифрований rawflash і rawflash із завантажувачем"#,
 } }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_language_display_names() {
-        for lang in Language::ALL {
-            let name = lang.display_name();
-            assert!(!name.is_empty());
-        }
-    }
-
-    #[test]
-    fn test_locale_region_fallback_portuguese() {
-        assert_eq!(locale_to_language("pt-PT"), Language::Portuguese);
-        assert_eq!(
-            detect_system_language_from_locale(Some("pt-PT")),
-            Language::Portuguese
-        );
-    }
-
-    #[test]
-    fn test_locale_region_fallback_from_unknown_primary() {
-        // Primary tag is unknown; suffix "pt" should resolve via region fallback.
-        assert_eq!(
-            detect_system_language_from_locale(Some("xx-pt")),
-            Language::Portuguese
-        );
-    }
-
-    #[test]
-    fn test_detect_system_language_no_locale() {
-        assert_eq!(detect_system_language_from_locale(None), Language::English);
-    }
-
-    #[test]
-    fn test_resolve_language() {
-        // Test that resolving a specific language returns itself
-        assert_eq!(resolve_language(Language::French), Language::French);
-        assert_eq!(resolve_language(Language::Spanish), Language::Spanish);
-
-        // Test resolving Auto
-        let resolved = resolve_language(Language::Auto);
-        // It should match whatever detect_system_language() returns
-        assert_eq!(resolved, detect_system_language());
-    }
-
-    const ALL_KEYS: &[L10nKey] = &[
-        L10nKey::TitleDriveProperties,
-        L10nKey::LabelDevice,
-        L10nKey::SectionOperation,
-        L10nKey::TabWrite,
-        L10nKey::TabRead,
-        L10nKey::TabRecover,
-        L10nKey::OptionBootloader,
-        L10nKey::OptionEncrypted,
-        L10nKey::SectionFirmwareImage,
-        L10nKey::BtnBrowse,
-        L10nKey::SectionStatus,
-        L10nKey::LabelTypeToConfirm,
-        L10nKey::LabelWrongFw,
-        L10nKey::BtnExtract,
-        L10nKey::BtnStart,
-        L10nKey::BtnStop,
-        L10nKey::MenuQuit,
-        L10nKey::TooltipStop,
-        L10nKey::TitleStopWarning,
-        L10nKey::LabelStopWarningMsg,
-        L10nKey::LabelStopWarningDesc,
-        L10nKey::LabelStopWarningAsk,
-        L10nKey::BtnStopNo,
-        L10nKey::BtnStopYes,
-        L10nKey::TitleForceKillWarning,
-        L10nKey::LabelForceKillMsg,
-        L10nKey::LabelForceKillDesc,
-        L10nKey::LabelForceKillAsk,
-        L10nKey::BtnForceKillNo,
-        L10nKey::BtnForceKillYes,
-        L10nKey::StatusCancelling,
-        L10nKey::StatusOpCancelled,
-        L10nKey::LogOpCancelled,
-        L10nKey::StatusReady,
-        L10nKey::StatusNoDrives,
-        L10nKey::StatusProbing,
-        L10nKey::StatusProbeFailed,
-        L10nKey::StatusOpSuccess,
-        L10nKey::TooltipRefresh,
-        L10nKey::TooltipSettings,
-        L10nKey::TooltipAbout,
-        L10nKey::TooltipStartEnabled,
-        L10nKey::TitleExitWarning,
-        L10nKey::LabelExitWarningMsg,
-        L10nKey::LabelExitWarningDesc,
-        L10nKey::LabelExitWarningAsk,
-        L10nKey::BtnNoCancel,
-        L10nKey::BtnYesForce,
-        L10nKey::TitleSettings,
-        L10nKey::LabelBackend,
-        L10nKey::LabelToolPath,
-        L10nKey::LabelSdfPath,
-        L10nKey::BtnListDrives,
-        L10nKey::BtnParseSdf,
-        L10nKey::LabelAutodetected,
-        L10nKey::LabelLanguage,
-        L10nKey::AboutDescription,
-        L10nKey::AboutBuiltWith,
-        L10nKey::AboutAcknowledgementsTitle,
-        L10nKey::AboutBackendAckText,
-        L10nKey::AboutCreatorAckText,
-        L10nKey::ReasonBusy,
-        L10nKey::ReasonProbing,
-        L10nKey::ReasonNoDrive,
-        L10nKey::ReasonNotMt1959,
-        L10nKey::ReasonNoBackend,
-        L10nKey::ReasonNoFirmware,
-        L10nKey::ReasonConflict,
-        L10nKey::ReasonEnterToken,
-        L10nKey::LabelManufacturer,
-        L10nKey::LabelProduct,
-        L10nKey::LabelRevision,
-        L10nKey::LabelSerial,
-        L10nKey::LabelFirmwareDate,
-        L10nKey::LabelMt1959Platform,
-        L10nKey::LabelEncryptedFirmware,
-        L10nKey::LabelLibreDrive,
-        L10nKey::LibreDriveEnabled,
-        L10nKey::LibreDrivePossible,
-        L10nKey::LibreDriveNotAvailable,
-        L10nKey::LibreDriveUnknown,
-        L10nKey::LabelSdfVersion,
-        L10nKey::WarnCannotCombine,
-        L10nKey::StatusReadyText,
-        L10nKey::LogReady,
-        L10nKey::StatusNoDrivesFound,
-        L10nKey::StatusDrivesFound,
-        L10nKey::LabelToken,
-        L10nKey::WarnFirmwareLoadFailed,
-        L10nKey::LabelAppName,
-        L10nKey::LabelGithubRepo,
-        L10nKey::LabelVersion,
-        L10nKey::BackendSdftool,
-        L10nKey::BackendMakeMkv,
-        L10nKey::BtnAutoDetect,
-        L10nKey::StatusNotFound,
-        L10nKey::StatusPathValid,
-        L10nKey::StatusOptional,
-        L10nKey::StatusHintRead,
-        L10nKey::StatusHintWrite,
-        L10nKey::StatusHintRecover,
-        L10nKey::ReasonInvalidToolPath,
-        L10nKey::ReasonInvalidSdfPath,
-        L10nKey::StatusReadingFirmware,
-        L10nKey::StatusWritingFirmware,
-        L10nKey::StatusRecoveringDrive,
-        L10nKey::DialogTitleWrongFirmware,
-        L10nKey::StatusOpFinished,
-        L10nKey::StatusOpFailed,
-        L10nKey::StatusListingDrives,
-        L10nKey::StatusDriveListFailed,
-        L10nKey::ValPathEmpty,
-        L10nKey::ValFileNotExist,
-        L10nKey::ValPathNotFile,
-        L10nKey::ValMustContainSdftool,
-        L10nKey::ValMustContainMakemkv,
-        L10nKey::ValExtMustBeBin,
-        L10nKey::ThemeSystem,
-        L10nKey::ThemeDark,
-        L10nKey::ThemeLight,
-        L10nKey::LogErrGeneric,
-        L10nKey::LogFirmwareEmpty,
-        L10nKey::LogFirmwareReadFailed,
-        L10nKey::LogFirmwareLoaded,
-        L10nKey::LogRecoverSelectWrongFw,
-        L10nKey::LogRecoveryTokenExtracted,
-        L10nKey::LogProbeResult,
-        L10nKey::LogParsedDrivesFromOutput,
-        L10nKey::LogSdfHeader,
-        L10nKey::LogSdfVendor,
-        L10nKey::LogSdfModel,
-        L10nKey::LogSdfFirmware,
-        L10nKey::LogSdfFlags,
-        L10nKey::LogSdfExtraField,
-        L10nKey::LogSdfReadFailed,
-        L10nKey::ErrMissingToolPath,
-        L10nKey::ErrMissingDrive,
-        L10nKey::ErrUnsupportedPlatform,
-        L10nKey::ErrMissingFirmware,
-        L10nKey::ErrMissingOutputDirectory,
-        L10nKey::ErrMissingRecoveryBootToken,
-        L10nKey::ErrInvalidRecoveryBootToken,
-        L10nKey::ErrConfirmationMismatch,
-        L10nKey::ErrConflictingWriteModes,
-        L10nKey::LabelFlashSummaryTitle,
-        L10nKey::LabelFlashSummaryDrive,
-        L10nKey::LabelFlashSummaryFirmware,
-        L10nKey::LabelFlashSummaryMode,
-        L10nKey::FlashModeStandard,
-        L10nKey::FlashModeEncrypted,
-        L10nKey::FlashModeBootloader,
-        L10nKey::FlashModeRecover,
-        L10nKey::TitleFlashFailure,
-        L10nKey::LabelFlashFailureMsg,
-        L10nKey::LabelFlashFailureStep1,
-        L10nKey::LabelFlashFailureStep2,
-        L10nKey::LabelFlashFailureStep3,
-        L10nKey::BtnFlashFailureDismiss,
-        L10nKey::LabelNotAvailable,
-        L10nKey::BannerNoBackend,
-        L10nKey::LinkGetMakeMkv,
-        L10nKey::OptionDryRunOnly,
-        L10nKey::LogDryRunCommand,
-        L10nKey::HintFlashNoCancel,
-        L10nKey::HelpEmptyDrives,
-        L10nKey::LabelTokenLength,
-        L10nKey::WarnPlatformMismatch,
-        L10nKey::WarnCrossFlashConfirm,
-        L10nKey::ReasonCrossFlashNotConfirmed,
-        L10nKey::InfoTwoStepFlash,
-        L10nKey::WarnFirmwareDowngrade,
-        L10nKey::InfoFirmwareModelMismatch,
-        L10nKey::ReasonMt1939NotCompatible,
-    ];
-
-    #[test]
-    fn test_all_keys_non_empty_for_each_language() {
-        for &lang in Language::ALL {
-            if lang == Language::Auto {
-                continue;
-            }
-            for key in ALL_KEYS {
-                assert!(!t(*key, lang).is_empty(), "{lang:?} missing {key:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn test_translation_keys() {
-        assert_eq!(
-            ALL_KEYS.len(),
-            173,
-            "L10nKey variant count changed — update ALL_KEYS if intentional"
-        );
-        for key in ALL_KEYS {
-            let translation = t(*key, Language::English);
-            assert!(
-                !translation.is_empty(),
-                "empty translation for key: {key:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_translation_with_args() {
-        let args = [("required", "WRITE")];
-        let translation = t_with_args(L10nKey::LabelTypeToConfirm, Language::English, &args);
-        assert_eq!(translation, "Type \"WRITE\" to confirm:");
-    }
-
-    #[test]
-    fn test_platform_safety_keys_in_all_keys() {
-        let new_keys = [
-            L10nKey::WarnPlatformMismatch,
-            L10nKey::WarnCrossFlashConfirm,
-            L10nKey::ReasonCrossFlashNotConfirmed,
-            L10nKey::InfoTwoStepFlash,
-            L10nKey::WarnFirmwareDowngrade,
-            L10nKey::InfoFirmwareModelMismatch,
-            L10nKey::ReasonMt1939NotCompatible,
-        ];
-        for &key in &new_keys {
-            assert!(
-                ALL_KEYS.contains(&key),
-                "new safety key {key:?} missing from ALL_KEYS"
-            );
-        }
-    }
-
-    #[test]
-    fn test_platform_safety_keys_non_empty_english() {
-        let keys = [
-            L10nKey::WarnPlatformMismatch,
-            L10nKey::WarnCrossFlashConfirm,
-            L10nKey::ReasonCrossFlashNotConfirmed,
-            L10nKey::InfoTwoStepFlash,
-            L10nKey::WarnFirmwareDowngrade,
-            L10nKey::InfoFirmwareModelMismatch,
-            L10nKey::ReasonMt1939NotCompatible,
-        ];
-        for &key in &keys {
-            let text = t(key, Language::English);
-            assert!(!text.is_empty(), "empty English text for {key:?}");
-        }
-    }
-
-    #[test]
-    fn test_locale_to_language_all_prefixes() {
-        let cases = [
-            ("bg", Language::Bulgarian),
-            ("bg-BG", Language::Bulgarian),
-            ("hr", Language::Croatian),
-            ("hr-HR", Language::Croatian),
-            ("cs", Language::Czech),
-            ("cs-CZ", Language::Czech),
-            ("da", Language::Danish),
-            ("da-DK", Language::Danish),
-            ("nl", Language::Dutch),
-            ("nl-NL", Language::Dutch),
-            ("et", Language::Estonian),
-            ("et-EE", Language::Estonian),
-            ("fi", Language::Finnish),
-            ("fi-FI", Language::Finnish),
-            ("fr", Language::French),
-            ("fr-FR", Language::French),
-            ("gl", Language::Galician),
-            ("gl-ES", Language::Galician),
-            ("de", Language::German),
-            ("de-DE", Language::German),
-            ("el", Language::Greek),
-            ("el-GR", Language::Greek),
-            ("hu", Language::Hungarian),
-            ("hu-HU", Language::Hungarian),
-            ("id", Language::Indonesian),
-            ("id-ID", Language::Indonesian),
-            ("it", Language::Italian),
-            ("it-IT", Language::Italian),
-            ("lv", Language::Latvian),
-            ("lv-LV", Language::Latvian),
-            ("lt", Language::Lithuanian),
-            ("lt-LT", Language::Lithuanian),
-            ("ms", Language::Malay),
-            ("ms-MY", Language::Malay),
-            ("nb", Language::Norwegian),
-            ("nb-NO", Language::Norwegian),
-            ("no", Language::Norwegian),
-            ("nn", Language::Norwegian),
-            ("pl", Language::Polish),
-            ("pl-PL", Language::Polish),
-            ("pt-br", Language::PortugueseBrazilian),
-            ("pt-BR", Language::PortugueseBrazilian),
-            ("pt", Language::Portuguese),
-            ("pt-PT", Language::Portuguese),
-            ("ro", Language::Romanian),
-            ("ro-RO", Language::Romanian),
-            ("ru", Language::Russian),
-            ("ru-RU", Language::Russian),
-            ("sk", Language::Slovak),
-            ("sk-SK", Language::Slovak),
-            ("sl", Language::Slovenian),
-            ("sl-SI", Language::Slovenian),
-            ("es", Language::Spanish),
-            ("es-ES", Language::Spanish),
-            ("sv", Language::Swedish),
-            ("sv-SE", Language::Swedish),
-            ("tr", Language::Turkish),
-            ("tr-TR", Language::Turkish),
-            ("uk", Language::Ukrainian),
-            ("uk-UA", Language::Ukrainian),
-            ("en", Language::English),
-            ("en-US", Language::English),
-            ("ja", Language::English), // unsupported → English
-            ("zh-CN", Language::English),
-        ];
-        for (locale, expected) in &cases {
-            assert_eq!(
-                locale_to_language(locale),
-                *expected,
-                "locale_to_language({locale}) should return {expected:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_all_display_names_unique() {
-        let mut names = std::collections::HashSet::new();
-        for lang in Language::ALL {
-            let name = lang.display_name();
-            assert!(names.insert(name), "duplicate display name: {name}");
-        }
-    }
-
-    #[test]
-    fn test_display_name_japanese_not_present() {
-        // Japanese is not in the supported list
-        assert!(!Language::ALL
-            .iter()
-            .any(|l| l.display_name().contains("Japanese")));
-    }
-
-    #[test]
-    fn test_resolve_language_specific() {
-        for lang in Language::ALL {
-            if *lang == Language::Auto {
-                continue;
-            }
-            assert_eq!(resolve_language(*lang), *lang);
-        }
-    }
-
-    #[test]
-    fn test_t_with_args_no_args() {
-        let text = t_with_args(L10nKey::TitleDriveProperties, Language::English, &[]);
-        assert_eq!(text, "Drive Properties");
-    }
-
-    #[test]
-    fn test_t_with_args_multiple_args() {
-        // LabelTypeToConfirm has {required} placeholder
-        let args = [("required", "FLASH H:")];
-        let text = t_with_args(L10nKey::LabelTypeToConfirm, Language::English, &args);
-        assert!(text.contains("FLASH H:"));
-    }
-
-    #[test]
-    fn test_t_with_args_missing_placeholder() {
-        // If placeholder doesn't exist, text should be unchanged
-        let args = [("nonexistent", "value")];
-        let text = t_with_args(L10nKey::TitleDriveProperties, Language::English, &args);
-        assert_eq!(text, "Drive Properties");
-    }
-
-    #[test]
-    fn test_language_all_count() {
-        // 31 languages including Auto
-        assert_eq!(Language::ALL.len(), 31);
-    }
-
-    #[test]
-    fn test_translation_dispatch_returns_language_specific_text() {
-        // German has real translations — should differ from English
-        let en = t(L10nKey::TitleSettings, Language::English);
-        let de = t(L10nKey::TitleSettings, Language::German);
-        assert_eq!(en, "Settings");
-        assert_eq!(de, "Einstellungen");
-        assert_ne!(en, de, "German translation should differ from English");
-    }
-
-    #[test]
-    fn test_auto_language_falls_back_to_english() {
-        // Language::Auto should return English (resolve happens outside t())
-        let en = t(L10nKey::TitleSettings, Language::English);
-        let auto = t(L10nKey::TitleSettings, Language::Auto);
-        assert_eq!(en, auto, "Language::Auto should fall back to English");
-    }
-
-    #[test]
-    fn test_german_translations_complete() {
-        // German has full translations — spot-check keys where the text must differ
-        let must_differ = [
-            L10nKey::TitleSettings,
-            L10nKey::LabelToolPath,
-            L10nKey::BtnListDrives,
-            L10nKey::BtnParseSdf,
-            L10nKey::LabelAutodetected,
-            L10nKey::LabelLanguage,
-            L10nKey::BtnStart,
-            L10nKey::StatusReady,
-            L10nKey::TooltipSettings,
-        ];
-        for key in must_differ {
-            let text = t(key, Language::German);
-            assert!(!text.is_empty(), "German translation missing for {key:?}");
-            assert_ne!(
-                text,
-                t(key, Language::English),
-                "German should have a real translation for {key:?}, not English fallback"
-            );
-        }
-        // Keys like "Backend:", "sdf.bin:" are the same in German — just verify non-empty
-        let same_in_both = [L10nKey::LabelBackend, L10nKey::LabelSdfPath];
-        for key in same_in_both {
-            let text = t(key, Language::German);
-            assert!(!text.is_empty(), "German translation missing for {key:?}");
-        }
-    }
-
-    /// GUI log/error keys added for ops/workers — must be defined in every locale table.
-    const LOG_KEYS: &[L10nKey] = &[
-        L10nKey::LogErrGeneric,
-        L10nKey::LogFirmwareEmpty,
-        L10nKey::LogFirmwareReadFailed,
-        L10nKey::LogFirmwareLoaded,
-        L10nKey::LogRecoverSelectWrongFw,
-        L10nKey::LogRecoveryTokenExtracted,
-        L10nKey::LogProbeResult,
-        L10nKey::LogParsedDrivesFromOutput,
-        L10nKey::LogSdfHeader,
-        L10nKey::LogSdfVendor,
-        L10nKey::LogSdfModel,
-        L10nKey::LogSdfFirmware,
-        L10nKey::LogSdfFlags,
-        L10nKey::LogSdfExtraField,
-        L10nKey::LogSdfReadFailed,
-        L10nKey::ErrMissingToolPath,
-        L10nKey::ErrMissingDrive,
-        L10nKey::ErrUnsupportedPlatform,
-        L10nKey::ErrMissingFirmware,
-        L10nKey::ErrMissingOutputDirectory,
-        L10nKey::ErrMissingRecoveryBootToken,
-        L10nKey::ErrInvalidRecoveryBootToken,
-        L10nKey::ErrConfirmationMismatch,
-        L10nKey::ErrConflictingWriteModes,
-    ];
-
-    #[test]
-    fn test_plan_error_message_all_variants() {
-        use crate::command::PlanError;
-        let lang = Language::German;
-        assert!(!plan_error_message(&PlanError::MissingToolPath, lang).is_empty());
-        assert!(!plan_error_message(&PlanError::MissingDrive, lang).is_empty());
-        assert!(!plan_error_message(&PlanError::UnsupportedPlatform, lang).is_empty());
-        assert!(!plan_error_message(&PlanError::MissingFirmware, lang).is_empty());
-        assert!(!plan_error_message(&PlanError::MissingOutputDirectory, lang).is_empty());
-        assert!(!plan_error_message(&PlanError::MissingRecoveryBootToken, lang).is_empty());
-        assert!(!plan_error_message(&PlanError::InvalidRecoveryBootToken, lang).is_empty());
-        assert!(plan_error_message(
-            &PlanError::ConfirmationMismatch {
-                expected: "YES".into()
-            },
-            lang
-        )
-        .contains("YES"));
-        assert!(!plan_error_message(&PlanError::ConflictingWriteModes, lang).is_empty());
-    }
-
-    #[test]
-    fn test_log_error_helper() {
-        let msg = log_error(Language::Spanish, "boom");
-        assert!(msg.contains("boom"));
-    }
-
-    #[test]
-    fn test_log_keys_translated_all_languages() {
-        for lang in Language::ALL {
-            if matches!(lang, Language::Auto | Language::English) {
-                continue;
-            }
-            let mut localized = 0usize;
-            for key in LOG_KEYS {
-                let text = t(*key, *lang);
-                assert!(!text.is_empty(), "{lang:?} missing translation for {key:?}");
-                if text != t(*key, Language::English) {
-                    localized += 1;
-                }
-            }
-            // Allow a few technical strings to match English (e.g. SDF0 header, ERROR prefix).
-            let min_localized = LOG_KEYS.len() - 6;
-            assert!(
-                localized >= min_localized,
-                "{lang:?} has too many English fallbacks for log keys ({localized}/{min_localized})"
-            );
-        }
-    }
-}
