@@ -55,13 +55,41 @@ def load_codecov_ignore() -> list[str]:
     return paths
 
 
+def codecov_yml_nests_comment_under_coverage(text: str) -> bool:
+    """Historical footgun: comment: under coverage: invalidates the whole file."""
+    in_coverage = False
+    coverage_indent = -1
+    for line in text.splitlines():
+        if re.match(r"^coverage:\s*$", line):
+            in_coverage = True
+            coverage_indent = 0
+            continue
+        if not in_coverage:
+            continue
+        if line.strip() and not line.startswith(" ") and not line.startswith("\t"):
+            # top-level key again
+            in_coverage = False
+            continue
+        if re.match(r"^\s+comment:\s*$", line):
+            return True
+    return False
+
+
 def main() -> int:
     regexes = load_regex_patterns()
     codecov = load_codecov_ignore()
     expected_codecov = [c for c, _ in EXPECTED]
     expected_regex = [r for _, r in EXPECTED]
+    yml = CODECOV_YML.read_text()
 
     ok = True
+    if codecov_yml_nests_comment_under_coverage(yml):
+        print(
+            "FAIL: codecov.yml nests `comment:` under `coverage:` — Codecov rejects "
+            "the whole file and falls back to defaults (relative drop checks).",
+            file=sys.stderr,
+        )
+        ok = False
     if regexes != expected_regex:
         print("FAIL: scripts/coverage-ignore.regex does not match expected set:", file=sys.stderr)
         print(f"  file:     {regexes}", file=sys.stderr)

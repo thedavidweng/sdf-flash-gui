@@ -128,6 +128,18 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: python3 scripts/coverage-ignore-sync-check.py
 
+      - name: Validate codecov.yml
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # Reject invalid YAML before upload — an invalid file makes Codecov
+          # ignore all settings (absolute floor, ignore paths) and use defaults.
+          resp="$(curl -sS --data-binary @codecov.yml https://codecov.io/validate)"
+          echo "$resp"
+          echo "$resp" | grep -q '^Valid!' || {
+            echo "error: codecov.yml failed validation (Codecov would ignore it)" >&2
+            exit 1
+          }
+
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v7
@@ -138,3 +150,5 @@ jobs:
           files: lcov.info
           disable_search: true
           fail_ci_if_error: false
+          # Re-send status after processing so project/patch use this commit's yaml.
+          handle_no_reports_found: false
