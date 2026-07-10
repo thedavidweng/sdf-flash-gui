@@ -1,43 +1,35 @@
+# Validated with: curl --data-binary @codecov.yml https://codecov.io/validate
+# NOTE: `comment` is TOP-LEVEL (not under coverage:). Nesting it under coverage
+# makes Codecov reject the whole file and fall back to defaults (relative drop).
+
 coverage:
   status:
     project:
       default:
-        # Fixed floor (not auto) — near-100% auto baselines flake when domain
-        # code grows even if every changed line is covered (patch is the real gate).
+        # Absolute floor — same as scripts/coverage-gate.py PROJECT_MIN (99%).
         target: 99%
-        threshold: 0%
+        # Codecov threshold = allowed drop vs base commit. 100% disables the
+        # "must not decrease from main" check so only `target` applies (matches gate).
+        threshold: 100%
     patch:
       default:
-        # New/changed lines must be fully covered.
+        # Same as coverage-gate.py patch: every changed executable line covered.
         target: 100%
         threshold: 0%
 
-  comment:
-    layout: "condensed_header, condensed_files, condensed_footer"
-    require_changes: true
-    hide_project_coverage: false
+# Top-level (Codecov rejects this under coverage:)
+comment:
+  layout: "condensed_header, condensed_files, condensed_footer"
+  require_changes: true
+  hide_project_coverage: false
 
-# Paths excluded from Codecov metrics.
-# Keep in sync with scripts/coverage-ignore.regex (llvm-cov) and Agents.md.
-#
-# Do NOT ignore domain logic: command, flash, orchestration, process (lifecycle),
-# sdf, manifest, gui/ops, gui/workers, gui/state, gui/validation, i18n.
+# Keep in sync with scripts/coverage-ignore.regex (CI: coverage-ignore-sync-check.py).
+# Do NOT ignore domain logic: command, flash, orchestration, process, sdf,
+# drive/parse, gui/ops, gui/workers, gui/state, gui/validation, i18n.
 ignore:
-  # Binary entry: eframe launch + CLI process::exit
   - "src/main.rs"
-  # eframe App shell / native window lifecycle
   - "src/gui/mod.rs"
-  # egui view rendering only (logic is in ops/workers)
   - "src/gui/views/**"
-  # OS-specific drive enumerate + backend discovery
-  - "src/drive.rs"
-  # rfd native file dialog adapter (mocked at FileDialog trait)
+  - "src/drive/os.rs"
   - "src/gui/file_dialog.rs"
-  # NativeRunner thin OS process adapter (mocked at ProcessRunner trait)
   - "src/process_runner.rs"
-
-flags:
-  unit:
-    paths:
-      - src/
-    carryforward: true

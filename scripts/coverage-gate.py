@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Enforce the same coverage gates Codecov applies on Ubuntu CI.
+"""Enforce the same coverage gates as codecov.yml (absolute floors).
 
 Reads lcov.info (from `./scripts/coverage.sh lcov`) and:
   1. Project: line hit rate among non-ignored files must be >= PROJECT_MIN (99%).
+     Absolute floor only — no “must not drop vs base” rule (see codecov.yml
+     project.threshold: 100%).
   2. Patch: every executable changed line in non-ignored files under src/ must
-     have hit count > 0 vs BASE (default: origin/main or main).
+     have hit count > 0 vs BASE (default: origin/main or main) → 100%.
 
-This is the local/CI gate that prevents "Codecov fails after push" surprises.
+Ignore set: scripts/coverage-ignore.regex (must match codecov.yml `ignore:` —
+checked by scripts/coverage-ignore-sync-check.py in CI).
 """
 
 from __future__ import annotations

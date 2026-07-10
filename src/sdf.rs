@@ -336,41 +336,60 @@ fn parse_metadata_table(buf: &[u8]) -> Result<SdfMetadata, SdfError> {
     Ok(metadata)
 }
 
+/// Shared field view for CLI and GUI presentation (one place for field list).
+#[derive(Debug, Clone, Copy)]
+pub struct ContainerPresentation<'a> {
+    pub version: u32,
+    pub header_size: u32,
+    pub table_offset: u32,
+    pub flags: u32,
+    pub payload_offset: u32,
+    pub encrypted: bool,
+    pub compressed: bool,
+    pub vendor: Option<&'a str>,
+    pub model: Option<&'a str>,
+    pub firmware: Option<&'a str>,
+    pub extra: &'a [(String, String)],
+}
+
+/// Extract presentation fields from a parsed container.
+pub fn container_presentation(container: &SdfContainer) -> ContainerPresentation<'_> {
+    ContainerPresentation {
+        version: container.header.version,
+        header_size: container.header.header_size,
+        table_offset: container.header.table_offset,
+        flags: container.header.flags,
+        payload_offset: container.payload.offset,
+        encrypted: container.payload.encrypted,
+        compressed: container.payload.compressed,
+        vendor: container.metadata.vendor.as_deref(),
+        model: container.metadata.model.as_deref(),
+        firmware: container.metadata.firmware_version.as_deref(),
+        extra: container.metadata.extra.as_slice(),
+    }
+}
+
 /// CLI text output for `sdf-info`.
 pub fn format_container_cli(container: &SdfContainer, file: &str) -> String {
+    let p = container_presentation(container);
     let mut out = format!("SDF0 Container: {file}\n");
-    out.push_str(&format!("  Version:        {}\n", container.header.version));
-    out.push_str(&format!(
-        "  Header size:    {}\n",
-        container.header.header_size
-    ));
-    out.push_str(&format!(
-        "  Table offset:   {}\n",
-        container.header.table_offset
-    ));
-    out.push_str(&format!(
-        "  Flags:          0x{:08x}\n",
-        container.header.flags
-    ));
-    out.push_str(&format!("  Payload offset: {}\n", container.payload.offset));
-    out.push_str(&format!(
-        "  Encrypted:      {}\n",
-        container.payload.encrypted
-    ));
-    out.push_str(&format!(
-        "  Compressed:     {}\n",
-        container.payload.compressed
-    ));
-    if let Some(v) = &container.metadata.vendor {
+    out.push_str(&format!("  Version:        {}\n", p.version));
+    out.push_str(&format!("  Header size:    {}\n", p.header_size));
+    out.push_str(&format!("  Table offset:   {}\n", p.table_offset));
+    out.push_str(&format!("  Flags:          0x{:08x}\n", p.flags));
+    out.push_str(&format!("  Payload offset: {}\n", p.payload_offset));
+    out.push_str(&format!("  Encrypted:      {}\n", p.encrypted));
+    out.push_str(&format!("  Compressed:     {}\n", p.compressed));
+    if let Some(v) = p.vendor {
         out.push_str(&format!("  Vendor:         {v}\n"));
     }
-    if let Some(m) = &container.metadata.model {
+    if let Some(m) = p.model {
         out.push_str(&format!("  Model:          {m}\n"));
     }
-    if let Some(fw) = &container.metadata.firmware_version {
+    if let Some(fw) = p.firmware {
         out.push_str(&format!("  Firmware:       {fw}\n"));
     }
-    for (k, v) in &container.metadata.extra {
+    for (k, v) in p.extra {
         out.push_str(&format!("  {k}: {v}\n"));
     }
     out
@@ -379,24 +398,28 @@ pub fn format_container_cli(container: &SdfContainer, file: &str) -> String {
 /// Localized log text for GUI settings parse button.
 pub fn format_container_log(container: &SdfContainer, lang: crate::i18n::Language) -> String {
     use crate::i18n::{t_with_args, L10nKey};
+    let p = container_presentation(container);
+    let version = p.version.to_string();
+    let header_size = p.header_size.to_string();
+    let offset = p.payload_offset.to_string();
     let mut info = t_with_args(
         L10nKey::LogSdfHeader,
         lang,
         &[
-            ("version", &container.header.version.to_string()),
-            ("header_size", &container.header.header_size.to_string()),
-            ("offset", &container.payload.offset.to_string()),
+            ("version", &version),
+            ("header_size", &header_size),
+            ("offset", &offset),
         ],
     );
-    if let Some(v) = &container.metadata.vendor {
+    if let Some(v) = p.vendor {
         info.push('\n');
         info.push_str(&t_with_args(L10nKey::LogSdfVendor, lang, &[("vendor", v)]));
     }
-    if let Some(m) = &container.metadata.model {
+    if let Some(m) = p.model {
         info.push('\n');
         info.push_str(&t_with_args(L10nKey::LogSdfModel, lang, &[("model", m)]));
     }
-    if let Some(fw) = &container.metadata.firmware_version {
+    if let Some(fw) = p.firmware {
         info.push('\n');
         info.push_str(&t_with_args(
             L10nKey::LogSdfFirmware,
@@ -404,16 +427,15 @@ pub fn format_container_log(container: &SdfContainer, lang: crate::i18n::Languag
             &[("firmware", fw)],
         ));
     }
+    let enc = p.encrypted.to_string();
+    let comp = p.compressed.to_string();
     info.push('\n');
     info.push_str(&t_with_args(
         L10nKey::LogSdfFlags,
         lang,
-        &[
-            ("encrypted", &container.payload.encrypted.to_string()),
-            ("compressed", &container.payload.compressed.to_string()),
-        ],
+        &[("encrypted", &enc), ("compressed", &comp)],
     ));
-    for (k, v) in &container.metadata.extra {
+    for (k, v) in p.extra {
         info.push('\n');
         info.push_str(&t_with_args(
             L10nKey::LogSdfExtraField,

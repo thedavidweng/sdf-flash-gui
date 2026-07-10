@@ -144,10 +144,6 @@ fn find_backend() -> (command::Backend, String) {
     })
 }
 
-fn find_sdf_bin() -> String {
-    drive::find_sdf_bin()
-}
-
 fn cmd_list() {
     // Prefer backend `-l` (correct device paths for flash/probe). Fall back to
     // OS enumeration when the tool is missing or returns nothing parseable.
@@ -235,7 +231,7 @@ fn cmd_dump(device: &str, output_dir: &str) {
         std::process::exit(1);
     }
     let (backend, path) = find_backend();
-    let sdf_path = find_sdf_bin();
+    let sdf_path = drive::find_sdf_bin();
     match orchestration::run_dump(backend, &path, &sdf_path, device, output_dir) {
         Ok(()) => println!("Firmware dumped to {output_dir}"),
         Err(e) => {
@@ -270,7 +266,7 @@ fn cmd_flash(device: &str, args: FlashArgs<'_>) {
     let sdf_path = match args.sdf_path.map(String::as_str) {
         Some(p) => p,
         None => {
-            sdf_path_owned = find_sdf_bin();
+            sdf_path_owned = drive::find_sdf_bin();
             sdf_path_owned.as_str()
         }
     };

@@ -126,34 +126,9 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
         }
         WorkerMsg::DrivesListed(drives) => {
             let count = drives.len();
-            // Identity-stable reselection (path may change after flash re-enum).
-            // Inline (avoid ops↔workers cycle): same rules as ops::apply_drive_list.
-            let previous = state
-                .drive
-                .selected_drive
-                .and_then(|i| state.drive.drives.get(i))
-                .cloned();
-            let prev_idx = state.drive.selected_drive;
-            let old_device = previous.as_ref().map(|d| d.device.clone());
-            state.drive.drives = drives;
-            state.drive.selected_drive =
-                crate::drive::resolve_selection(&state.drive.drives, previous.as_ref(), prev_idx);
-            let new_device = state
-                .drive
-                .selected_drive
-                .and_then(|i| state.drive.drives.get(i))
-                .map(|d| d.device.clone());
-            if old_device != new_device || state.drive.selected_drive != prev_idx {
-                state.drive.last_probed_drive = None;
-                state.drive.drive_probed = false;
-            }
+            state.apply_drive_list(drives);
             state.finish_operation();
             let lang = state.chrome.resolved_lang;
-            if state.drive.drives.is_empty() {
-                state.set_status_key(L10nKey::StatusNoDrives, 0.0);
-            } else {
-                state.set_status_key(L10nKey::StatusReady, 0.0);
-            }
             state.log(&t_with_args(
                 L10nKey::StatusDrivesFound,
                 lang,

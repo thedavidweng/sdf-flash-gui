@@ -255,6 +255,54 @@ impl AppState {
         self.runtime.probing_drive = None;
     }
 
+    /// Drop probe-derived flags so Start cannot use results from another drive.
+    fn invalidate_probe_cache(&mut self) {
+        self.drive.last_probed_drive = None;
+        self.drive.drive_probed = false;
+        self.drive.drive_mt1959 = false;
+        self.drive.drive_mt1939 = false;
+        self.drive.drive_encrypted_firmware = false;
+        self.drive.drive_libredrive = crate::command::LibreDriveStatus::Unknown;
+        self.drive.drive_sdf_version = None;
+    }
+
+    /// Replace the drive list and re-select by path / identity (stable after re-enum).
+    ///
+    /// Single implementation for ops refresh and worker `DrivesListed` (avoids
+    /// ops↔workers cycle and dual probe-cache rules).
+    pub fn apply_drive_list(&mut self, drives: Vec<Drive>) {
+        let previous = self
+            .drive
+            .selected_drive
+            .and_then(|i| self.drive.drives.get(i))
+            .cloned();
+        let prev_idx = self.drive.selected_drive;
+        let old_device = previous.as_ref().map(|d| d.device.as_str());
+        let old_identity = previous.as_ref().map(|d| d.identity_key());
+        self.drive.drives = drives;
+        self.drive.selected_drive =
+            drive::resolve_selection(&self.drive.drives, previous.as_ref(), prev_idx);
+        let selected = self
+            .drive
+            .selected_drive
+            .and_then(|i| self.drive.drives.get(i));
+        let new_device = selected.map(|d| d.device.as_str());
+        let new_identity = selected.map(|d| d.identity_key());
+        // Path, selection index, or hardware identity at the same path changed
+        // (e.g. different drive re-enumerated as /dev/sr0).
+        if old_device != new_device
+            || self.drive.selected_drive != prev_idx
+            || old_identity != new_identity
+        {
+            self.invalidate_probe_cache();
+        }
+        if self.drive.drives.is_empty() {
+            self.set_status_key(L10nKey::StatusNoDrives, 0.0);
+        } else {
+            self.set_status_key(L10nKey::StatusReady, 0.0);
+        }
+    }
+
     #[cfg(test)]
     pub fn new_no_backend() -> Self {
         Self::defaults()
@@ -270,11 +318,6 @@ fn resolved_discovered_backend(found: Option<(Backend, String)>) -> (Backend, St
         Some((b, p)) => (b, p, true),
         None => (Backend::SdfTool, String::new(), false),
     }
-}
-
-/// Locate `sdf.bin` (re-export for GUI callers; logic lives in `drive`).
-pub fn find_sdf_bin() -> String {
-    drive::find_sdf_bin()
 }
 
 #[cfg(test)]
@@ -357,12 +400,6 @@ mod tests {
     }
 
     #[test]
-    fn find_sdf_bin_matches_drive_module() {
-        // Re-export must stay in sync with drive::find_sdf_bin.
-        assert_eq!(find_sdf_bin(), drive::find_sdf_bin());
-    }
-
-    #[test]
     fn new_no_backend_defaults() {
         let state = AppState::new_no_backend();
         assert_eq!(state.runtime.status_message, "Ready");
@@ -372,5 +409,56 @@ mod tests {
         assert_eq!(state.chrome.resolved_lang, Language::English);
         assert!(state.chrome.settings_nudge_until.is_none());
         assert!(!state.chrome.show_settings);
+    }
+
+    #[test]
+    fn apply_drive_list_keeps_probe_when_identity_unchanged() {
+        let mut state = AppState::new_no_backend();
+        let d = Drive {
+            device: "/dev/sr0".into(),
+            vendor: "HL-DT-ST".into(),
+            product: "BU40N".into(),
+            revision: "1.03".into(),
+            ..Default::default()
+        };
+        state.drive.drives.push(d.clone());
+        state.drive.selected_drive = Some(0);
+        state.drive.last_probed_drive = Some(0);
+        state.drive.drive_probed = true;
+        state.drive.drive_mt1959 = true;
+        state.apply_drive_list(vec![d]);
+        assert_eq!(state.drive.selected_drive, Some(0));
+        assert_eq!(state.drive.last_probed_drive, Some(0));
+        assert!(state.drive.drive_probed);
+        assert!(state.drive.drive_mt1959);
+    }
+
+    #[test]
+    fn apply_drive_list_clears_probe_when_identity_changes_at_same_path() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drives.push(Drive {
+            device: "/dev/sr0".into(),
+            vendor: "OLD".into(),
+            product: "DRIVE".into(),
+            revision: "1.00".into(),
+            ..Default::default()
+        });
+        state.drive.selected_drive = Some(0);
+        state.drive.last_probed_drive = Some(0);
+        state.drive.drive_probed = true;
+        state.drive.drive_mt1959 = true;
+        state.drive.drive_encrypted_firmware = true;
+        state.apply_drive_list(vec![Drive {
+            device: "/dev/sr0".into(),
+            vendor: "NEW".into(),
+            product: "DRIVE".into(),
+            revision: "2.00".into(),
+            ..Default::default()
+        }]);
+        assert_eq!(state.drive.selected_drive, Some(0));
+        assert!(state.drive.last_probed_drive.is_none());
+        assert!(!state.drive.drive_probed);
+        assert!(!state.drive.drive_mt1959);
+        assert!(!state.drive.drive_encrypted_firmware);
     }
 }

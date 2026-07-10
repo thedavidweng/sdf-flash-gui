@@ -35,10 +35,10 @@ cargo test
 
 Matches CI on Linux. Codecov (and the local/CI gate) enforce:
 
-- **project** line coverage ≥ **99%** (`codecov.yml`)
+- **project** line coverage ≥ **99%** absolute floor (`codecov.yml` + `coverage-gate.py`; not “no drop vs main”)
 - **patch** coverage **100%** on changed executable lines in non-ignored `src/`
 
-Ignore set is centralized:
+Ignore set is centralized (CI runs `scripts/coverage-ignore-sync-check.py`):
 
 - `scripts/coverage-ignore.regex` — llvm-cov (CI + local)
 - `codecov.yml` `ignore:` — Codecov upload (must list the same paths)
@@ -56,7 +56,7 @@ cargo install cargo-llvm-cov   # once, if not installed
 
 Open `target/llvm-cov/html/index.html` and confirm changed **non-ignored** files have no meaningful uncovered branches in the diff.
 
-**What is ignored (and why):** native entry/shell, egui views, OS drive discovery, rfd dialogs, and `NativeRunner` (thin process adapter). Domain modules (`command`, `flash`, `orchestration`, `process` lifecycle, `sdf`, `gui/ops`, `gui/workers`, …) are **not** ignored — cover new behaviour there with tests.
+**What is ignored (and why):** native entry/shell, egui views, OS drive discovery (`src/drive/os.rs`), rfd dialogs, and `NativeRunner` (thin process adapter). Domain modules (`command`, `flash`, `orchestration`, `process` lifecycle, `sdf`, `drive/parse`, `gui/ops`, `gui/workers`, …) are **not** ignored — cover new behaviour there with tests.
 
 ### SDF parser policy (CI enforces)
 
