@@ -1918,17 +1918,15 @@ Found 1 drives(s)
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
         let last = messages.last().unwrap();
-        assert!(
-            matches!(
-                last,
-                WorkerMsg::Done(WorkerResult::OperationComplete {
-                    success: false,
-                    status,
-                    ..
-                }) if status.contains("failed")
-            ),
-            "expected OperationComplete failure, got {last:?}"
+        let failed_list = matches!(
+            last,
+            WorkerMsg::Done(WorkerResult::OperationComplete {
+                success: false,
+                status,
+                ..
+            }) if status.contains("failed")
         );
+        assert!(failed_list);
     }
 
     #[test]
@@ -1941,11 +1939,14 @@ Found 1 drives(s)
         assert!(!state.runtime.log_text.contains('>'));
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        let streamed_cmd = messages.iter().any(|m| match m {
-            WorkerMsg::Stream(StreamEvent::Log(s)) => s.starts_with("> "),
-            _ => false,
-        });
-        assert!(streamed_cmd);
+        let log_lines: Vec<&str> = messages
+            .iter()
+            .filter_map(|m| match m {
+                WorkerMsg::Stream(StreamEvent::Log(s)) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(log_lines.iter().any(|s| s.starts_with("> ")));
         let failed = messages.iter().any(|m| {
             matches!(
                 m,
