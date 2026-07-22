@@ -9,6 +9,12 @@
 // To run with a custom path:
 //   FIRMWARE_PACK_DIR="/path/to/All You Need Firmware Pack (MartyMcNuts)" \
 //     cargo test --test e2e_firmware_pack -- --ignored
+//
+// Per ADR 0001 (docs/adr/0001-no-filename-based-firmware-logic.md), firmware
+// properties must never be derived from filenames. This test harness collects
+// `.bin` files by extension only and uses the binary content for all
+// identification. Filenames appear solely in assertion messages for
+// human-readable diagnostics.
 
 use sdf_flash_gui::command::{self, Backend, Operation, PlanRequest};
 use sdf_flash_gui::flash;
@@ -17,196 +23,18 @@ use sdf_flash_gui::sdf;
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
-// Firmware info and filename parser
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct FirmwareInfo {
-    vendor: String,
-    model: String,
-    version: String,
-    is_modified: bool,
-    filename: String,
-    path: PathBuf,
-}
-
-/// Parse the MartyMcNuts naming convention:
-///   DE_{Vendor}_{Model}_{Version}[_-MK].bin
-///
-/// Vendor mapping: LG → HL-DT-ST, ASUS and Buffalo keep their names.
-fn parse_firmware_filename(path: &Path) -> Option<FirmwareInfo> {
-    let filename = path.file_name()?.to_str()?;
-    if !filename.ends_with(".bin") {
-        return None;
-    }
-
-    let stem = filename.strip_prefix("DE_")?.strip_suffix(".bin")?;
-
-    let parts: Vec<&str> = stem.splitn(2, '_').collect();
-    if parts.len() < 2 {
-        return None;
-    }
-
-    let vendor_short = parts[0];
-    let rest = parts[1];
-    let segments: Vec<&str> = rest.split('_').collect();
-
-    let (model, version, is_modified) = if segments.len() >= 2 {
-        let last = segments.last().unwrap();
-
-        if *last == "MK" {
-            let ver_idx = segments.len() - 2;
-            let version_raw = segments[ver_idx];
-            let version = version_raw.trim_end_matches("-MK");
-            let model_parts = &segments[..ver_idx];
-            (model_parts.join("_"), version.to_string(), true)
-        } else if last.ends_with("-MK") || last.ends_with("_MK") {
-            let version = last.trim_end_matches("-MK").trim_end_matches("_MK");
-            let model_parts = &segments[..segments.len() - 1];
-            (model_parts.join("_"), version.to_string(), true)
-        } else {
-            let version = *last;
-            let model_parts = &segments[..segments.len() - 1];
-            (model_parts.join("_"), version.to_string(), false)
-        }
-    } else {
-        (rest.to_string(), String::new(), false)
-    };
-
-    let vendor = match vendor_short {
-        "LG" => "HL-DT-ST",
-        "ASUS" => "ASUS",
-        "Buffalo" => "Buffalo",
-        other => other,
-    }
-    .to_string();
-
-    Some(FirmwareInfo {
-        vendor,
-        model,
-        version,
-        is_modified,
-        filename: filename.to_string(),
-        path: path.to_path_buf(),
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Filename parser tests — no real firmware needed, always runs in CI
-// ---------------------------------------------------------------------------
-
-#[test]
-fn parse_filename_lg_standard() {
-    let info = parse_firmware_filename(Path::new("/pack/DE_LG_BU40N_1.00.bin")).unwrap();
-    assert_eq!(info.vendor, "HL-DT-ST");
-    assert_eq!(info.model, "BU40N");
-    assert_eq!(info.version, "1.00");
-    assert!(!info.is_modified);
-}
-
-#[test]
-fn parse_filename_lg_mk_suffix() {
-    let info = parse_firmware_filename(Path::new("/pack/DE_LG_BU40N_1.03_MK.bin")).unwrap();
-    assert_eq!(info.vendor, "HL-DT-ST");
-    assert_eq!(info.model, "BU40N");
-    assert_eq!(info.version, "1.03");
-    assert!(info.is_modified);
-}
-
-#[test]
-fn parse_filename_asus_hyphen_model() {
-    let info = parse_firmware_filename(Path::new("/pack/DE_ASUS_BW-16D1HT_3.02.bin")).unwrap();
-    assert_eq!(info.vendor, "ASUS");
-    assert_eq!(info.model, "BW-16D1HT");
-    assert_eq!(info.version, "3.02");
-    assert!(!info.is_modified);
-}
-
-#[test]
-fn parse_filename_asus_mk_suffix() {
-    let info = parse_firmware_filename(Path::new("/pack/DE_ASUS_BW-16D1HT_3.10_MK.bin")).unwrap();
-    assert_eq!(info.vendor, "ASUS");
-    assert_eq!(info.model, "BW-16D1HT");
-    assert_eq!(info.version, "3.10");
-    assert!(info.is_modified);
-}
-
-#[test]
-fn parse_filename_buffalo_letter_version() {
-    let info = parse_firmware_filename(Path::new("/pack/DE_Buffalo_BRUHD-PU3_BU10.bin")).unwrap();
-    assert_eq!(info.vendor, "Buffalo");
-    assert_eq!(info.model, "BRUHD-PU3");
-    assert_eq!(info.version, "BU10");
-    assert!(!info.is_modified);
-}
-
-#[test]
-fn parse_filename_buffalo_mk_suffix() {
-    let info =
-        parse_firmware_filename(Path::new("/pack/DE_Buffalo_BRUHD-PU3_BU12-MK.bin")).unwrap();
-    assert_eq!(info.vendor, "Buffalo");
-    assert_eq!(info.model, "BRUHD-PU3");
-    assert_eq!(info.version, "BU12");
-    assert!(info.is_modified);
-}
-
-#[test]
-fn parse_filename_hyphenated_model_with_mk() {
-    let info = parse_firmware_filename(Path::new("/pack/DE_LG_BP60NB10-NB12_1.02-MK.bin")).unwrap();
-    assert_eq!(info.vendor, "HL-DT-ST");
-    assert_eq!(info.model, "BP60NB10-NB12");
-    assert_eq!(info.version, "1.02");
-    assert!(info.is_modified);
-}
-
-#[test]
-fn parse_filename_simple_mk_variant() {
-    let info = parse_firmware_filename(Path::new("/pack/DE_LG_BP60NB10_1.00_MK.bin")).unwrap();
-    assert_eq!(info.vendor, "HL-DT-ST");
-    assert_eq!(info.model, "BP60NB10");
-    assert_eq!(info.version, "1.00");
-    assert!(info.is_modified);
-}
-
-#[test]
-fn parse_filename_multi_model_segments() {
-    let info = parse_firmware_filename(Path::new("/pack/DE_LG_WH16NS40-NS50_1.02.bin")).unwrap();
-    assert_eq!(info.vendor, "HL-DT-ST");
-    assert_eq!(info.model, "WH16NS40-NS50");
-    assert_eq!(info.version, "1.02");
-    assert!(!info.is_modified);
-}
-
-#[test]
-fn parse_filename_slim_wp_model() {
-    let info = parse_firmware_filename(Path::new("/pack/DE_LG_WP50NB40-NB50_1.03_MK.bin")).unwrap();
-    assert_eq!(info.vendor, "HL-DT-ST");
-    assert_eq!(info.model, "WP50NB40-NB50");
-    assert_eq!(info.version, "1.03");
-    assert!(info.is_modified);
-}
-
-#[test]
-fn parse_filename_not_bin_extension() {
-    assert!(parse_firmware_filename(Path::new("/pack/DE_LG_BU40N_1.00.txt")).is_none());
-}
-
-#[test]
-fn parse_filename_no_de_prefix() {
-    assert!(parse_firmware_filename(Path::new("/pack/LG_BU40N_1.00.bin")).is_none());
-}
-
-#[test]
-fn parse_filename_unknown_vendor_passthrough() {
-    let info = parse_firmware_filename(Path::new("/pack/DE_Pioneer_BDR-212_1.00.bin")).unwrap();
-    assert_eq!(info.vendor, "Pioneer");
-    assert_eq!(info.model, "BDR-212");
-    assert_eq!(info.version, "1.00");
-}
-
-// ---------------------------------------------------------------------------
 // Firmware pack location and discovery helpers
 // ---------------------------------------------------------------------------
+
+/// A discovered firmware file: its path on disk and basename for display.
+/// No firmware metadata is parsed from the filename (ADR 0001).
+#[derive(Debug, Clone)]
+struct FirmwareFile {
+    /// Basename for display in assertion messages only.
+    filename: String,
+    /// Absolute or relative path to the `.bin` file.
+    path: PathBuf,
+}
 
 fn firmware_pack_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("FIRMWARE_PACK_DIR") {
@@ -218,7 +46,7 @@ fn firmware_pack_dir() -> PathBuf {
     PathBuf::from(home).join("Downloads/IA/All You Need Firmware Pack (MartyMcNuts)")
 }
 
-fn collect_firmware_files() -> Vec<FirmwareInfo> {
+fn collect_firmware_files() -> Vec<FirmwareFile> {
     let pack_dir = firmware_pack_dir();
     if !pack_dir.exists() {
         return Vec::new();
@@ -230,16 +58,22 @@ fn collect_firmware_files() -> Vec<FirmwareInfo> {
     files
 }
 
-fn walk_dir(dir: &Path, out: &mut Vec<FirmwareInfo>) {
+fn walk_dir(dir: &Path, out: &mut Vec<FirmwareFile>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
                 walk_dir(&path, out);
             } else if path.extension().is_some_and(|e| e == "bin") {
-                if let Some(info) = parse_firmware_filename(&path) {
-                    out.push(info);
-                }
+                let filename = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                out.push(FirmwareFile {
+                    filename,
+                    path: path.to_path_buf(),
+                });
             }
         }
     }

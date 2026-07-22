@@ -129,7 +129,7 @@ mod tests {
         assert!(needs_two_step_flash("WP50NB40"));
         assert!(needs_two_step_flash("BP55EB40"));
         assert!(needs_two_step_flash("HL-DT-ST BP50NB40"));
-        assert!(needs_two_step_flash("DE_LG_BP50NB40-NB50_1.03_MK.bin"));
+        assert!(needs_two_step_flash("BP50NB40-NB50"));
     }
 
     #[test]

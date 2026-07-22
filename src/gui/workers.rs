@@ -79,7 +79,10 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
                 state.drive.drive_libredrive = libredrive;
                 state.drive.drive_sdf_version = sdf_version;
                 if success {
-                    state.flash.encrypted_write = encrypted_firmware;
+                    // Recompute encrypted_write from both the drive's current
+                    // firmware state and the loaded firmware file's encryption.
+                    // If no firmware is loaded, this falls back to drive state only.
+                    state.recompute_encrypted_write();
                 }
             }
             state.record_probe_outcome(drive_idx, success);

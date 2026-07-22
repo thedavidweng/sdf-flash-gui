@@ -1643,6 +1643,71 @@ mod tests {
     }
 
     #[test]
+    fn load_firmware_detects_encrypted_firmware_file_even_when_drive_not_encrypted() {
+        // Simulate loading a firmware file with an embedded 2120 date stamp
+        // onto a drive that currently has non-encrypted firmware.
+        // This is the gap the firmware-file encryption detection closes:
+        // without it, the code would use non-enc mode and silently fail.
+        let dir = std::env::temp_dir().join("sdf_flash_test_fw_enc");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("DE_LG_BP50NB40_1.03_MK.bin");
+        let mut data = vec![0u8; 1_400_000];
+        let date = b"212005070917";
+        data[1_370_000..1_370_000 + date.len()].copy_from_slice(date);
+        std::fs::write(&file, &data).unwrap();
+
+        let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = false;
+        state.flash.encrypted_write = false;
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert!(
+            state.flash.encrypted_write,
+            "encrypted_write must be true when firmware file is encrypted, even if drive is not"
+        );
+        assert_eq!(state.flash.firmware_file_encrypted, Some(true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_firmware_non_encrypted_firmware_file_with_non_encrypted_drive() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_fw_nonenc");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("DE_LG_WH16NS60_1.02_MK.bin");
+        let mut data = vec![0u8; 1_400_000];
+        let date = b"211810291936";
+        data[1_370_000..1_370_000 + date.len()].copy_from_slice(date);
+        std::fs::write(&file, &data).unwrap();
+
+        let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = false;
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert!(
+            !state.flash.encrypted_write,
+            "encrypted_write should be false when neither drive nor firmware is encrypted"
+        );
+        assert_eq!(state.flash.firmware_file_encrypted, Some(false));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_firmware_encrypted_file_and_encrypted_drive() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_both_enc");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("DE_LG_BP50NB40_1.03_MK.bin");
+        let mut data = vec![0u8; 1_400_000];
+        let date = b"212005070917";
+        data[1_370_000..1_370_000 + date.len()].copy_from_slice(date);
+        std::fs::write(&file, &data).unwrap();
+
+        let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = true;
+        load_firmware(&mut state, &file.to_string_lossy());
+        assert!(state.flash.encrypted_write);
+        assert_eq!(state.flash.firmware_file_encrypted, Some(true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn start_disabled_reason_recover_empty_when_valid() {
         let (mut state, temp_dir) = state_with_valid_paths("recover_valid");
         state.drive.drives.push(Drive {

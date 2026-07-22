@@ -21,7 +21,7 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
     state.flash.firmware_sdf_info = None;
     state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Unknown;
     state.flash.firmware_identification = None;
-    state.flash.encrypted_write = state.drive.drive_encrypted_firmware;
+    state.flash.firmware_file_encrypted = None;
     match std::fs::read(path) {
         Ok(data) => {
             if data.is_empty() {
@@ -41,6 +41,15 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
                 state.flash.firmware_identification = Some(id);
                 state.flash.firmware_sdf_info = sdf_info;
 
+                // Detect whether the firmware file itself is encrypted (date ≥ 2020).
+                // `rawflash enc` is needed when either the drive's current firmware
+                // or the target firmware file is encrypted.
+                state.flash.firmware_file_encrypted =
+                    crate::firmware_db::resolve_firmware_encrypted(
+                        state.flash.firmware_identification.as_ref().unwrap(),
+                        &data,
+                    );
+
                 state.flash.firmware_data = Some(data);
             }
         }
@@ -53,6 +62,9 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
             state.flash.firmware_data = None;
         }
     }
+
+    // Recompute encrypted_write: drive_encrypted OR firmware_file_encrypted.
+    state.recompute_encrypted_write();
 
     if let Some(parent) = std::path::Path::new(path).parent() {
         state.flash.firmware_candidates = std::fs::read_dir(parent)
