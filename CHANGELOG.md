@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
+## [Unreleased]
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Detect firmware encryption from binary content + ADRs 0001/0002 (#23)
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- **changelog:** Sync CHANGELOG.md for v0.4.0
 ## [0.4.0] - 2026-07-10
 
 ### <!-- 0 -->🚀 Features
