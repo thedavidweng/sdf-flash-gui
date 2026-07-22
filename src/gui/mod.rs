@@ -27,6 +27,11 @@ use workers::{spawn_list_drives, spawn_probe, WorkerMsg};
 
 const WINDOW_WIDTH: f32 = 380.0;
 const WINDOW_HEIGHT: f32 = 640.0;
+/// Allow shrinking for small displays / large OS scale (default size stays 380×640).
+const WINDOW_MIN_WIDTH: f32 = 320.0;
+const WINDOW_MIN_HEIGHT: f32 = 480.0;
+/// Minimum interactive size for icon-only toolbar controls (logical points).
+const TOOLBAR_HIT_MIN: f32 = 28.0;
 
 pub(crate) const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -48,6 +53,7 @@ pub(crate) fn button_text_size(ui: &egui::Ui) -> f32 {
 
 pub(crate) fn toolbar_icon_button(ui: &egui::Ui, glyph: &'static str) -> egui::Button<'static> {
     egui::Button::new(egui::RichText::new(glyph).size(button_text_size(ui)))
+        .min_size(egui::vec2(TOOLBAR_HIT_MIN, TOOLBAR_HIT_MIN))
 }
 
 pub(crate) fn icon_button(
@@ -104,7 +110,7 @@ pub fn run() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([WINDOW_WIDTH, WINDOW_HEIGHT])
-            .with_min_inner_size([WINDOW_WIDTH, WINDOW_HEIGHT])
+            .with_min_inner_size([WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT])
             .with_resizable(true)
             .with_icon(window_icon()),
         ..Default::default()

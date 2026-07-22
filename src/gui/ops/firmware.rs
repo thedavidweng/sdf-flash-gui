@@ -94,7 +94,7 @@ pub fn prompt_recovery_wrong_firmware(state: &mut AppState, dialog: &impl FileDi
     state.log(t(L10nKey::LogRecoverSelectWrongFw, lang));
     if let Some(file) = dialog.pick_file_with_title(
         t(L10nKey::DialogTitleWrongFirmware, lang),
-        "Firmware",
+        t(L10nKey::DialogFilterFirmware, lang),
         &["bin"],
         None,
     ) {

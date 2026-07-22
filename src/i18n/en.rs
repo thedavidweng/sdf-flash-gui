@@ -21,13 +21,13 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::MenuQuit => "Quit",
         L10nKey::TooltipStop => "Stop the current operation",
         L10nKey::TitleStopWarning => "Confirm Stop",
-        L10nKey::LabelStopWarningMsg => "⚠️ An operation is in progress!",
+        L10nKey::LabelStopWarningMsg => "An operation is in progress!",
         L10nKey::LabelStopWarningDesc => "Stopping now may interrupt the flashing process and brick your optical drive.",
         L10nKey::LabelStopWarningAsk => "Are you sure you want to stop this operation?",
         L10nKey::BtnStopNo => "No, Keep Running",
         L10nKey::BtnStopYes => "Yes, Stop",
         L10nKey::TitleForceKillWarning => "Force Stop",
-        L10nKey::LabelForceKillMsg => "⚠️ The backend did not stop!",
+        L10nKey::LabelForceKillMsg => "The backend did not stop!",
         L10nKey::LabelForceKillDesc => "Force-killing the backend may corrupt the drive. Only continue if the operation appears hung.",
         L10nKey::LabelForceKillAsk => "Force kill the backend process?",
         L10nKey::BtnForceKillNo => "No, Wait",
@@ -45,7 +45,7 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::TooltipAbout => "About",
         L10nKey::TooltipStartEnabled => "Start the selected operation",
         L10nKey::TitleExitWarning => "Confirm Exit",
-        L10nKey::LabelExitWarningMsg => "⚠️ An operation is in progress!",
+        L10nKey::LabelExitWarningMsg => "An operation is in progress!",
         L10nKey::LabelExitWarningDesc => "Closing the application now may interrupt the flashing process and brick your optical drive.",
         L10nKey::LabelExitWarningAsk => "Are you sure you want to force exit?",
         L10nKey::BtnNoCancel => "No, Cancel",
@@ -85,14 +85,14 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::LibreDriveNotAvailable => "Not available",
         L10nKey::LibreDriveUnknown => "Unknown",
         L10nKey::LabelSdfVersion => "SDF Version:",
-        L10nKey::WarnCannotCombine => "⚠ Cannot combine encrypted + boot-loader",
+        L10nKey::WarnCannotCombine => "Cannot combine encrypted + boot-loader",
         L10nKey::StatusReadyText => "READY",
         L10nKey::LogReady => "Ready.",
         L10nKey::StatusNoDrivesFound => "No drives found",
         L10nKey::StatusDrivesFound => "{count} drives found",
         L10nKey::StatusOneDriveFound => "1 drive found",
         L10nKey::LabelToken => "Token:",
-        L10nKey::WarnFirmwareLoadFailed => "⚠ Failed to load or invalid firmware file",
+        L10nKey::WarnFirmwareLoadFailed => "Failed to load or invalid firmware file",
         L10nKey::LabelAppName => "SDF Flash GUI",
         L10nKey::LabelGithubRepo => "GitHub Repository",
         L10nKey::LabelVersion => "Version {version}",
@@ -159,7 +159,7 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::FlashModeRecover => "Recovery flash",
         L10nKey::TitleFlashFailure => "Flash Operation Failed",
         L10nKey::LabelFlashFailureMsg => {
-            "⚠️ The firmware write may have left your drive in an inconsistent state."
+            "The firmware write may have left your drive in an inconsistent state."
         }
         L10nKey::LabelFlashFailureStep1 => "Do not power off or eject the drive.",
         L10nKey::LabelFlashFailureStep2 => "Check the log below for error details.",
@@ -204,6 +204,10 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::InfoFirmwareModelMismatch => "Firmware is for {firmware}, your drive is {drive}. This is normal for cross-flashing.",
         L10nKey::ReasonMt1939NotCompatible => "This drive uses the older MT1939 chip and is NOT compatible with OmniDrive or MK firmware. See: https://wiki.redump.info/index.php?title=Flashing_Older_HLDS_Drives",
         L10nKey::LogTruncated => "… (older log entries truncated)",
+        L10nKey::StatusYes => "Yes",
+        L10nKey::StatusNo => "No",
+        L10nKey::DialogFilterFirmware => "Firmware",
+        L10nKey::DialogFilterExecutable => "Executable",
     }
 }
 

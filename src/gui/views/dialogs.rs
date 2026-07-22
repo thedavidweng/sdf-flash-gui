@@ -78,9 +78,10 @@ pub fn show_quit_confirmation_dialog(ctx: &egui::Context, state: &mut AppState) 
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.label(
-                    egui::RichText::new(t(
-                        L10nKey::LabelExitWarningMsg,
-                        state.chrome.resolved_lang,
+                    egui::RichText::new(format!(
+                        "{}  {}",
+                        icon::WARNING,
+                        t(L10nKey::LabelExitWarningMsg, state.chrome.resolved_lang)
                     ))
                     .color(ui.visuals().error_fg_color)
                     .strong(),
@@ -125,9 +126,10 @@ pub fn show_stop_confirmation_dialog(ctx: &egui::Context, state: &mut AppState) 
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.label(
-                    egui::RichText::new(t(
-                        L10nKey::LabelStopWarningMsg,
-                        state.chrome.resolved_lang,
+                    egui::RichText::new(format!(
+                        "{}  {}",
+                        icon::WARNING,
+                        t(L10nKey::LabelStopWarningMsg, state.chrome.resolved_lang)
                     ))
                     .color(ui.visuals().error_fg_color)
                     .strong(),
@@ -172,9 +174,10 @@ pub fn show_flash_failure_dialog(ctx: &egui::Context, state: &mut AppState) {
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.label(
-                    egui::RichText::new(t(
-                        L10nKey::LabelFlashFailureMsg,
-                        state.chrome.resolved_lang,
+                    egui::RichText::new(format!(
+                        "{}  {}",
+                        icon::WARNING,
+                        t(L10nKey::LabelFlashFailureMsg, state.chrome.resolved_lang)
                     ))
                     .color(ui.visuals().error_fg_color)
                     .strong(),
@@ -243,9 +246,13 @@ pub fn show_force_kill_dialog(ctx: &egui::Context, state: &mut AppState) {
                 });
             } else {
                 ui.label(
-                    egui::RichText::new(t(L10nKey::LabelForceKillMsg, lang))
-                        .color(ui.visuals().error_fg_color)
-                        .strong(),
+                    egui::RichText::new(format!(
+                        "{}  {}",
+                        icon::WARNING,
+                        t(L10nKey::LabelForceKillMsg, lang)
+                    ))
+                    .color(ui.visuals().error_fg_color)
+                    .strong(),
                 );
                 ui.add_space(8.0);
                 ui.label(t(L10nKey::LabelForceKillDesc, lang));

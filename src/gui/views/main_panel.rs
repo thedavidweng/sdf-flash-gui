@@ -27,10 +27,21 @@ pub fn show_main_ui(
 ) {
     let backend_ok = ops::backend_configured(state);
     let now = ctx.input(|i| i.time);
+    let reduced_motion = ctx.global_style().animation_time <= f32::EPSILON;
     let settings_nudge = ops::settings_nudge_active(state.chrome.settings_nudge_until, now);
-    let settings_highlight = ops::settings_nudge_highlight(state.chrome.settings_nudge_until, now);
+    let settings_highlight =
+        ops::settings_nudge_highlight(state.chrome.settings_nudge_until, now, reduced_motion);
     if settings_nudge {
-        ctx.request_repaint();
+        if reduced_motion {
+            let remaining = state
+                .chrome
+                .settings_nudge_until
+                .map(|until| (until - now).max(0.0))
+                .unwrap_or(0.0);
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(remaining));
+        } else {
+            ctx.request_repaint();
+        }
     } else if state.chrome.settings_nudge_until.is_some() {
         state.chrome.settings_nudge_until = None;
     }
@@ -73,22 +84,35 @@ pub fn show_main_ui(
         } else {
             format!("{settings_text} (Ctrl+,)")
         };
-        // Soft white fill only — no stroke / size change (layout-stable attention pulse).
         let mut settings_btn = super::super::toolbar_icon_button(ui, icon::GEAR);
         if settings_highlight > 0.0 {
-            // Cap alpha so the gear stays readable; strength already eases in/out.
-            let alpha = (settings_highlight * 150.0).clamp(0.0, 150.0) as u8;
-            settings_btn = settings_btn.fill(egui::Color32::from_white_alpha(alpha));
+            let accent = ui.visuals().selection.bg_fill;
+            let alpha = (settings_highlight * 180.0).clamp(0.0, 180.0) as u8;
+            settings_btn = settings_btn.fill(egui::Color32::from_rgba_unmultiplied(
+                accent.r(),
+                accent.g(),
+                accent.b(),
+                alpha,
+            ));
         }
         let settings_resp = ui.add(settings_btn);
         settings_btn_rect = settings_resp.rect;
         // Soft outer glow: fixed-width stroke drawn *outside* the widget (no layout shift).
         if settings_highlight > 0.05 {
-            let glow_alpha = (settings_highlight * 200.0).clamp(0.0, 200.0) as u8;
+            let accent = ui.visuals().selection.bg_fill;
+            let glow_alpha = (settings_highlight * 220.0).clamp(0.0, 220.0) as u8;
             ui.painter().rect_stroke(
                 settings_resp.rect,
                 ui.visuals().widgets.inactive.corner_radius,
-                egui::Stroke::new(1.5_f32, egui::Color32::from_white_alpha(glow_alpha)),
+                egui::Stroke::new(
+                    1.5_f32,
+                    egui::Color32::from_rgba_unmultiplied(
+                        accent.r(),
+                        accent.g(),
+                        accent.b(),
+                        glow_alpha,
+                    ),
+                ),
                 egui::StrokeKind::Outside,
             );
         }
@@ -135,50 +159,43 @@ pub fn show_main_ui(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let lang = state.chrome.resolved_lang;
             let current = state.chrome.theme;
-            if ui
-                .selectable_label(
-                    current == ThemeChoice::Light,
-                    icon_rich(
-                        ui,
-                        icon::SUN,
-                        t(L10nKey::ThemeLight, lang),
-                        egui::TextStyle::Body,
-                    ),
-                )
-                .clicked()
-            {
-                state.chrome.theme = ThemeChoice::Light;
-                ctx.set_theme(egui::ThemePreference::Light);
-            }
-            if ui
-                .selectable_label(
-                    current == ThemeChoice::Dark,
-                    icon_rich(
-                        ui,
-                        icon::MOON,
-                        t(L10nKey::ThemeDark, lang),
-                        egui::TextStyle::Body,
-                    ),
-                )
-                .clicked()
-            {
-                state.chrome.theme = ThemeChoice::Dark;
-                ctx.set_theme(egui::ThemePreference::Dark);
-            }
-            if ui
-                .selectable_label(
-                    current == ThemeChoice::System,
-                    icon_rich(
-                        ui,
-                        icon::DESKTOP,
-                        t(L10nKey::ThemeSystem, lang),
-                        egui::TextStyle::Body,
-                    ),
-                )
-                .clicked()
-            {
-                state.chrome.theme = ThemeChoice::System;
-                ctx.set_theme(egui::ThemePreference::System);
+            for (choice, glyph, key, pref) in [
+                (
+                    ThemeChoice::Light,
+                    icon::SUN,
+                    L10nKey::ThemeLight,
+                    egui::ThemePreference::Light,
+                ),
+                (
+                    ThemeChoice::Dark,
+                    icon::MOON,
+                    L10nKey::ThemeDark,
+                    egui::ThemePreference::Dark,
+                ),
+                (
+                    ThemeChoice::System,
+                    icon::DESKTOP,
+                    L10nKey::ThemeSystem,
+                    egui::ThemePreference::System,
+                ),
+            ] {
+                let label = t(key, lang);
+                let resp = ui.selectable_label(
+                    current == choice,
+                    icon_rich(ui, glyph, label, egui::TextStyle::Body),
+                );
+                resp.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::WidgetType::SelectableLabel,
+                        true,
+                        current == choice,
+                        label,
+                    )
+                });
+                if resp.clicked() {
+                    state.chrome.theme = choice;
+                    ctx.set_theme(pref);
+                }
             }
         });
     });
@@ -265,6 +282,7 @@ pub fn show_main_ui(
                 cols[0].label(t(L10nKey::LabelMt1959Platform, lang));
                 status_indicator(
                     &mut cols[1],
+                    lang,
                     state.runtime.probing,
                     state.drive.drive_probed,
                     state.drive.drive_mt1959,
@@ -273,6 +291,7 @@ pub fn show_main_ui(
                 cols[0].label(t(L10nKey::LabelEncryptedFirmware, lang));
                 status_indicator(
                     &mut cols[1],
+                    lang,
                     state.runtime.probing,
                     state.drive.drive_probed,
                     state.drive.drive_encrypted_firmware,
@@ -299,7 +318,7 @@ pub fn show_main_ui(
                         }
                     };
                     let color = if color_ok {
-                        egui::Color32::from_rgb(120, 200, 120)
+                        cols[1].visuals().hyperlink_color
                     } else {
                         weak_color
                     };
@@ -452,31 +471,34 @@ pub fn show_main_ui(
             );
         }
     } else {
-        ui.add(
-            egui::ProgressBar::new(0.0)
-                .fill(egui::Color32::TRANSPARENT)
-                .text(t(L10nKey::StatusReadyText, state.chrome.resolved_lang)),
+        ui.label(
+            egui::RichText::new(t(L10nKey::StatusReadyText, state.chrome.resolved_lang)).strong(),
         );
     }
 
     ui.add_space(GAP_SMALL);
+    let start_enabled = ops::can_start(state);
+    let disabled_reason = if !state.runtime.busy && !start_enabled {
+        ops::start_disabled_reason(state)
+    } else {
+        String::new()
+    };
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if state.runtime.busy {
+                let stop_label = t(L10nKey::BtnStop, state.chrome.resolved_lang);
                 let stop_text = t(L10nKey::TooltipStop, state.chrome.resolved_lang);
-                if ui
-                    .add(icon_button(
-                        ui,
-                        icon::STOP,
-                        t(L10nKey::BtnStop, state.chrome.resolved_lang),
-                    ))
-                    .on_hover_text(stop_text)
-                    .clicked()
-                {
+                let resp = ui
+                    .add(icon_button(ui, icon::STOP, stop_label))
+                    .on_hover_text(stop_text);
+                resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, stop_label)
+                });
+                if resp.clicked() {
                     ops::request_stop(state);
                 }
             } else {
-                let start_enabled = ops::can_start(state);
+                let start_label = t(L10nKey::BtnStart, state.chrome.resolved_lang);
                 let start_text = t(L10nKey::TooltipStartEnabled, state.chrome.resolved_lang);
                 let start_hint = if cfg!(target_os = "macos") {
                     format!("{start_text} (Enter / ⌘Enter)")
@@ -484,65 +506,60 @@ pub fn show_main_ui(
                     format!("{start_text} (Enter / Ctrl+Enter)")
                 };
                 let hover = if !start_enabled {
-                    ops::start_disabled_reason(state)
+                    disabled_reason.clone()
                 } else {
                     start_hint
                 };
 
                 ui.add_enabled_ui(start_enabled, |ui| {
-                    if ui
-                        .add(icon_button(
-                            ui,
-                            icon::PLAY,
-                            t(L10nKey::BtnStart, state.chrome.resolved_lang),
-                        ))
-                        .on_disabled_hover_text(hover)
-                        .clicked()
-                    {
+                    let resp = ui
+                        .add(icon_button(ui, icon::PLAY, start_label))
+                        .on_disabled_hover_text(&hover)
+                        .on_hover_text(&hover);
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            start_enabled,
+                            start_label,
+                        )
+                    });
+                    if resp.clicked() {
                         ops::execute_start(state, worker_tx, &NativeDialog, runner);
                     }
                 });
             }
         });
     });
+    if !disabled_reason.is_empty() {
+        ui.label(
+            egui::RichText::new(&disabled_reason)
+                .small()
+                .color(ui.visuals().weak_text_color()),
+        );
+    }
 
     ui.add_space(GAP_TINY);
     let log_height = ui.available_height() - 20.0;
     let log_height = log_height.max(40.0);
-
-    egui::ScrollArea::vertical()
-        .stick_to_bottom(true)
-        .max_height(log_height)
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            if state.runtime.log_text.is_empty() {
-                ui.weak(t(L10nKey::LogReady, state.chrome.resolved_lang));
-            } else {
-                ui.label(
-                    egui::RichText::new(&state.runtime.log_text)
-                        .monospace()
-                        .size(11.0),
-                );
-            }
-        });
+    show_log_panel(ui, state, log_height);
 
     let drive_count = state.drive.drives.len();
-    let status_text = if drive_count == 0 {
-        t(L10nKey::StatusNoDrivesFound, state.chrome.resolved_lang).to_string()
-    } else if drive_count == 1 {
-        t(L10nKey::StatusOneDriveFound, state.chrome.resolved_lang).to_string()
-    } else {
-        t_with_args(
-            L10nKey::StatusDrivesFound,
-            state.chrome.resolved_lang,
-            &[("count", &drive_count.to_string())],
-        )
-    };
-    ui.label(
-        icon_rich(ui, icon::HARD_DRIVES, &status_text, egui::TextStyle::Body)
-            .small()
-            .weak(),
-    );
+    if drive_count > 0 {
+        let status_text = if drive_count == 1 {
+            t(L10nKey::StatusOneDriveFound, state.chrome.resolved_lang).to_string()
+        } else {
+            t_with_args(
+                L10nKey::StatusDrivesFound,
+                state.chrome.resolved_lang,
+                &[("count", &drive_count.to_string())],
+            )
+        };
+        ui.label(
+            icon_rich(ui, icon::HARD_DRIVES, &status_text, egui::TextStyle::Body)
+                .small()
+                .weak(),
+        );
+    }
 
     // Low-intrusion first-run: no modal. Clicks outside Settings / Get MakeMKV pulse the gear.
     if !backend_ok && ctx.input(|i| i.pointer.primary_clicked()) {
@@ -556,23 +573,58 @@ pub fn show_main_ui(
     }
 }
 
-fn status_indicator(ui: &mut egui::Ui, probing: bool, probed: bool, ok: bool) {
+fn status_indicator(ui: &mut egui::Ui, lang: Language, probing: bool, probed: bool, ok: bool) {
     let size = button_text_size(ui);
     if probing {
         ui.add(egui::Spinner::new());
     } else if !probed {
         ui.weak("…");
     } else if ok {
+        let label = t(L10nKey::StatusYes, lang);
         ui.colored_label(
             ui.visuals().hyperlink_color,
-            egui::RichText::new(icon::CHECK_CIRCLE).size(size),
+            egui::RichText::new(format!("{} {label}", icon::CHECK_CIRCLE)).size(size),
         );
     } else {
+        let label = t(L10nKey::StatusNo, lang);
         ui.colored_label(
             ui.visuals().error_fg_color,
-            egui::RichText::new(icon::X_CIRCLE).size(size),
+            egui::RichText::new(format!("{} {label}", icon::X_CIRCLE)).size(size),
         );
     }
+}
+
+fn show_log_panel(ui: &mut egui::Ui, state: &AppState, log_height: f32) {
+    let mono_size = ui
+        .style()
+        .text_styles
+        .get(&egui::TextStyle::Monospace)
+        .map(|f| f.size)
+        .unwrap_or(12.0);
+    let row_height = mono_size + 2.0;
+
+    if state.runtime.log_text.is_empty() {
+        egui::ScrollArea::vertical()
+            .stick_to_bottom(true)
+            .max_height(log_height)
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.weak(t(L10nKey::LogReady, state.chrome.resolved_lang));
+            });
+        return;
+    }
+
+    let lines: Vec<&str> = state.runtime.log_text.lines().collect();
+    let num_rows = lines.len();
+    egui::ScrollArea::vertical()
+        .stick_to_bottom(true)
+        .max_height(log_height)
+        .show_rows(ui, row_height, num_rows, |ui, row_range| {
+            ui.set_min_width(ui.available_width());
+            for row in row_range {
+                ui.label(egui::RichText::new(lines[row]).monospace().size(mono_size));
+            }
+        });
 }
 
 fn show_firmware_selector(ui: &mut egui::Ui, state: &mut AppState, dialog: &impl FileDialog) {
@@ -585,10 +637,11 @@ fn show_firmware_selector(ui: &mut egui::Ui, state: &mut AppState, dialog: &impl
         egui::TextStyle::Body,
     ));
     let path_before = state.flash.firmware_path.clone();
+    let filter = t(L10nKey::DialogFilterFirmware, state.chrome.resolved_lang);
     let _ = file_picker(
         ui,
         &mut state.flash.firmware_path,
-        "Firmware",
+        filter,
         &["bin"],
         state.chrome.resolved_lang,
         dialog,
@@ -693,10 +746,11 @@ fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState, dialog: &
 
             ui.add_space(GAP_TINY);
             ui.label(t(L10nKey::LabelWrongFw, state.chrome.resolved_lang));
+            let filter = t(L10nKey::DialogFilterFirmware, state.chrome.resolved_lang);
             if file_picker(
                 ui,
                 &mut state.flash.wrong_firmware_path,
-                "Firmware",
+                filter,
                 &["bin"],
                 state.chrome.resolved_lang,
                 dialog,
