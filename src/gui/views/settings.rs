@@ -258,7 +258,7 @@ pub fn show_settings_window(
                             )
                             .clicked()
                         {
-                            spawn_list_drives(worker_tx, state, runner);
+                            spawn_list_drives(worker_tx, state, runner, true);
                         }
                     });
                 });

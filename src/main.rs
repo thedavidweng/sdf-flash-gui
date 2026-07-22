@@ -7,8 +7,6 @@ use sdf_flash_gui::process_runner::NativeRunner;
 use sdf_flash_gui::sdf;
 
 fn main() {
-    env_logger::init();
-
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() <= 1 {

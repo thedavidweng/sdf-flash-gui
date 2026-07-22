@@ -226,7 +226,7 @@ mod tests {
     fn flash_mode_label_read() {
         let mut state = AppState::new_no_backend();
         state.operation_mode = OperationMode::Read;
-        assert!(flash_mode_label(&state).contains("READ"));
+        assert!(flash_mode_label(&state).contains("Read"));
     }
 
     #[test]
@@ -1469,7 +1469,7 @@ mod tests {
         let mut state = AppState::new_no_backend();
         prompt_recovery_wrong_firmware(&mut state, &no_dialog());
         // Dialog returns nothing → log message but no token
-        assert!(state.runtime.log_text.contains("RECOVER"));
+        assert!(state.runtime.log_text.contains("Recover"));
         assert!(state.flash.wrong_firmware_path.is_empty());
     }
 

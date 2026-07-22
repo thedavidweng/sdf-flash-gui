@@ -160,12 +160,6 @@ impl std::fmt::Display for BackendOpError {
     }
 }
 
-pub fn run_list_backend(backend: Backend, tool_path: &str) -> Result<String, String> {
-    run_list_backend_with(backend, tool_path, &NativeRunner, None)
-        .map(|o| o.combined())
-        .map_err(|e| e.to_string())
-}
-
 /// List drives via backend `-l`, using the shared process runner seam.
 pub fn run_list_backend_with(
     backend: Backend,
@@ -556,16 +550,6 @@ mod tests {
         )
         .expect("list");
         assert!(out.stdout.contains("/dev/sr0") || out.combined().contains("/dev/sr0"));
-    }
-
-    #[test]
-    fn run_list_backend_native_wrapper_maps_spawn_error() {
-        let err = run_list_backend(
-            crate::command::Backend::SdfTool,
-            "/nonexistent/sdftool_coverage_list_xyz",
-        )
-        .unwrap_err();
-        assert!(err.contains("failed") || !err.is_empty(), "err={err}");
     }
 
     #[test]

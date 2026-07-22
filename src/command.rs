@@ -324,7 +324,7 @@ pub fn classify_drive_safety(drive_label: &str, info_output: &str) -> DriveSafet
 ///
 /// Prefer explicit Identification SDF status (`Possible, not yet enabled` /
 /// `Enabled`). Fall back to Drive Specific SDF present/not present.
-pub fn classify_libredrive_status(info_output: &str) -> LibreDriveStatus {
+pub(crate) fn classify_libredrive_status(info_output: &str) -> LibreDriveStatus {
     // Walk lines so we can order "not possible" before "possible" (substring trap).
     for line in info_output.lines() {
         let t = line.trim();

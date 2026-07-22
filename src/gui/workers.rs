@@ -44,7 +44,10 @@ pub enum WorkerResult {
         status: String,
         progress: f32,
     },
-    DrivesListed(Vec<Drive>),
+    DrivesListed {
+        drives: Vec<Drive>,
+        verbose: bool,
+    },
     StopNeedsForceKill,
 }
 
@@ -145,16 +148,18 @@ fn handle_result(result: WorkerResult, state: &mut AppState) -> Option<Attention
                 Attention::Critical
             })
         }
-        WorkerResult::DrivesListed(drives) => {
+        WorkerResult::DrivesListed { drives, verbose } => {
             let count = drives.len();
             state.apply_drive_list(drives);
             state.finish_operation();
-            let lang = state.chrome.resolved_lang;
-            state.log(&t_with_args(
-                L10nKey::StatusDrivesFound,
-                lang,
-                &[("count", &count.to_string())],
-            ));
+            if verbose {
+                let lang = state.chrome.resolved_lang;
+                state.log(&t_with_args(
+                    L10nKey::StatusDrivesFound,
+                    lang,
+                    &[("count", &count.to_string())],
+                ));
+            }
             None
         }
         WorkerResult::StopNeedsForceKill => {
@@ -417,11 +422,15 @@ pub fn spawn_list_drives(
     tx: &Sender<WorkerMsg>,
     state: &mut AppState,
     runner: &std::sync::Arc<dyn ProcessRunner>,
+    verbose: bool,
 ) {
     let cmd = command::plan_drive_list(state.config.backend, &state.config.tool_path);
     let lang = state.chrome.resolved_lang;
     let control = state.begin_operation(t(L10nKey::StatusListingDrives, lang));
-    state.log(&format!("> {}", process::format_command(&cmd)));
+    let cmd_display = process::format_command(&cmd);
+    if verbose {
+        state.log(&format!("> {cmd_display}"));
+    }
 
     let tx = tx.clone();
     let backend = state.config.backend;
@@ -436,18 +445,28 @@ pub fn spawn_list_drives(
             Some(control.as_ref()),
         ) {
             Ok(out) => {
-                let combined = out.combined();
-                if !combined.is_empty() {
-                    let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(combined)));
-                }
                 // Parse stdout only (stderr may contain noise).
                 let drives = crate::drive::parse_drive_list(&out.stdout);
-                let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(t_with_args(
-                    L10nKey::LogParsedDrivesFromOutput,
-                    lang,
-                    &[("count", &drives.len().to_string())],
-                ))));
-                let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(drives)));
+                if verbose {
+                    let combined = out.combined();
+                    if !combined.is_empty() {
+                        let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(combined)));
+                    }
+                    let log_key = if drives.len() == 1 {
+                        L10nKey::LogParsedOneDriveFromOutput
+                    } else {
+                        L10nKey::LogParsedDrivesFromOutput
+                    };
+                    let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(t_with_args(
+                        log_key,
+                        lang,
+                        &[("count", &drives.len().to_string())],
+                    ))));
+                }
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed {
+                    drives,
+                    verbose,
+                }));
             }
             Err(crate::orchestration::BackendOpError::Cancelled) => {
                 let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(
@@ -463,6 +482,11 @@ pub fn spawn_list_drives(
                 let _ = tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill));
             }
             Err(crate::orchestration::BackendOpError::Failed(e)) => {
+                if !verbose {
+                    let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(format!(
+                        "> {cmd_display}"
+                    ))));
+                }
                 let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(log_error(lang, &e))));
                 let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
                     success: false,
@@ -753,16 +777,32 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(vec![
-            test_drive(),
-        ])));
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed {
+            drives: vec![test_drive()],
+            verbose: true,
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert_eq!(state.drive.drives.len(), 1);
         assert_eq!(state.drive.selected_drive, Some(0));
         assert!(!state.runtime.busy);
         assert!(!state.runtime.progress_indeterminate);
-        assert!(state.runtime.log_text.contains("1 drive(s)"));
+        assert!(state.runtime.log_text.contains("1 drive"));
+    }
+
+    #[test]
+    fn drain_drives_listed_quiet_skips_summary_log() {
+        let mut state = AppState::new_no_backend();
+        state.runtime.busy = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed {
+            drives: vec![test_drive()],
+            verbose: false,
+        }));
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert_eq!(state.drive.drives.len(), 1);
+        assert!(state.runtime.log_text.is_empty());
     }
 
     #[test]
@@ -771,12 +811,31 @@ mod tests {
         state.drive.drives.push(test_drive());
         state.drive.selected_drive = Some(0);
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(vec![])));
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed {
+            drives: vec![],
+            verbose: false,
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert!(state.drive.drives.is_empty());
         // Empty list clears selection (no stale index into vanished list).
         assert_eq!(state.drive.selected_drive, None);
+        assert!(state.runtime.log_text.is_empty());
+    }
+
+    #[test]
+    fn drain_drives_listed_verbose_empty_logs_summary() {
+        let mut state = AppState::new_no_backend();
+        state.runtime.busy = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed {
+            drives: vec![],
+            verbose: true,
+        }));
+        drop(tx);
+        drain_worker_messages(&mut state, &rx);
+        assert!(state.drive.drives.is_empty());
+        assert!(state.runtime.log_text.contains("0 drives"));
     }
 
     #[test]
@@ -787,16 +846,19 @@ mod tests {
         state.drive.last_probed_drive = Some(0);
         state.drive.drive_probed = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(vec![
-            test_drive(),
-            crate::drive::Drive {
-                device: "/dev/sr1".into(),
-                vendor: "V".into(),
-                product: "P".into(),
-                revision: "R".into(),
-                ..Default::default()
-            },
-        ])));
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed {
+            drives: vec![
+                test_drive(),
+                crate::drive::Drive {
+                    device: "/dev/sr1".into(),
+                    vendor: "V".into(),
+                    product: "P".into(),
+                    revision: "R".into(),
+                    ..Default::default()
+                },
+            ],
+            verbose: false,
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         // Same device path → stay on that drive; probe cache stays valid.
@@ -830,9 +892,10 @@ mod tests {
             ..Default::default()
         };
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(vec![
-            filler, target,
-        ])));
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed {
+            drives: vec![filler, target],
+            verbose: false,
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert_eq!(state.drive.selected_drive, Some(1));
@@ -855,22 +918,25 @@ mod tests {
         state.drive.last_probed_drive = Some(0);
         state.drive.drive_probed = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(vec![
-            crate::drive::Drive {
-                device: "/dev/sr0".into(),
-                vendor: "OTHER".into(),
-                product: "X".into(),
-                revision: "0".into(),
-                ..Default::default()
-            },
-            crate::drive::Drive {
-                device: "/dev/sg2".into(), // path changed, same identity
-                vendor: "HL-DT-ST".into(),
-                product: "BU40N".into(),
-                revision: "1.03".into(),
-                ..Default::default()
-            },
-        ])));
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed {
+            drives: vec![
+                crate::drive::Drive {
+                    device: "/dev/sr0".into(),
+                    vendor: "OTHER".into(),
+                    product: "X".into(),
+                    revision: "0".into(),
+                    ..Default::default()
+                },
+                crate::drive::Drive {
+                    device: "/dev/sg2".into(), // path changed, same identity
+                    vendor: "HL-DT-ST".into(),
+                    product: "BU40N".into(),
+                    revision: "1.03".into(),
+                    ..Default::default()
+                },
+            ],
+            verbose: false,
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert_eq!(state.drive.selected_drive, Some(1));
@@ -887,7 +953,10 @@ mod tests {
         state.drive.selected_drive = Some(0);
         state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(vec![])));
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed {
+            drives: vec![],
+            verbose: false,
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert!(state.drive.drives.is_empty());
@@ -1030,7 +1099,7 @@ mod tests {
             |m| {
                 matches!(
                     m,
-                    WorkerMsg::Done(WorkerResult::DrivesListed(_))
+                    WorkerMsg::Done(WorkerResult::DrivesListed { .. })
                         | WorkerMsg::Done(WorkerResult::OperationComplete { .. })
                         | WorkerMsg::Done(WorkerResult::StopNeedsForceKill)
                 )
@@ -1206,15 +1275,55 @@ mod tests {
         state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
-        spawn_list_drives(&tx, &mut state, &runner);
+        spawn_list_drives(&tx, &mut state, &runner, false);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
         assert!(
-            messages.iter().any(
-                |m| matches!(m, WorkerMsg::Done(WorkerResult::DrivesListed(d)) if d.is_empty())
-            ),
+            messages.iter().any(|m| matches!(
+                m,
+                WorkerMsg::Done(WorkerResult::DrivesListed { drives, verbose: false })
+                    if drives.is_empty()
+            )),
             "msgs: {messages:?}"
         );
+        assert!(
+            messages
+                .iter()
+                .all(|m| !matches!(m, WorkerMsg::Stream(StreamEvent::Log(_)))),
+            "quiet list must not stream log lines: {messages:?}"
+        );
+    }
+
+    #[test]
+    fn spawn_list_drives_verbose_empty_output_logs_parse_only() {
+        let mut state = AppState::new_no_backend();
+        state.config.tool_path = "/usr/bin/sdftool".into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
+        spawn_list_drives(&tx, &mut state, &runner, true);
+        assert!(state.runtime.log_text.contains('>'));
+        let messages = wait_for_drives_listed(&rx);
+        drop(tx);
+        let log_lines: Vec<&str> = messages
+            .iter()
+            .filter_map(|m| match m {
+                WorkerMsg::Stream(StreamEvent::Log(s)) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            log_lines.len(),
+            1,
+            "empty backend output → only parse line: {messages:?}"
+        );
+        assert!(log_lines[0].contains("Parsed"), "log: {log_lines:?}");
+        assert!(matches!(
+            messages.last(),
+            Some(WorkerMsg::Done(WorkerResult::DrivesListed {
+                drives,
+                verbose: true
+            })) if drives.is_empty()
+        ));
     }
 
     #[test]
@@ -1310,13 +1419,20 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> =
             Arc::new(MockRunner::success("0:/dev/sr0 HL-DT-ST BU40N 1.03\n"));
-        spawn_list_drives(&tx, &mut state, &runner);
+        spawn_list_drives(&tx, &mut state, &runner, true);
         assert!(state.runtime.busy);
+        assert!(state.runtime.log_text.contains('>'));
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
         let drives = expect_drives_listed(&messages);
         assert_eq!(drives.len(), 1);
         assert_eq!(drives[0].device, "/dev/sr0");
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, WorkerMsg::Stream(StreamEvent::Log(_)))),
+            "verbose list should stream log lines: {messages:?}"
+        );
     }
 
     /// Pull `DrivesListed` out of a worker message stream.
@@ -1328,7 +1444,9 @@ mod tests {
         messages
             .iter()
             .find_map(|m| match m {
-                WorkerMsg::Done(WorkerResult::DrivesListed(d)) => Some(d.as_slice()),
+                WorkerMsg::Done(WorkerResult::DrivesListed { drives, .. }) => {
+                    Some(drives.as_slice())
+                }
                 _ => None,
             })
             .expect("DrivesListed message missing")
@@ -1366,7 +1484,7 @@ Found 1 drives(s)
 
 ";
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(stdout));
-        spawn_list_drives(&tx, &mut state, &runner);
+        spawn_list_drives(&tx, &mut state, &runner, true);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
         let drives = expect_drives_listed(&messages);
@@ -1388,7 +1506,7 @@ Found 1 drives(s)
 
 ";
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(stdout));
-        spawn_list_drives(&tx, &mut state, &runner);
+        spawn_list_drives(&tx, &mut state, &runner, true);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
         let drives = expect_drives_listed(&messages);
@@ -1408,7 +1526,7 @@ Found 1 drives(s)
 
 ";
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(stdout));
-        spawn_list_drives(&tx, &mut state, &runner);
+        spawn_list_drives(&tx, &mut state, &runner, true);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
         let drives = expect_drives_listed(&messages);
@@ -1766,7 +1884,7 @@ Found 1 drives(s)
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::cancelled());
-        spawn_list_drives(&tx, &mut state, &runner);
+        spawn_list_drives(&tx, &mut state, &runner, true);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
         assert!(matches!(
@@ -1783,7 +1901,7 @@ Found 1 drives(s)
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::needs_force_kill());
-        spawn_list_drives(&tx, &mut state, &runner);
+        spawn_list_drives(&tx, &mut state, &runner, true);
         std::thread::sleep(std::time::Duration::from_millis(100));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
@@ -1826,7 +1944,7 @@ Found 1 drives(s)
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::failing());
-        spawn_list_drives(&tx, &mut state, &runner);
+        spawn_list_drives(&tx, &mut state, &runner, true);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
         let last = messages.last().unwrap();
@@ -1840,6 +1958,32 @@ Found 1 drives(s)
                 }) if status.contains("failed")
             ),
             "expected OperationComplete failure, got {last:?}"
+        );
+    }
+
+    #[test]
+    fn spawn_list_drives_quiet_failure_logs_command() {
+        let mut state = AppState::new_no_backend();
+        state.config.tool_path = "/usr/bin/sdftool".into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::failing());
+        spawn_list_drives(&tx, &mut state, &runner, false);
+        assert!(!state.runtime.log_text.contains('>'));
+        let messages = wait_for_drives_listed(&rx);
+        drop(tx);
+        assert!(
+            messages.iter().any(|m| match m {
+                WorkerMsg::Stream(StreamEvent::Log(s)) => s.starts_with("> "),
+                _ => false,
+            }),
+            "quiet failure should still stream the command: {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|m| matches!(
+                m,
+                WorkerMsg::Done(WorkerResult::OperationComplete { success: false, .. })
+            )),
+            "msgs: {messages:?}"
         );
     }
 }

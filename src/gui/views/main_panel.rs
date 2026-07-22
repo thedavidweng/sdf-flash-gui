@@ -21,7 +21,6 @@ use super::super::{
 pub fn show_main_ui(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
-    frame: &mut eframe::Frame,
     state: &mut AppState,
     worker_tx: &mpsc::Sender<WorkerMsg>,
     runner: &std::sync::Arc<dyn process::ProcessRunner>,
@@ -41,11 +40,17 @@ pub fn show_main_ui(
 
     ui.horizontal(|ui| {
         let refresh_text = t(L10nKey::TooltipRefresh, state.chrome.resolved_lang);
-        let refresh_hint = if cfg!(target_os = "macos") {
+        let mut refresh_hint = if cfg!(target_os = "macos") {
             format!("{refresh_text} (⌘R)")
         } else {
             format!("{refresh_text} (Ctrl+R)")
         };
+        if state.drive.drives.is_empty() {
+            refresh_hint = format!(
+                "{refresh_hint}\n{}",
+                t(L10nKey::HelpEmptyDrives, state.chrome.resolved_lang)
+            );
+        }
         let refresh_resp = ui.add_enabled(
             backend_ok && !state.runtime.busy && !state.runtime.probing,
             super::super::toolbar_icon_button(ui, icon::ARROW_CLOCKWISE),
@@ -60,7 +65,7 @@ pub fn show_main_ui(
         if refresh_resp.on_hover_text(refresh_hint).clicked() {
             // Backend `-l` is the source of truth (macOS USB optical uses
             // /IOBDServices/… paths that OS enumeration cannot produce).
-            spawn_list_drives(worker_tx, state, runner);
+            spawn_list_drives(worker_tx, state, runner, true);
         }
         let settings_text = t(L10nKey::TooltipSettings, state.chrome.resolved_lang);
         let settings_hint = if cfg!(target_os = "macos") {
@@ -143,7 +148,7 @@ pub fn show_main_ui(
                 .clicked()
             {
                 state.chrome.theme = ThemeChoice::Light;
-                ctx.set_visuals(egui::Visuals::light());
+                ctx.set_theme(egui::ThemePreference::Light);
             }
             if ui
                 .selectable_label(
@@ -158,7 +163,7 @@ pub fn show_main_ui(
                 .clicked()
             {
                 state.chrome.theme = ThemeChoice::Dark;
-                ctx.set_visuals(egui::Visuals::dark());
+                ctx.set_theme(egui::ThemePreference::Dark);
             }
             if ui
                 .selectable_label(
@@ -173,7 +178,7 @@ pub fn show_main_ui(
                 .clicked()
             {
                 state.chrome.theme = ThemeChoice::System;
-                ctx.set_visuals(egui::Visuals::dark());
+                ctx.set_theme(egui::ThemePreference::System);
             }
         });
     });
@@ -214,7 +219,7 @@ pub fn show_main_ui(
             .selected_drive()
             .map(ops::drive_label)
             .unwrap_or_else(|| no_drives_msg.to_string());
-        egui::ComboBox::from_id_salt("drive_selector")
+        let combo_resp = egui::ComboBox::from_id_salt("drive_selector")
             .selected_text(&selected_label)
             .width(ui.available_width())
             .show_ui(ui, |ui| {
@@ -231,98 +236,88 @@ pub fn show_main_ui(
                 }
             });
         if state.drive.drives.is_empty() {
-            ui.add_space(GAP_TINY);
-            ui.label(
-                egui::RichText::new(t(L10nKey::HelpEmptyDrives, state.chrome.resolved_lang))
-                    .small()
-                    .italics()
-                    .color(ui.visuals().weak_text_color()),
-            );
+            combo_resp
+                .response
+                .on_hover_text(t(L10nKey::HelpEmptyDrives, state.chrome.resolved_lang));
         }
-        ui.add_space(GAP_TINY);
-        // Identity fields from list (MakeMKV BuildDriveId) + probe status.
-        let selected = state.selected_drive().cloned();
-        let lang = state.chrome.resolved_lang;
-        let na = t(L10nKey::LabelNotAvailable, lang);
-        let weak_color = ui.visuals().weak_text_color();
-        ui.columns(2, |cols| {
-            let prop = |cols: &mut [egui::Ui], label_key: L10nKey, value: &str| {
-                cols[0].label(t(label_key, lang));
-                if value.is_empty() {
-                    cols[1].weak(na);
-                } else {
-                    cols[1].label(value);
-                }
-            };
+        if let Some(d) = state.selected_drive().cloned() {
+            ui.add_space(GAP_TINY);
+            let lang = state.chrome.resolved_lang;
+            let na = t(L10nKey::LabelNotAvailable, lang);
+            let weak_color = ui.visuals().weak_text_color();
+            ui.columns(2, |cols| {
+                let prop = |cols: &mut [egui::Ui], label_key: L10nKey, value: &str| {
+                    cols[0].label(t(label_key, lang));
+                    if value.is_empty() {
+                        cols[1].weak(na);
+                    } else {
+                        cols[1].label(value);
+                    }
+                };
 
-            if let Some(ref d) = selected {
                 prop(cols, L10nKey::LabelManufacturer, &d.vendor);
                 prop(cols, L10nKey::LabelProduct, &d.product);
                 prop(cols, L10nKey::LabelRevision, &d.revision);
                 prop(cols, L10nKey::LabelSerial, &d.serial);
                 let date = d.firmware_date_display();
                 prop(cols, L10nKey::LabelFirmwareDate, &date);
-            } else {
-                prop(cols, L10nKey::LabelManufacturer, "");
-                prop(cols, L10nKey::LabelProduct, "");
-                prop(cols, L10nKey::LabelRevision, "");
-                prop(cols, L10nKey::LabelSerial, "");
-                prop(cols, L10nKey::LabelFirmwareDate, "");
-            }
 
-            cols[0].label(t(L10nKey::LabelMt1959Platform, lang));
-            status_indicator(
-                &mut cols[1],
-                state.runtime.probing,
-                state.drive.drive_probed,
-                state.drive.drive_mt1959,
-            );
+                cols[0].label(t(L10nKey::LabelMt1959Platform, lang));
+                status_indicator(
+                    &mut cols[1],
+                    state.runtime.probing,
+                    state.drive.drive_probed,
+                    state.drive.drive_mt1959,
+                );
 
-            cols[0].label(t(L10nKey::LabelEncryptedFirmware, lang));
-            status_indicator(
-                &mut cols[1],
-                state.runtime.probing,
-                state.drive.drive_probed,
-                state.drive.drive_encrypted_firmware,
-            );
+                cols[0].label(t(L10nKey::LabelEncryptedFirmware, lang));
+                status_indicator(
+                    &mut cols[1],
+                    state.runtime.probing,
+                    state.drive.drive_probed,
+                    state.drive.drive_encrypted_firmware,
+                );
 
-            cols[0].label(t(L10nKey::LabelLibreDrive, lang));
-            if state.runtime.probing {
-                cols[1].add(egui::Spinner::new());
-            } else if !state.drive.drive_probed {
-                cols[1].weak("…");
-            } else {
-                let (text_key, color_ok) = match state.drive.drive_libredrive {
-                    crate::command::LibreDriveStatus::Enabled => (L10nKey::LibreDriveEnabled, true),
-                    crate::command::LibreDriveStatus::PossibleNotEnabled => {
-                        (L10nKey::LibreDrivePossible, true)
-                    }
-                    crate::command::LibreDriveStatus::NotAvailable => {
-                        (L10nKey::LibreDriveNotAvailable, false)
-                    }
-                    crate::command::LibreDriveStatus::Unknown => {
-                        (L10nKey::LibreDriveUnknown, false)
-                    }
-                };
-                let color = if color_ok {
-                    egui::Color32::from_rgb(120, 200, 120)
+                cols[0].label(t(L10nKey::LabelLibreDrive, lang));
+                if state.runtime.probing {
+                    cols[1].add(egui::Spinner::new());
+                } else if !state.drive.drive_probed {
+                    cols[1].weak("…");
                 } else {
-                    weak_color
-                };
-                cols[1].colored_label(color, t(text_key, lang));
-            }
+                    let (text_key, color_ok) = match state.drive.drive_libredrive {
+                        crate::command::LibreDriveStatus::Enabled => {
+                            (L10nKey::LibreDriveEnabled, true)
+                        }
+                        crate::command::LibreDriveStatus::PossibleNotEnabled => {
+                            (L10nKey::LibreDrivePossible, true)
+                        }
+                        crate::command::LibreDriveStatus::NotAvailable => {
+                            (L10nKey::LibreDriveNotAvailable, false)
+                        }
+                        crate::command::LibreDriveStatus::Unknown => {
+                            (L10nKey::LibreDriveUnknown, false)
+                        }
+                    };
+                    let color = if color_ok {
+                        egui::Color32::from_rgb(120, 200, 120)
+                    } else {
+                        weak_color
+                    };
+                    cols[1].colored_label(color, t(text_key, lang));
+                }
 
-            cols[0].label(t(L10nKey::LabelSdfVersion, lang));
-            if state.runtime.probing {
-                cols[1].add(egui::Spinner::new());
-            } else if !state.drive.drive_probed {
-                cols[1].weak("…");
-            } else if let Some(v) = &state.drive.drive_sdf_version {
-                cols[1].label(v);
-            } else {
-                cols[1].weak("—");
-            }
-        });
+                cols[0].label(t(L10nKey::LabelSdfVersion, lang));
+                if state.runtime.probing {
+                    cols[1].add(egui::Spinner::new());
+                } else if !state.drive.drive_probed {
+                    cols[1].weak("…");
+                } else if let Some(v) = &state.drive.drive_sdf_version {
+                    cols[1].label(v);
+                } else {
+                    cols[1].weak("—");
+                }
+            });
+        }
 
         ui.add_space(GAP_MEDIUM);
 
@@ -467,7 +462,6 @@ pub fn show_main_ui(
     ui.add_space(GAP_SMALL);
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let _ = frame;
             if state.runtime.busy {
                 let stop_text = t(L10nKey::TooltipStop, state.chrome.resolved_lang);
                 if ui
@@ -535,6 +529,8 @@ pub fn show_main_ui(
     let drive_count = state.drive.drives.len();
     let status_text = if drive_count == 0 {
         t(L10nKey::StatusNoDrivesFound, state.chrome.resolved_lang).to_string()
+    } else if drive_count == 1 {
+        t(L10nKey::StatusOneDriveFound, state.chrome.resolved_lang).to_string()
     } else {
         t_with_args(
             L10nKey::StatusDrivesFound,

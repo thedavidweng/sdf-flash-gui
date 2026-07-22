@@ -55,18 +55,14 @@ pub fn compare_versions(current: &str, target: &str) -> FlashDirection {
 
 #[derive(Debug, Clone)]
 pub struct FirmwareSdfInfo {
-    pub vendor: Option<String>,
     pub model: Option<String>,
-    pub firmware_version: Option<String>,
 }
 
 pub fn check_firmware_sdf(firmware_data: &[u8]) -> Option<FirmwareSdfInfo> {
     let mut cursor = std::io::Cursor::new(firmware_data);
     let container = sdf::parse_sdf0(&mut cursor).ok()?;
     Some(FirmwareSdfInfo {
-        vendor: container.metadata.vendor,
         model: container.metadata.model,
-        firmware_version: container.metadata.firmware_version,
     })
 }
 
@@ -74,7 +70,7 @@ pub fn check_firmware_sdf(firmware_data: &[u8]) -> Option<FirmwareSdfInfo> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FirmwareBinaryInfo {
     /// PCB type from the boot string at offset 12288 (e.g. "JB8", "BU5", "BUP3").
-    pub pcb_type: Option<String>,
+    pub(crate) pcb_type: Option<String>,
     /// Drive model found embedded in the binary (e.g. "BW-16D1HT", "BU40N").
     pub model: Option<String>,
     /// Form factor inferred from the PCB type.
@@ -88,7 +84,6 @@ pub struct KnownFirmware {
     pub model: &'static str,
     pub version: &'static str,
     pub form_factor: DriveFormFactor,
-    pub is_mk: bool,
     /// Whether this firmware image itself is encrypted (date ≥ 2020).
     /// Encrypted firmware requires `rawflash enc` regardless of the
     /// drive's current firmware state.
@@ -104,7 +99,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BC-12D2HT",
         version: "3.11-MK",
         form_factor: DriveFormFactor::Desktop,
-        is_mk: true,
         is_encrypted: false, // date 2119-02-27
     },
     KnownFirmware {
@@ -112,7 +106,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BW-16D1HT",
         version: "3.02",
         form_factor: DriveFormFactor::Desktop,
-        is_mk: false,
         is_encrypted: false, // date 2117-11-24
     },
     KnownFirmware {
@@ -120,7 +113,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BW-16D1HT",
         version: "3.10-MK",
         form_factor: DriveFormFactor::Desktop,
-        is_mk: true,
         is_encrypted: false, // date 2119-01-04
     },
     KnownFirmware {
@@ -128,7 +120,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BH16NS55",
         version: "1.02",
         form_factor: DriveFormFactor::Desktop,
-        is_mk: false,
         is_encrypted: false, // date 2115-12-11
     },
     KnownFirmware {
@@ -136,7 +127,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "WH14NS40",
         version: "1.02",
         form_factor: DriveFormFactor::Desktop,
-        is_mk: false,
         is_encrypted: false, // date 2115-12-11
     },
     KnownFirmware {
@@ -144,7 +134,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "WH16NS40",
         version: "1.02",
         form_factor: DriveFormFactor::Desktop,
-        is_mk: false,
         is_encrypted: false, // date 2117-03-10
     },
     KnownFirmware {
@@ -152,7 +141,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "WH16NS60",
         version: "1.00",
         form_factor: DriveFormFactor::Desktop,
-        is_mk: false,
         is_encrypted: false, // date 2117-04-25
     },
     KnownFirmware {
@@ -160,7 +148,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "WH16NS60",
         version: "1.02-MK",
         form_factor: DriveFormFactor::Desktop,
-        is_mk: true,
         is_encrypted: false, // date 2118-10-29
     },
     // === Slim External Drives ===
@@ -169,7 +156,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BU40N",
         version: "1.03-MK",
         form_factor: DriveFormFactor::Slim,
-        is_mk: true,
         is_encrypted: false, // date 2119-05-14 (Buffalo BRUHD-PU3 BN12-MK)
     },
     KnownFirmware {
@@ -177,7 +163,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BU40N",
         version: "1.00",
         form_factor: DriveFormFactor::Slim,
-        is_mk: false,
         is_encrypted: false, // date 2117-05-30 (Buffalo BRUHD-PU3 BU10)
     },
     KnownFirmware {
@@ -185,7 +170,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BU40N",
         version: "1.03-MK",
         form_factor: DriveFormFactor::Slim,
-        is_mk: true,
         is_encrypted: false, // date 2119-02-23 (Buffalo BRUHD-PU3 BU12-MK)
     },
     KnownFirmware {
@@ -193,7 +177,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BP50NB40",
         version: "1.03-MK",
         form_factor: DriveFormFactor::Slim,
-        is_mk: true,
         is_encrypted: true, // date 2120-05-07
     },
     KnownFirmware {
@@ -201,7 +184,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BP60NB10",
         version: "1.00-MK",
         form_factor: DriveFormFactor::Slim,
-        is_mk: true,
         is_encrypted: false, // date 2117-11-21
     },
     KnownFirmware {
@@ -209,7 +191,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BP60NB10",
         version: "1.02-MK",
         form_factor: DriveFormFactor::Slim,
-        is_mk: true,
         is_encrypted: true, // date 2120-05-07
     },
     KnownFirmware {
@@ -217,7 +198,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BP60NB10",
         version: "1.02-MK",
         form_factor: DriveFormFactor::Slim,
-        is_mk: true,
         is_encrypted: true, // date 2121-07-08 (NB12 variant)
     },
     KnownFirmware {
@@ -225,7 +205,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BU40N",
         version: "1.00",
         form_factor: DriveFormFactor::Slim,
-        is_mk: false,
         is_encrypted: false, // date 2116-12-20
     },
     KnownFirmware {
@@ -233,7 +212,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "BU40N",
         version: "1.03-MK",
         form_factor: DriveFormFactor::Slim,
-        is_mk: true,
         is_encrypted: false, // date 2118-10-24
     },
     KnownFirmware {
@@ -241,7 +219,6 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         model: "WP50NB40",
         version: "1.03-MK",
         form_factor: DriveFormFactor::Slim,
-        is_mk: true,
         is_encrypted: true, // date 2120-05-07
     },
 ];
@@ -604,7 +581,6 @@ mod tests {
         data.extend_from_slice(metadata);
 
         let info = check_firmware_sdf(&data).unwrap();
-        assert_eq!(info.vendor.as_deref(), Some("TestVendor"));
         assert_eq!(info.model.as_deref(), Some("TestModel"));
     }
 
@@ -612,7 +588,6 @@ mod tests {
     fn check_firmware_sdf_extracts_vendor_and_model() {
         let firmware = build_sdf0_firmware_bytes("OtherVendor", "BU40N");
         let info = check_firmware_sdf(&firmware).expect("sdf metadata");
-        assert_eq!(info.vendor.as_deref(), Some("OtherVendor"));
         assert_eq!(info.model.as_deref(), Some("BU40N"));
     }
 
@@ -632,7 +607,6 @@ mod tests {
         data.extend(vec![0u8; 64]);
 
         let info = check_firmware_sdf(&data).unwrap();
-        assert_eq!(info.vendor.as_deref(), Some("TestVendor"));
         assert_eq!(info.model.as_deref(), Some("TestModel"));
     }
 
@@ -661,7 +635,6 @@ mod tests {
         assert_eq!(fw.model, "BW-16D1HT");
         assert_eq!(fw.version, "3.02");
         assert_eq!(fw.form_factor, DriveFormFactor::Desktop);
-        assert!(!fw.is_mk);
     }
 
     #[test]
@@ -995,9 +968,7 @@ mod tests {
             },
         };
         let sdf = FirmwareSdfInfo {
-            vendor: Some("HL-DT-ST".to_string()),
             model: Some("BU40N".to_string()),
-            firmware_version: Some("1.00".to_string()),
         };
         assert_eq!(
             resolve_form_factor_with_sdf(&id, Some(&sdf)),
@@ -1016,11 +987,7 @@ mod tests {
                 form_factor: DriveFormFactor::Unknown,
             },
         };
-        let sdf = FirmwareSdfInfo {
-            vendor: None,
-            model: None,
-            firmware_version: None,
-        };
+        let sdf = FirmwareSdfInfo { model: None };
         assert_eq!(
             resolve_form_factor_with_sdf(&id, Some(&sdf)),
             DriveFormFactor::Unknown
@@ -1086,9 +1053,7 @@ mod tests {
             },
         };
         let sdf = FirmwareSdfInfo {
-            vendor: None,
             model: Some("ALSO_WRONG".to_string()),
-            firmware_version: None,
         };
         assert_eq!(
             resolve_model_with_sdf(&id, Some(&sdf)).as_deref(),
@@ -1108,9 +1073,7 @@ mod tests {
             },
         };
         let sdf = FirmwareSdfInfo {
-            vendor: None,
             model: Some("SHOULD_NOT_USE".to_string()),
-            firmware_version: None,
         };
         assert_eq!(
             resolve_model_with_sdf(&id, Some(&sdf)).as_deref(),
@@ -1130,9 +1093,7 @@ mod tests {
             },
         };
         let sdf = FirmwareSdfInfo {
-            vendor: Some("HL-DT-ST".to_string()),
             model: Some("BU40N".to_string()),
-            firmware_version: Some("1.00".to_string()),
         };
         assert_eq!(
             resolve_model_with_sdf(&id, Some(&sdf)).as_deref(),
@@ -1165,11 +1126,7 @@ mod tests {
                 form_factor: DriveFormFactor::Unknown,
             },
         };
-        let sdf = FirmwareSdfInfo {
-            vendor: None,
-            model: None,
-            firmware_version: None,
-        };
+        let sdf = FirmwareSdfInfo { model: None };
         assert!(resolve_model_with_sdf(&id, Some(&sdf)).is_none());
     }
 
