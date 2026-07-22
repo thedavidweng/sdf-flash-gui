@@ -1,5 +1,3 @@
-// Abstraction over native file dialogs for testability.
-
 use std::path::{Path, PathBuf};
 
 /// Trait for file/folder picker operations.

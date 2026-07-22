@@ -270,7 +270,6 @@ mod tests {
             i.mode = StartMode::Recover;
             i.firmware_path = "fw.bin";
             i.confirmation = "FLASH /dev/sr0";
-            // 16 spaces: len ok, plan would reject as non-graphic.
             i.recovery_token = "                ";
             assert_eq!(evaluate(&i), Some(StartBlock::NeedConfirmation));
             i.recovery_token = "ABCDEFGHIJKLMNO\0";
@@ -290,10 +289,6 @@ mod tests {
             );
         });
     }
-
-    // --- plan_block defensive branch tests ---
-    // These exercise the PlanError → StartBlock mapping in plan_block directly,
-    // bypassing evaluate's pre-checks so the defensive branches are covered.
 
     #[test]
     fn plan_block_unsupported_platform_maps_to_not_mt1959() {

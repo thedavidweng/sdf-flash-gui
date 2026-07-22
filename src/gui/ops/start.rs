@@ -186,7 +186,6 @@ pub fn execute_start(
                     }
                 };
 
-            // prepare_firmware_op only yields a plan when would_execute is true.
             let Some(plan) = prepared.plan else {
                 return;
             };

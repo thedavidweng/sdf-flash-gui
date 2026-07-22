@@ -20,7 +20,7 @@ const SETTINGS_HEIGHT: f32 = 380.0;
 const SETTINGS_MIN_WIDTH: f32 = 500.0;
 const SETTINGS_MIN_HEIGHT: f32 = 380.0;
 
-#[allow(deprecated)] // viewport has no parent Ui; CentralPanel::show(ctx) is still required
+#[allow(deprecated)]
 pub fn show_settings_window(
     ctx: &egui::Context,
     state: &mut AppState,

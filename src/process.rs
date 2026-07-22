@@ -618,8 +618,6 @@ mod tests {
     fn wait_until_child_exited(control: &OperationControl) {
         use std::time::{Duration, Instant};
 
-        // Always fall through to assert! so the helper has no dead panic-only DA
-        // when the child exits within the deadline (the common test path).
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline && control.is_child_running() {
             thread::sleep(Duration::from_millis(5));
@@ -762,27 +760,23 @@ mod tests {
 
     #[test]
     fn parse_progress_percent_prgv_partial() {
-        // PRGV with only one value — should return None
         assert_eq!(parse_progress_percent("PRGV:50"), None);
     }
 
     #[test]
     fn parse_progress_percent_prgv_over_100() {
-        // Should clamp to 100
         let p = parse_progress_percent("PRGV:200,100").unwrap();
         assert!((p - 100.0).abs() < 0.01);
     }
 
     #[test]
     fn parse_progress_percent_prgv_negative() {
-        // Should clamp to 0
         let p = parse_progress_percent("PRGV:-10,100").unwrap();
         assert!((p - 0.0).abs() < 0.01);
     }
 
     #[test]
     fn parse_progress_percent_multiple_percent_signs() {
-        // Should use the last % sign
         assert_eq!(parse_progress_percent("10% then 90%"), Some(90.0));
     }
 
@@ -791,14 +785,35 @@ mod tests {
         assert_eq!(parse_progress_percent("%"), None);
     }
 
+    fn as_completed(outcome: CommandRunOutcome) -> Result<CommandOutput, &'static str> {
+        match outcome {
+            CommandRunOutcome::Completed(out) => Ok(out),
+            CommandRunOutcome::Cancelled => Err("cancelled"),
+            CommandRunOutcome::NeedsForceKill => Err("needs_force_kill"),
+        }
+    }
+
+    #[test]
+    fn as_completed_maps_all_outcomes() {
+        assert!(matches!(
+            as_completed(CommandRunOutcome::Cancelled),
+            Err("cancelled")
+        ));
+        assert!(matches!(
+            as_completed(CommandRunOutcome::NeedsForceKill),
+            Err("needs_force_kill")
+        ));
+        let out =
+            as_completed(run_command_cancellable("echo", &["ok".into()], None).expect("spawn"))
+                .expect("completed");
+        assert!(out.stdout.contains("ok"));
+    }
+
     #[test]
     fn run_command_echo() {
-        let result = run_command_cancellable("echo", &["hello".into()], None);
-        assert!(result.is_ok());
-        let out = match result.unwrap() {
-            CommandRunOutcome::Completed(out) => out,
-            _ => panic!("expected Completed"),
-        };
+        let out =
+            as_completed(run_command_cancellable("echo", &["hello".into()], None).expect("spawn"))
+                .expect("completed");
         assert!(out.success());
         assert!(out.stdout.contains("hello"));
     }
@@ -811,42 +826,38 @@ mod tests {
 
     #[test]
     fn run_command_exit_code() {
-        let result = run_command_cancellable("sh", &["-c".into(), "exit 42".into()], None);
-        assert!(result.is_ok());
-        let out = match result.unwrap() {
-            CommandRunOutcome::Completed(out) => out,
-            _ => panic!("expected Completed"),
-        };
+        let out = as_completed(
+            run_command_cancellable("sh", &["-c".into(), "exit 42".into()], None).expect("spawn"),
+        )
+        .expect("completed");
         assert!(!out.success());
     }
 
     #[test]
     fn run_command_stderr() {
-        let result = run_command_cancellable("sh", &["-c".into(), "echo error >&2".into()], None);
-        assert!(result.is_ok());
-        let out = match result.unwrap() {
-            CommandRunOutcome::Completed(out) => out,
-            _ => panic!("expected Completed"),
-        };
+        let out = as_completed(
+            run_command_cancellable("sh", &["-c".into(), "echo error >&2".into()], None)
+                .expect("spawn"),
+        )
+        .expect("completed");
         assert!(out.stderr.contains("error"));
     }
 
     #[test]
     fn run_command_streaming_echo() {
         let mut lines = Vec::new();
-        let result = run_command_streaming_cancellable(
-            "echo",
-            &["hello".into()],
-            |line| {
-                lines.push(line.to_string());
-            },
-            None,
-        );
-        assert!(result.is_ok());
-        let out = match result.unwrap() {
-            CommandRunOutcome::Completed(out) => out,
-            _ => panic!("expected Completed"),
-        };
+        let out = as_completed(
+            run_command_streaming_cancellable(
+                "echo",
+                &["hello".into()],
+                |line| {
+                    lines.push(line.to_string());
+                },
+                None,
+            )
+            .expect("spawn"),
+        )
+        .expect("completed");
         assert!(out.success());
         assert!(lines.iter().any(|l| l.contains("hello")));
     }
@@ -877,19 +888,18 @@ mod tests {
     #[test]
     fn run_command_streaming_multi_line_stdout() {
         let mut lines = Vec::new();
-        let result = run_command_streaming_cancellable(
-            "sh",
-            &["-c".into(), "echo line1; echo line2".into()],
-            |line| {
-                lines.push(line.to_string());
-            },
-            None,
-        );
-        assert!(result.is_ok());
-        let out = match result.unwrap() {
-            CommandRunOutcome::Completed(out) => out,
-            _ => panic!("expected Completed"),
-        };
+        let out = as_completed(
+            run_command_streaming_cancellable(
+                "sh",
+                &["-c".into(), "echo line1; echo line2".into()],
+                |line| {
+                    lines.push(line.to_string());
+                },
+                None,
+            )
+            .expect("spawn"),
+        )
+        .expect("completed");
         assert!(out.stdout.contains("line1"));
         assert!(out.stdout.contains("line2"));
         assert!(lines.iter().any(|l| l.contains("line1")));
@@ -899,19 +909,18 @@ mod tests {
     #[test]
     fn run_command_streaming_multi_line_stderr() {
         let mut lines = Vec::new();
-        let result = run_command_streaming_cancellable(
-            "sh",
-            &["-c".into(), "echo err1 >&2; echo err2 >&2".into()],
-            |line| {
-                lines.push(line.to_string());
-            },
-            None,
-        );
-        assert!(result.is_ok());
-        let out = match result.unwrap() {
-            CommandRunOutcome::Completed(out) => out,
-            _ => panic!("expected Completed"),
-        };
+        let out = as_completed(
+            run_command_streaming_cancellable(
+                "sh",
+                &["-c".into(), "echo err1 >&2; echo err2 >&2".into()],
+                |line| {
+                    lines.push(line.to_string());
+                },
+                None,
+            )
+            .expect("spawn"),
+        )
+        .expect("completed");
         assert!(out.stderr.contains("err1"));
         assert!(out.stderr.contains("err2"));
     }

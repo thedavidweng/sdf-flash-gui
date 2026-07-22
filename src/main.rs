@@ -1,5 +1,3 @@
-// sdf-flash-gui — Cross-platform SDFtool GUI for optical drive firmware.
-
 use sdf_flash_gui::command;
 use sdf_flash_gui::drive;
 use sdf_flash_gui::orchestration;
@@ -143,8 +141,6 @@ fn find_backend() -> (command::Backend, String) {
 }
 
 fn cmd_list() {
-    // Prefer backend `-l` (correct device paths for flash/probe). Fall back to
-    // OS enumeration when the tool is missing or returns nothing parseable.
     let (backend, path) = find_backend();
     let mut drives = match orchestration::run_list_backend_with(backend, &path, &NativeRunner, None)
     {

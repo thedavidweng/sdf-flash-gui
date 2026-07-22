@@ -120,7 +120,6 @@ pub fn resolve_selection(
                 return Some(i);
             }
         }
-        // BuildDriveId match (device path may be the identity string itself)
         let bid = prev.build_drive_id();
         if bid != "__" {
             if let Some(i) = drives.iter().position(|d| {
@@ -234,7 +233,6 @@ fn is_drive_device_token(token: &str) -> bool {
     if is_windows_drive_letter(token) {
         return true;
     }
-    // Windows SPTI paths used by MakeMKV/sdftool: \\.\D: or \\.\CdRomN
     if let Some(rest) = token.strip_prefix(r"\\.\") {
         if is_windows_drive_letter(rest) {
             return true;
@@ -335,7 +333,6 @@ pub fn parse_underscore_identity_full(ident: &str) -> UnderscoreIdentity {
         };
     }
     let vendor = parts[0].to_string();
-    // Prefer: VENDOR + product… + rev + [date] + [serial…]
     if parts.len() >= 4 {
         for rev_idx in 2..parts.len() {
             let cand = parts[rev_idx];
@@ -449,7 +446,6 @@ pub fn parse_drive_list(output: &str) -> Vec<Drive> {
         }
 
         let drive = if is_drive_device_token(parts[0]) {
-            // Format A: device path on the index line.
             let device = parts[0].to_string();
             let mut drive = Drive {
                 device,
@@ -467,7 +463,6 @@ pub fn parse_drive_list(output: &str) -> Vec<Drive> {
             }
             drive
         } else {
-            // Format B: INQUIRY vendor/product/rev on the index line.
             let (vendor, product, revision) = parse_inline_identity(&parts);
             let mut drive = Drive {
                 vendor,
@@ -477,17 +472,14 @@ pub fn parse_drive_list(output: &str) -> Vec<Drive> {
             };
             if let Some(ident) = take_indented_continuation(&lines, &mut i) {
                 if is_list_status_line(ident) {
-                    // open/query error — keep inquiry fields, no usable path yet.
                 } else if is_drive_device_token(ident) {
                     drive.device = ident.to_string();
                 } else {
-                    // BuildDriveId line — valid `-d` target on real sdftool.
                     drive.device = ident.to_string();
                     let parsed = parse_underscore_identity_full(ident);
                     if drive.vendor.is_empty() && drive.product.is_empty() {
                         parsed.apply_to_drive(&mut drive);
                     } else {
-                        // Keep inquiry vendor/product/rev; still take date/serial.
                         if !parsed.firmware_date.is_empty() {
                             drive.firmware_date = parsed.firmware_date;
                         }
@@ -498,7 +490,6 @@ pub fn parse_drive_list(output: &str) -> Vec<Drive> {
                 }
             }
             if drive.device.is_empty() && (!drive.vendor.is_empty() || !drive.product.is_empty()) {
-                // Fallback device = BuildDriveId so the entry remains selectable.
                 drive.device = drive.build_drive_id();
             }
             if drive.device.is_empty() {
@@ -538,13 +529,10 @@ mod mac_parsers {
     /// BuildDriveId as a stable selectable id (works with `sdftool -d`).
     pub(crate) fn parse_ioreg_optical_services(output: &str, service_class: &str) -> Vec<Drive> {
         let mut drives = Vec::new();
-        // Each matching service block usually contains one Device Characteristics dict.
         for chunk in output.split("Device Characteristics") {
             if chunk.len() == output.len() {
-                // No split match — try whole buffer once for a single dict form.
                 continue;
             }
-            // Limit scan to the dict-ish region after the key.
             let region = chunk.get(..500).unwrap_or(chunk);
             let vendor = ioreg_quoted_value(region, "Vendor Name").unwrap_or_default();
             let product = ioreg_quoted_value(region, "Product Name").unwrap_or_default();
@@ -559,7 +547,6 @@ mod mac_parsers {
                 revision,
                 ..Default::default()
             };
-            // Prefer a path MakeMKV-style; BuildDriveId is a valid -d target.
             drive.device = format!("/{service_class}/{}", drive.build_drive_id());
             drives.push(drive);
             if drives.len() >= MAX_OPTICAL_DRIVES {
@@ -587,13 +574,10 @@ mod mac_parsers {
             if trimmed.is_empty() {
                 continue;
             }
-            // Skip header: "Vendor   Product ..."
             if trimmed.starts_with("Vendor") {
                 continue;
             }
             let mut parts = trimmed.split_whitespace();
-            // Non-empty trimmed lines always yield a first token; keep empty check
-            // for a single early-continue path (digit validation).
             let index = parts.next().unwrap_or("");
             if index.is_empty() || !index.chars().all(|c| c.is_ascii_digit()) {
                 continue;
@@ -602,7 +586,6 @@ mod mac_parsers {
                 continue;
             };
             let rest: Vec<&str> = parts.collect();
-            // rest: product… rev bus supportLevel — bus is USB/ATAPI/FireWire/etc.
             let bus_idx = rest.iter().position(|t| {
                 matches!(
                     *t,
@@ -615,7 +598,6 @@ mod mac_parsers {
             if bus_i == 0 {
                 continue;
             }
-            // revision is the token immediately before bus
             let rev_i = bus_i - 1;
             let product = rest[..rev_i].join(" ");
             let revision = rest[rev_i].to_string();
@@ -623,7 +605,6 @@ mod mac_parsers {
                 continue;
             }
             drives.push(Drive {
-                // Stable placeholder until backend list supplies /IOBDServices/…
                 device: format!("drutil:{index}"),
                 vendor: vendor.to_string(),
                 product,
@@ -635,7 +616,6 @@ mod mac_parsers {
     }
 
     pub(crate) fn parse_vendor_product(name: &str) -> (String, String) {
-        // Try to split "VENDOR PRODUCT" or "VENDOR_MODEL"
         if let Some(idx) = name.find('_') {
             (name[..idx].to_string(), name[idx + 1..].to_string())
         } else if let Some(idx) = name.find(' ') {
@@ -687,7 +667,6 @@ mod tests {
 
     #[test]
     fn parse_drive_list_four_fields() {
-        // Cross-platform pure parser — must run on Linux/Windows CI too.
         let output = "0:/dev/sr0 HL-DT-ST BU40N 1.03\n";
         let drives = parse_drive_list(output);
         assert_eq!(drives.len(), 1);
@@ -802,8 +781,6 @@ Found 1 drives(s)
 
     #[test]
     fn parse_drive_list_multi_platform_mixed() {
-        // Simulate a capture that includes every platform path shape at once
-        // so a regression on any OS fails CI on all OS runners.
         let output = "\
 Found 3 drives(s)
 00: /dev/sr0
@@ -973,7 +950,7 @@ Found 1 drives(s)
             },
         ];
         let prev = Drive {
-            device: "/dev/sg1".into(), // path changed
+            device: "/dev/sg1".into(),
             vendor: "HL-DT-ST".into(),
             product: "BU40N".into(),
             revision: "1.03".into(),
@@ -990,7 +967,6 @@ Found 1 drives(s)
 
     #[test]
     fn parse_drive_list_format_b_inquiry_then_path() {
-        // MakeMKV RE format (01-sdftool-spec §3.1): inquiry on index line.
         let output = "\
 Found 1 drives(s)
 00:  HL-DT-ST BD-RE BU50N GE03
@@ -1016,7 +992,6 @@ Found 1 drives(s)
         assert_eq!(drives[0].vendor, "HL-DT-ST");
         assert_eq!(drives[0].product, "BU40N");
         assert_eq!(drives[0].revision, "1.03");
-        // Fallback device is BuildDriveId so the row stays selectable.
         assert_eq!(drives[0].device, "HL-DT-ST_BU40N_1.03");
     }
 
@@ -1110,16 +1085,13 @@ not-a-number  junk
 
     #[test]
     fn parse_ioreg_skips_missing_quotes_and_empty_vendor_product() {
-        // No Device Characteristics marker → first-chunk continue path.
         assert!(parse_ioreg_optical_services("no dict here", "IOBDServices").is_empty());
-        // Key present but value is not a quoted string.
         let unquoted = r#"
 Device Characteristics
   "Vendor Name"=HL-DT-ST
   "Product Name"=BU40N
 "#;
         assert!(parse_ioreg_optical_services(unquoted, "IOBDServices").is_empty());
-        // Empty vendor+product after quotes.
         let empty = r#"
 Device Characteristics
   "Vendor Name"=""

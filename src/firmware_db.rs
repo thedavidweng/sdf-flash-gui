@@ -227,7 +227,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
 /// The boot string looks like "MT1959 Boot JB8 " or "MT1959 Boot BU5 ".
 fn extract_pcb_type(data: &[u8]) -> Option<String> {
     const BOOT_OFFSET: usize = 12288;
-    const BOOT_LEN: usize = 20; // "MT1959 Boot XXXX" = 20 bytes max
+    const BOOT_LEN: usize = 20;
     if data.len() < BOOT_OFFSET + BOOT_LEN {
         return None;
     }
@@ -258,9 +258,7 @@ fn pcb_to_form_factor(pcb: &str) -> DriveFormFactor {
 /// Search for a known drive model name in the firmware binary.
 /// Uses byte-level matching so it works on non-UTF-8 binary data.
 fn extract_model(data: &[u8]) -> Option<String> {
-    // Search in the first 256KB where the model string is typically embedded.
     let search_region = &data[..data.len().min(256 * 1024)];
-    // Single source of model names: platform classification tables.
     for model in crate::platform::known_models() {
         let model_bytes = model.as_bytes();
         if search_region
@@ -647,7 +645,6 @@ mod tests {
 
     #[test]
     fn extract_pcb_type_desktop() {
-        // "MT1959 Boot JB8 " at offset 12288
         let mut data = vec![0u8; 12310];
         let boot = b"MT1959 Boot JB8 ";
         data[12288..12288 + boot.len()].copy_from_slice(boot);
@@ -681,15 +678,12 @@ mod tests {
 
     #[test]
     fn extract_pcb_type_boundary_length_12307() {
-        // 12307 = BOOT_OFFSET + 19 — one byte short of the 20-byte slice.
-        // Must not panic (regression test for off-by-one in length check).
         let data = vec![0u8; 12307];
         assert!(extract_pcb_type(&data).is_none());
     }
 
     #[test]
     fn extract_pcb_type_boundary_length_12308() {
-        // 12308 = BOOT_OFFSET + 20 — exactly enough for the slice.
         let mut data = vec![0u8; 12308];
         let boot = b"MT1959 Boot JB8 ";
         data[12288..12288 + boot.len()].copy_from_slice(boot);
@@ -747,9 +741,7 @@ mod tests {
 
     #[test]
     fn extract_model_works_on_non_utf8_binary() {
-        // Real firmware binaries contain non-UTF-8 bytes (0xFF, etc.).
-        // The byte-level search must still find the model string.
-        let mut data = vec![0xFFu8; 40000]; // 0xFF is invalid UTF-8
+        let mut data = vec![0xFFu8; 40000];
         let model = b"BW-16D1HT";
         data[37600..37600 + model.len()].copy_from_slice(model);
         let found = extract_model(&data);
@@ -758,9 +750,7 @@ mod tests {
 
     #[test]
     fn extract_model_works_with_mixed_binary_data() {
-        // Firmware with a mix of valid and invalid UTF-8 bytes before the model.
         let mut data = vec![0u8; 40000];
-        // Fill early region with non-UTF-8 bytes
         for i in 0..30000 {
             data[i] = 0x80 + (i % 100) as u8;
         }
@@ -817,7 +807,6 @@ mod tests {
                 form_factor: DriveFormFactor::Slim,
             },
         };
-        // Known says Desktop, binary says Slim — known wins
         assert_eq!(resolve_form_factor(&id), DriveFormFactor::Desktop);
     }
 
@@ -949,7 +938,6 @@ mod tests {
 
     #[test]
     fn extract_pcb_type_empty_after_trim() {
-        // Boot string is "MT1959 Boot " followed by only spaces/nulls
         let mut data = vec![0u8; 12310];
         let boot = b"MT1959 Boot     ";
         data[12288..12288 + boot.len()].copy_from_slice(boot);
@@ -1130,11 +1118,8 @@ mod tests {
         assert!(resolve_model_with_sdf(&id, Some(&sdf)).is_none());
     }
 
-    // === Firmware date extraction tests ===
-
     #[test]
     fn extract_firmware_date_finds_encrypted_date() {
-        // Simulate a firmware binary with a 2120 date stamp embedded.
         let mut data = vec![0u8; 1_400_000];
         let date = b"212005070917";
         data[1_370_000..1_370_000 + date.len()].copy_from_slice(date);
@@ -1153,7 +1138,6 @@ mod tests {
 
     #[test]
     fn extract_firmware_date_finds_10_digit_stamp() {
-        // 10-digit date (YYMMDDHHMM) should also be accepted.
         let mut data = vec![0u8; 100_000];
         let date = b"2120050709";
         data[50_000..50_000 + date.len()].copy_from_slice(date);
@@ -1169,7 +1153,6 @@ mod tests {
 
     #[test]
     fn extract_firmware_date_none_for_short_digit_runs() {
-        // 9-digit runs are too short (minimum is 10).
         let mut data = vec![0u8; 1000];
         let digits = b"212005070";
         data[100..100 + digits.len()].copy_from_slice(digits);
@@ -1179,7 +1162,6 @@ mod tests {
     #[test]
     fn extract_firmware_date_rejects_invalid_month() {
         let mut data = vec![0u8; 100_000];
-        // Year 2120, month 13 — invalid.
         let date = b"212013070917";
         data[50_000..50_000 + date.len()].copy_from_slice(date);
         assert!(extract_firmware_date_from_binary(&data).is_none());
@@ -1188,7 +1170,6 @@ mod tests {
     #[test]
     fn extract_firmware_date_rejects_invalid_day() {
         let mut data = vec![0u8; 100_000];
-        // Year 2120, month 05, day 32 — invalid.
         let date = b"212005320917";
         data[50_000..50_000 + date.len()].copy_from_slice(date);
         assert!(extract_firmware_date_from_binary(&data).is_none());
@@ -1197,7 +1178,6 @@ mod tests {
     #[test]
     fn extract_firmware_date_rejects_year_out_of_range() {
         let mut data = vec![0u8; 100_000];
-        // Year 1990 — before 2000, not a plausible firmware date.
         let date = b"199005070917";
         data[50_000..50_000 + date.len()].copy_from_slice(date);
         assert!(extract_firmware_date_from_binary(&data).is_none());
@@ -1206,7 +1186,6 @@ mod tests {
     #[test]
     fn extract_firmware_date_skips_short_digit_runs_finds_real_date() {
         let mut data = vec![0u8; 100_000];
-        // A short 5-digit run followed by the real date.
         data[100..105].copy_from_slice(b"12345");
         let date = b"211810291936";
         data[50_000..50_000 + date.len()].copy_from_slice(date);
@@ -1219,11 +1198,8 @@ mod tests {
         assert!(extract_firmware_date_from_binary(&[]).is_none());
     }
 
-    // === resolve_firmware_encrypted tests ===
-
     #[test]
     fn resolve_firmware_encrypted_known_encrypted() {
-        // BP50NB40 1.03-MK hash — known to be encrypted (date 2120).
         let hash = "e04aaf44157fbbec5e3c0cbf1a9ba99c81d2aeba7d420c7ece654dc515d503ff";
         let id = FirmwareIdentification {
             sha256: hash.to_string(),
@@ -1239,7 +1215,6 @@ mod tests {
 
     #[test]
     fn resolve_firmware_encrypted_known_non_encrypted() {
-        // WH16NS60 1.02-MK hash — known to be non-encrypted (date 2118).
         let hash = "c5e351d25f647599185b117f569a98c42c1fc54f6bc07d21410677afa6372510";
         let id = FirmwareIdentification {
             sha256: hash.to_string(),
@@ -1309,10 +1284,7 @@ mod tests {
             .filter(|f| f.is_encrypted)
             .map(|f| (f.model, f.version))
             .collect();
-        // Exactly 4 known firmware files are encrypted (date ≥ 2120):
-        // BP50NB40 1.03-MK, BP60NB10 1.02-MK (x2 variants), WP50NB40 1.03-MK.
         assert_eq!(encrypted.len(), 4);
-        // All encrypted ones are slim external drives.
         assert!(encrypted
             .iter()
             .all(|(m, _)| m.starts_with("BP") || m.starts_with("WP")));
@@ -1321,7 +1293,6 @@ mod tests {
     #[test]
     fn known_firmware_non_encrypted_flags_are_false() {
         let non_encrypted = KNOWN_FIRMWARES.iter().filter(|f| !f.is_encrypted).count();
-        // 18 total - 4 encrypted = 14 non-encrypted.
         assert_eq!(non_encrypted, 14);
     }
 }

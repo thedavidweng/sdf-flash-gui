@@ -32,25 +32,21 @@ pub fn enumerate_drives() -> Vec<Drive> {
 }
 
 // ---------------------------------------------------------------------------
-// macOS implementation (IOKit-class discovery, aligned with MakeMKV transport)
+// macOS (specs/04-scsi-transport, 34-backup-profile-drive)
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "macos")]
 fn enumerate_macos() -> Vec<Drive> {
-    // 1. IOKit optical service classes (specs/04-scsi-transport, 34-backup-profile-drive):
-    //    IOBDServices / IODVDServices / IOCompactDiscServices — works without media.
     let from_ioreg = enumerate_macos_ioreg();
     if !from_ioreg.is_empty() {
         return cap_drive_list(from_ioreg);
     }
 
-    // 2. drutil list — DiscRecording framework view of burners.
     let from_drutil = enumerate_macos_drutil();
     if !from_drutil.is_empty() {
         return cap_drive_list(from_drutil);
     }
 
-    // 3. SATA-attached internal drives (legacy Macs) via system_profiler.
     if let Ok(output) = std::process::Command::new("system_profiler")
         .args(["SPSerialATADataType", "-json"])
         .output()
@@ -103,7 +99,6 @@ fn enumerate_macos() -> Vec<Drive> {
 
 #[cfg(target_os = "macos")]
 fn enumerate_macos_ioreg() -> Vec<Drive> {
-    // Order matches MakeMKV optical service priority: BD → DVD → CD.
     const CLASSES: &[&str] = &["IOBDServices", "IODVDServices", "IOCompactDiscServices"];
     let mut drives = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -144,7 +139,6 @@ fn enumerate_macos_drutil() -> Vec<Drive> {
 
 #[cfg(target_os = "macos")]
 fn enumerate_macos_diskutil_fallback() -> Vec<Drive> {
-    // Last resort: scan /dev/rdisk* when media is present (creates a block node).
     let mut drives = Vec::new();
     for i in 0..16 {
         let device = format!("/dev/rdisk{i}");
@@ -174,7 +168,7 @@ fn enumerate_macos_diskutil_fallback() -> Vec<Drive> {
 }
 
 // ---------------------------------------------------------------------------
-// Linux implementation via sysfs
+// Linux
 // ---------------------------------------------------------------------------
 
 /// Collect `srN` block names from sysfs (handles USB-attached sr10+, etc.).
@@ -202,7 +196,6 @@ fn linux_sr_block_names() -> Vec<String> {
             .unwrap_or(0);
         na.cmp(&nb)
     });
-    // Fallback when /sys/block is unreadable (containers, weird mounts).
     if names.is_empty() {
         for i in 0..16 {
             let name = format!("sr{i}");
@@ -305,7 +298,6 @@ fn merge_linux_drives(sg: Vec<Drive>, sr: Vec<Drive>) -> Vec<Drive> {
     let mut seen = std::collections::HashSet::new();
     for d in sg.into_iter().chain(sr) {
         let key = d.identity_key();
-        // Empty identity: still include by device path uniqueness.
         let dedupe_key = if key == "||" {
             format!("dev:{}", d.device)
         } else {
@@ -336,7 +328,7 @@ fn read_sysfs_attr(base: &str, attr: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Windows implementation via drive letters
+// Windows
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "windows")]
@@ -346,27 +338,25 @@ mod winapi {
     }
 }
 
+/// Win32 `DRIVE_CDROM` (specs/04-scsi-transport / MakeMKV GetDriveType scan).
+#[cfg(target_os = "windows")]
+const DRIVE_CDROM: u32 = 5;
+
 #[cfg(target_os = "windows")]
 fn enumerate_windows() -> Vec<Drive> {
     let mut drives = Vec::new();
-    // MakeMKV: GetDriveType letters A:–Z: (specs/04-scsi-transport).
-    // USB optical burners still get a letter with no media (DRIVE_CDROM = 5).
     for letter in b'A'..=b'Z' {
         if drives.len() >= MAX_OPTICAL_DRIVES {
             break;
         }
         let device = format!("{}:", letter as char);
-        // GetDriveTypeA expects a null-terminated root path ("X:\").
         let path = format!("{}\\\0", device);
 
-        // SAFETY: valid pointer to a null-terminated ASCII string ("X:\\0").
-        // Return value 5 == DRIVE_CDROM.
-        let is_cdrom = unsafe { winapi::GetDriveTypeA(path.as_ptr()) == 5 };
+        // SAFETY: `path` is a null-terminated ASCII root (`X:\`).
+        let is_cdrom = unsafe { winapi::GetDriveTypeA(path.as_ptr()) == DRIVE_CDROM };
 
         if is_cdrom {
             drives.push(Drive {
-                // sdftool accepts both `D:` and `\\.\D:`; prefer the short form
-                // used in MakeMKV docs / CLI examples (`-d D:`).
                 device,
                 vendor: String::new(),
                 product: String::new(),
@@ -534,11 +524,8 @@ mod tests {
 
     #[test]
     fn find_backend_prefers_selected() {
-        // On any dev machine with sdftool or makemkvcon installed, find_backend
-        // should return the preferred backend when it exists.
         if let Some((backend, path)) = find_backend(crate::command::Backend::SdfTool) {
             assert!(!path.is_empty());
-            // If sdftool is installed, it should be preferred; otherwise makemkvcon.
             let name = std::path::Path::new(&path)
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())

@@ -1,5 +1,3 @@
-// Shared between settings window and can_start/start_disabled_reason.
-
 use crate::command::Backend;
 use crate::i18n::{t, L10nKey, Language};
 

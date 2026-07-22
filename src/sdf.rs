@@ -1,5 +1,3 @@
-// The payload is always reported as opaque/encrypted.
-
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
 
@@ -142,19 +140,6 @@ pub fn parse_sdf0<R: Read>(reader: &mut R) -> Result<SdfContainer, SdfError> {
     let flags = be_u32(&header_buf, 16)?;
     let payload_offset = be_u32(&header_buf, 20)?;
 
-    // The SDF0 format has two variants:
-    //
-    // 1. **Firmware SDF0 containers** — 24-byte structured header with
-    //    header_size, table_offset, flags, and payload_offset fields, followed
-    //    by a metadata table (vendor, model, firmware version, …).
-    //
-    // 2. **sdf.bin database files** (from makemkv.com) — 8-byte header
-    //    (magic + version) followed directly by encrypted/compressed data.
-    //    Bytes at offsets 8–23 are encrypted payload, not structured fields,
-    //    so header_size/table_offset/payload_offset will be garbage.
-    //
-    // Detect variant 2 by checking whether the offset fields are internally
-    // consistent and within a sane range. If not, return a minimal container.
     if !looks_like_structured_header(header_size, table_offset, payload_offset) {
         return Ok(minimal_sdf0_container(magic, version));
     }
@@ -174,8 +159,6 @@ pub fn parse_sdf0<R: Read>(reader: &mut R) -> Result<SdfContainer, SdfError> {
         skip_bytes(reader, remaining)?;
     }
 
-    // looks_like_structured_header already guarantees:
-    // payload_offset >= header_size, and table_offset is 0 or in [header_size, payload_offset].
     let metadata_start = if table_offset == 0 {
         header_size
     } else {
@@ -237,7 +220,6 @@ fn looks_like_structured_header(header_size: u32, table_offset: u32, payload_off
     if table_offset > SDF0_MAX_OFFSET {
         return false;
     }
-    // Offsets must be internally consistent.
     if table_offset != 0 && table_offset < header_size {
         return false;
     }
@@ -259,7 +241,7 @@ fn minimal_sdf0_container(magic: [u8; 4], version: u32) -> SdfContainer {
             version,
             header_size: 8,
             table_offset: 0,
-            flags: 0x01, // encrypted
+            flags: 0x01,
             payload_offset: 8,
         },
         metadata: SdfMetadata::default(),
@@ -512,7 +494,7 @@ mod tests {
 
     #[test]
     fn parse_sdf0_data_too_short() {
-        let data = vec![0u8; 10]; // less than 24 bytes
+        let data = vec![0u8; 10];
         let mut cursor = Cursor::new(&data);
         let err = parse_sdf0(&mut cursor).unwrap_err();
         assert!(matches!(err, SdfError::DataTooShort { .. }));
@@ -528,7 +510,7 @@ mod tests {
 
     #[test]
     fn parse_sdf0_compressed_flag() {
-        let data = build_sdf0_header(1, 24, 0, 0x02, 24); // flag bit 1 = compressed
+        let data = build_sdf0_header(1, 24, 0, 0x02, 24);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         assert!(!container.payload.encrypted);
@@ -537,7 +519,7 @@ mod tests {
 
     #[test]
     fn parse_sdf0_both_flags() {
-        let data = build_sdf0_header(1, 24, 0, 0x03, 24); // encrypted + compressed
+        let data = build_sdf0_header(1, 24, 0, 0x03, 24);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
         assert!(container.payload.encrypted);
@@ -572,7 +554,6 @@ mod tests {
 
     #[test]
     fn parse_sdf0_empty_metadata() {
-        // Table area is <= 4 bytes, so metadata defaults
         let mut data = build_sdf0_header(1, 24, 0, 0x00, 28);
         data.extend_from_slice(&[0u8; 4]);
         let mut cursor = Cursor::new(&data);
@@ -628,28 +609,22 @@ mod tests {
 
     #[test]
     fn parse_sdf0_truncated_metadata() {
-        // Metadata table with truncated key (no null terminator)
         let data = build_sdf0_with_metadata(1, 0x00, b"Ven", 0);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
-        // Should not crash, metadata should be empty or partial
         assert!(container.metadata.vendor.is_none());
     }
 
     #[test]
     fn parse_sdf0_truncated_value() {
-        // Key present but value truncated
         let data = build_sdf0_with_metadata(1, 0x00, b"Vendor\0LG", 0);
         let mut cursor = Cursor::new(&data);
         let container = parse_sdf0(&mut cursor).unwrap();
-        // Should not crash
-        assert!(container.metadata.vendor.is_none()); // value wasn't terminated
+        assert!(container.metadata.vendor.is_none());
     }
 
     #[test]
     fn parse_sdf0_rejects_oversized_header_size() {
-        // Use a payload_offset >= header_size so the structured-header heuristic
-        // passes, then the explicit HeaderTooLarge check triggers.
         let oversize = SDF0_MAX_HEADER_SIZE + 1;
         let data = build_sdf0_header(1, oversize, 0, 0x00, oversize + 100);
         let mut cursor = Cursor::new(&data);
@@ -756,7 +731,6 @@ mod tests {
 
     #[test]
     fn parse_sdf0_larger_header() {
-        // header_size > 24 means there's extra header data to skip
         let metadata = b"Vendor\0Test\0";
         let header_size = 32u32;
         let payload_offset = header_size + metadata.len() as u32;
@@ -785,26 +759,23 @@ mod tests {
 
     #[test]
     fn parse_metadata_key_no_null() {
-        // Buffer > 4 bytes with no null terminator → break on key search
-        let data = b"Vendor"; // 6 bytes, no null
+        let data = b"Vendor";
         let metadata = parse_metadata_table(data).unwrap();
         assert!(metadata.vendor.is_none());
     }
 
     #[test]
     fn parse_metadata_key_then_no_room_for_value() {
-        // Key with null terminator, but nothing after it → break on value position check
-        let data = b"Ven\0"; // 4 bytes: key + null, pos becomes 4 which >= buf.len()
+        let data = b"Ven\0";
         let metadata = parse_metadata_table(data).unwrap();
         assert!(metadata.vendor.is_none());
     }
 
     #[test]
     fn parse_metadata_value_no_null() {
-        // Key with null, value without null → break on value search
-        let data = b"Vendor\0Test"; // 11 bytes, value has no null
+        let data = b"Vendor\0Test";
         let metadata = parse_metadata_table(data).unwrap();
-        assert!(metadata.vendor.is_none()); // value wasn't terminated, so not set
+        assert!(metadata.vendor.is_none());
     }
 
     #[test]
@@ -817,7 +788,6 @@ mod tests {
 
     #[test]
     fn parse_sdf0_inconsistent_offsets_falls_back_to_minimal() {
-        // payload_offset < header_size → not a structured header → minimal container
         let data = build_sdf0_header(1, 24, 24, 0x00, 20);
         let container = parse_sdf0(&mut Cursor::new(&data)).unwrap();
         assert_eq!(container.header.version, 1);
@@ -828,7 +798,6 @@ mod tests {
 
     #[test]
     fn parse_sdf0_table_after_payload_falls_back_to_minimal() {
-        // table_offset > payload_offset → not a structured header → minimal container
         let data = build_sdf0_header(1, 24, 28, 0x00, 26);
         let container = parse_sdf0(&mut Cursor::new(&data)).unwrap();
         assert_eq!(container.header.version, 1);
@@ -838,7 +807,6 @@ mod tests {
 
     #[test]
     fn parse_sdf0_table_before_header_falls_back_to_minimal() {
-        // table_offset < header_size → not a structured header → minimal container
         let data = build_sdf0_header(1, 24, 16, 0x00, 24);
         let container = parse_sdf0(&mut Cursor::new(&data)).unwrap();
         assert_eq!(container.header.version, 1);
@@ -917,7 +885,6 @@ mod tests {
             got: *b"NOPE",
         };
         let msg = format!("{err}");
-        // "SDF0" appears in the literal error message template "invalid SDF0 magic"
         assert!(msg.contains("SDF0"));
         assert!(msg.contains("invalid SDF0 magic"));
     }
@@ -942,18 +909,14 @@ mod tests {
 
     #[test]
     fn parse_sdf0_database_file_minimal_container() {
-        // Simulate a sdf.bin database file: magic + version (BE) followed by
-        // encrypted data that looks like garbage in the header fields.
         let mut data = Vec::new();
         data.extend_from_slice(b"SDF0");
-        data.extend_from_slice(&0xa6u32.to_be_bytes()); // version 166
-                                                        // Bytes 8–23 are encrypted data, not structured header fields.
-                                                        // Use large values that fail the structured-header heuristic.
-        data.extend_from_slice(&0x00000408u32.to_be_bytes()); // would-be header_size
-        data.extend_from_slice(&0x8001f936u32.to_be_bytes()); // garbage table_offset
-        data.extend_from_slice(&0x000f000cu32.to_be_bytes()); // garbage flags
-        data.extend_from_slice(&0x1a000102u32.to_be_bytes()); // garbage payload_offset
-        data.extend(vec![0xAB; 100]); // encrypted payload
+        data.extend_from_slice(&0xa6u32.to_be_bytes());
+        data.extend_from_slice(&0x00000408u32.to_be_bytes());
+        data.extend_from_slice(&0x8001f936u32.to_be_bytes());
+        data.extend_from_slice(&0x000f000cu32.to_be_bytes());
+        data.extend_from_slice(&0x1a000102u32.to_be_bytes());
+        data.extend(vec![0xAB; 100]);
 
         let container = parse_sdf0(&mut Cursor::new(&data)).unwrap();
         assert_eq!(container.header.version, 166);
@@ -972,13 +935,11 @@ mod tests {
 
     #[test]
     fn looks_like_structured_header_invalid() {
-        // Offsets beyond sane range
         assert!(!looks_like_structured_header(24, 0, SDF0_MAX_OFFSET + 1));
         assert!(!looks_like_structured_header(SDF0_MAX_OFFSET + 1, 0, 24,));
-        // Internally inconsistent
-        assert!(!looks_like_structured_header(24, 24, 20)); // payload < header
-        assert!(!looks_like_structured_header(24, 16, 24)); // table < header
-        assert!(!looks_like_structured_header(24, 48, 32)); // table > payload
+        assert!(!looks_like_structured_header(24, 24, 20));
+        assert!(!looks_like_structured_header(24, 16, 24));
+        assert!(!looks_like_structured_header(24, 48, 32));
     }
     #[test]
     fn looks_like_structured_header_table_offset_too_large() {
@@ -987,16 +948,15 @@ mod tests {
 
     #[test]
     fn parse_sdf0_header_size_larger_than_min_skips_padding() {
-        // header_size > 24 forces skip_bytes on remaining header padding
         let mut data = Vec::new();
         data.extend_from_slice(b"SDF0");
         data.extend_from_slice(&1u32.to_be_bytes());
-        data.extend_from_slice(&32u32.to_be_bytes()); // header_size
-        data.extend_from_slice(&32u32.to_be_bytes()); // table_offset
+        data.extend_from_slice(&32u32.to_be_bytes());
+        data.extend_from_slice(&32u32.to_be_bytes());
         data.extend_from_slice(&0u32.to_be_bytes());
-        data.extend_from_slice(&40u32.to_be_bytes()); // payload_offset
-        data.extend_from_slice(&[0u8; 8]); // padding to header_size 32
-        data.extend_from_slice(b"Vendor\0X\0"); // 9 bytes meta, pad to payload 40
+        data.extend_from_slice(&40u32.to_be_bytes());
+        data.extend_from_slice(&[0u8; 8]);
+        data.extend_from_slice(b"Vendor\0X\0");
         data.resize(40, 0);
         let mut cursor = std::io::Cursor::new(&data);
         let c = parse_sdf0(&mut cursor).expect("parse");
@@ -1005,18 +965,13 @@ mod tests {
 
     #[test]
     fn parse_sdf0_rejects_payload_before_header() {
-        // structured-looking but payload_offset < header_size after heuristic
-        // Use values that pass looks_like then fail payload check:
-        // looks_like requires payload_offset >= header_size, so use table_offset issues
-        // table_offset == 0, payload == header is ok. Use metadata_start > payload via table.
         let mut data = Vec::new();
         data.extend_from_slice(b"SDF0");
         data.extend_from_slice(&1u32.to_be_bytes());
         data.extend_from_slice(&24u32.to_be_bytes());
-        data.extend_from_slice(&50u32.to_be_bytes()); // table after payload
+        data.extend_from_slice(&50u32.to_be_bytes());
         data.extend_from_slice(&0u32.to_be_bytes());
         data.extend_from_slice(&40u32.to_be_bytes());
-        // This should fall back to minimal via inconsistency path, not hard error
         let mut cursor = std::io::Cursor::new(&data);
         let c = parse_sdf0(&mut cursor).expect("fallback");
         assert!(c.metadata.vendor.is_none());

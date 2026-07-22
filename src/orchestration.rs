@@ -1,5 +1,3 @@
-// Shared between CLI and GUI — flash session: probe → identity → plan → run.
-
 use crate::command::{
     self, Backend, Command, DriveSafety, Operation, Plan, PlanError, PlanRequest,
 };
@@ -305,7 +303,6 @@ impl FlashSession {
         runner: &dyn ProcessRunner,
         control: Option<&OperationControl>,
     ) -> Result<Self, String> {
-        // Fail fast on mode conflict before probing (same rule as plan_command / GUI can_start).
         if command::write_modes_conflict(req.encrypted, req.include_boot_loader) {
             return Err("--encrypted and --include-boot-loader cannot be combined".into());
         }
@@ -403,8 +400,6 @@ mod tests {
 
     #[test]
     fn parse_drive_identity_fallback_to_device() {
-        // Falls back to splitting on '_' only, preserving hyphenated vendor names.
-        // "HL-DT-ST_BU40N_1.03" → vendor="HL-DT-ST", model="BU40N_1.03".
         let output = "no useful info here";
         let dm = drive::parse_identity_from_info("HL-DT-ST_BU40N_1.03", output);
         assert_eq!(dm.vendor, "HL-DT-ST");
@@ -448,7 +443,6 @@ mod tests {
 
     #[test]
     fn parse_drive_identity_fallback_no_underscore() {
-        // Device label without '_' — no fallback parsing
         let dm = drive::parse_identity_from_info("/dev/sr0", "");
         assert!(dm.vendor.is_empty());
         assert!(dm.model.is_empty());
@@ -463,7 +457,6 @@ mod tests {
 
     #[test]
     fn parse_drive_identity_underscore_empty_vendor() {
-        // "_MODEL" → empty vendor part is skipped, model = "MODEL"
         let dm = drive::parse_identity_from_info("_MODEL", "");
         assert!(dm.vendor.is_empty());
         assert_eq!(dm.model, "MODEL");
@@ -471,7 +464,6 @@ mod tests {
 
     #[test]
     fn parse_drive_identity_underscore_empty_model() {
-        // "VENDOR_" → vendor = "VENDOR", empty model part is skipped
         let dm = drive::parse_identity_from_info("VENDOR_", "");
         assert_eq!(dm.vendor, "VENDOR");
         assert!(dm.model.is_empty());
@@ -507,7 +499,6 @@ mod tests {
 
     #[test]
     fn probe_drive_parses_mock_output() {
-        // Use ProcessRunner seam — never exec a just-written script (Linux ETXTBSY).
         let runner = stdout_runner(
             "Drive platform: MT1959\nVendor: HL-DT-ST\nProduct: BU40N\nRevision: 1.03\n",
         );
@@ -526,7 +517,6 @@ mod tests {
 
     #[test]
     fn probe_drive_native_wrapper_maps_spawn_error() {
-        // Covers thin NativeRunner wrapper without writing executables.
         let err = probe_drive(
             crate::command::Backend::SdfTool,
             "/nonexistent/sdftool_coverage_probe_xyz",
@@ -887,7 +877,6 @@ mod tests {
             ),
             Err(BackendOpError::Failed(ref m)) if m == "boom"
         ));
-        // Exercise ProcessRunner::run_command_streaming adapter path.
         let _ = spawn_err.run_command_streaming("x", &[], &|_| {}, None);
     }
 
@@ -1146,7 +1135,6 @@ mod tests {
             None,
         )
         .expect("prepare");
-        // Same runner answers the execute step without touching the filesystem.
         session.execute_with(&runner).expect("execute");
     }
 }
