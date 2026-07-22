@@ -6,6 +6,69 @@
 //! known firmware hashes.
 
 use crate::platform::DriveFormFactor;
+use crate::sdf;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+pub fn sha256_hex(data: &[u8]) -> String {
+    let hash = Sha256::digest(data);
+    let mut hex = String::with_capacity(64);
+    for b in hash {
+        use std::fmt::Write;
+        let _ = write!(hex, "{b:02x}");
+    }
+    hex
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FlashDirection {
+    Upgrade,
+    Downgrade,
+    Same,
+}
+
+pub fn compare_versions(current: &str, target: &str) -> FlashDirection {
+    if current == target {
+        return FlashDirection::Same;
+    }
+    let c_parts: Option<Vec<u32>> = current.split(['.', '-']).map(|p| p.parse().ok()).collect();
+    let t_parts: Option<Vec<u32>> = target.split(['.', '-']).map(|p| p.parse().ok()).collect();
+    if let (Some(cp), Some(tp)) = (&c_parts, &t_parts) {
+        let max_len = cp.len().max(tp.len());
+        for i in 0..max_len {
+            let c = cp.get(i).copied().unwrap_or(0);
+            let t = tp.get(i).copied().unwrap_or(0);
+            match c.cmp(&t) {
+                std::cmp::Ordering::Less => return FlashDirection::Upgrade,
+                std::cmp::Ordering::Greater => return FlashDirection::Downgrade,
+                std::cmp::Ordering::Equal => continue,
+            }
+        }
+        return FlashDirection::Same;
+    }
+    if current < target {
+        FlashDirection::Upgrade
+    } else {
+        FlashDirection::Downgrade
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FirmwareSdfInfo {
+    pub vendor: Option<String>,
+    pub model: Option<String>,
+    pub firmware_version: Option<String>,
+}
+
+pub fn check_firmware_sdf(firmware_data: &[u8]) -> Option<FirmwareSdfInfo> {
+    let mut cursor = std::io::Cursor::new(firmware_data);
+    let container = sdf::parse_sdf0(&mut cursor).ok()?;
+    Some(FirmwareSdfInfo {
+        vendor: container.metadata.vendor,
+        model: container.metadata.model,
+        firmware_version: container.metadata.firmware_version,
+    })
+}
 
 /// Metadata extracted by scanning the firmware binary content.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -342,7 +405,7 @@ pub struct FirmwareIdentification {
 
 /// Identify a firmware binary by hash lookup + binary content analysis.
 pub fn identify_firmware(data: &[u8]) -> FirmwareIdentification {
-    let sha256 = crate::flash::sha256_hex(data);
+    let sha256 = sha256_hex(data);
     let known = lookup_known_firmware(&sha256);
     let binary_info = analyze_firmware_binary(data);
     FirmwareIdentification {
@@ -368,7 +431,7 @@ pub fn resolve_form_factor(id: &FirmwareIdentification) -> DriveFormFactor {
 /// Priority: known hash > binary PCB type > SDF0 model > Unknown.
 pub fn resolve_form_factor_with_sdf(
     id: &FirmwareIdentification,
-    sdf_info: Option<&crate::flash::FirmwareSdfInfo>,
+    sdf_info: Option<&FirmwareSdfInfo>,
 ) -> DriveFormFactor {
     let ff = resolve_form_factor(id);
     if ff != DriveFormFactor::Unknown {
@@ -394,7 +457,7 @@ pub fn resolve_model(id: &FirmwareIdentification) -> Option<String> {
 /// Best-effort model determination with SDF0 metadata fallback.
 pub fn resolve_model_with_sdf(
     id: &FirmwareIdentification,
-    sdf_info: Option<&crate::flash::FirmwareSdfInfo>,
+    sdf_info: Option<&FirmwareSdfInfo>,
 ) -> Option<String> {
     let model = resolve_model(id);
     if model.is_some() {
@@ -403,9 +466,175 @@ pub fn resolve_model_with_sdf(
     sdf_info.and_then(|sdf| sdf.model.clone())
 }
 
+/// Full result of firmware identification: hash lookup, binary analysis,
+/// SDF0 metadata, and the resolved form factor / model / encryption status.
+///
+/// Produced by [`identify`], the single deep entry point that runs the whole
+/// identification cascade (known hash → binary PCB → SDF0 metadata → date).
+/// Callers store this struct and read its fields instead of orchestrating
+/// the four `resolve_*` functions themselves.
+#[derive(Debug, Clone)]
+pub struct ResolvedFirmware {
+    pub identification: FirmwareIdentification,
+    pub sdf_info: Option<FirmwareSdfInfo>,
+    pub form_factor: DriveFormFactor,
+    pub model: Option<String>,
+    pub encrypted: Option<bool>,
+}
+
+/// Identify a firmware binary in one deep call.
+///
+/// Runs the full cascade: SHA-256 hash lookup, binary content analysis
+/// (PCB type + embedded model), SDF0 metadata parse, form-factor resolution
+/// (known hash → binary PCB → SDF0 model), model resolution, and encryption
+/// detection (known `is_encrypted` → binary date stamp ≥ 2120).
+///
+/// This is the single source of truth for firmware properties per ADR 0001.
+/// The GUI and CLI should call this instead of threading the four `resolve_*`
+/// functions themselves.
+pub fn identify(data: &[u8]) -> ResolvedFirmware {
+    let sdf_info = check_firmware_sdf(data);
+    let identification = identify_firmware(data);
+    let form_factor = resolve_form_factor_with_sdf(&identification, sdf_info.as_ref());
+    let model = resolve_model_with_sdf(&identification, sdf_info.as_ref());
+    let encrypted = resolve_firmware_encrypted(&identification, data);
+    ResolvedFirmware {
+        identification,
+        sdf_info,
+        form_factor,
+        model,
+        encrypted,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sha256_hex_known_input() {
+        let hash = sha256_hex(b"");
+        assert_eq!(
+            hash,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn sha256_hex_hello() {
+        let hash = sha256_hex(b"hello");
+        assert_eq!(
+            hash,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
+
+    #[test]
+    fn compare_versions_upgrade() {
+        assert_eq!(compare_versions("1.03", "1.04"), FlashDirection::Upgrade);
+        assert_eq!(compare_versions("1.0", "2.0"), FlashDirection::Upgrade);
+    }
+
+    #[test]
+    fn compare_versions_downgrade() {
+        assert_eq!(compare_versions("1.04", "1.03"), FlashDirection::Downgrade);
+        assert_eq!(compare_versions("2.0", "1.0"), FlashDirection::Downgrade);
+    }
+
+    #[test]
+    fn compare_versions_same() {
+        assert_eq!(compare_versions("1.03", "1.03"), FlashDirection::Same);
+        assert_eq!(compare_versions("1.0.0", "1.0.0"), FlashDirection::Same);
+    }
+
+    #[test]
+    fn compare_versions_same_numeric_different_text() {
+        assert_eq!(compare_versions("1.0", "1.00"), FlashDirection::Same);
+    }
+
+    #[test]
+    fn compare_versions_different_lengths() {
+        assert_eq!(compare_versions("1.0", "1.0.1"), FlashDirection::Upgrade);
+        assert_eq!(compare_versions("1.0.1", "1.0"), FlashDirection::Downgrade);
+    }
+
+    #[test]
+    fn compare_versions_non_numeric_fallback() {
+        assert_eq!(compare_versions("abc", "def"), FlashDirection::Upgrade);
+        assert_eq!(compare_versions("def", "abc"), FlashDirection::Downgrade);
+    }
+
+    #[test]
+    fn compare_versions_mixed_numeric_non_numeric() {
+        assert_eq!(compare_versions("1.0", "abc"), FlashDirection::Upgrade);
+    }
+
+    #[test]
+    fn check_firmware_sdf_non_sdf_data() {
+        let mut data = vec![0u8; 100];
+        data[0..4].copy_from_slice(&[0x85, 0x4a, 0xc0, 0x75]);
+        assert!(check_firmware_sdf(&data).is_none());
+    }
+
+    fn build_sdf0_firmware_bytes(vendor: &str, model: &str) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"SDF0");
+        data.extend_from_slice(&1u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&0u32.to_be_bytes());
+        let metadata = format!("Vendor\0{vendor}\0Model\0{model}\0");
+        let payload_offset = 24 + metadata.len() as u32;
+        data.extend_from_slice(&payload_offset.to_be_bytes());
+        data.extend_from_slice(metadata.as_bytes());
+        data
+    }
+
+    #[test]
+    fn check_firmware_sdf_valid_sdf0() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"SDF0");
+        data.extend_from_slice(&1u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&0u32.to_be_bytes());
+        let metadata = b"Vendor\0TestVendor\0Model\0TestModel\0";
+        let payload_offset = 24 + metadata.len() as u32;
+        data.extend_from_slice(&payload_offset.to_be_bytes());
+        data.extend_from_slice(metadata);
+
+        let info = check_firmware_sdf(&data).unwrap();
+        assert_eq!(info.vendor.as_deref(), Some("TestVendor"));
+        assert_eq!(info.model.as_deref(), Some("TestModel"));
+    }
+
+    #[test]
+    fn check_firmware_sdf_extracts_vendor_and_model() {
+        let firmware = build_sdf0_firmware_bytes("OtherVendor", "BU40N");
+        let info = check_firmware_sdf(&firmware).expect("sdf metadata");
+        assert_eq!(info.vendor.as_deref(), Some("OtherVendor"));
+        assert_eq!(info.model.as_deref(), Some("BU40N"));
+    }
+
+    #[test]
+    fn check_firmware_sdf_padded_metadata_region() {
+        let metadata = b"Vendor\0TestVendor\0Model\0TestModel\0";
+        let payload_offset = 256u32;
+        let mut data = Vec::new();
+        data.extend_from_slice(b"SDF0");
+        data.extend_from_slice(&1u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(&payload_offset.to_be_bytes());
+        data.extend_from_slice(metadata);
+        data.resize(payload_offset as usize, 0xAA);
+        data.extend(vec![0u8; 64]);
+
+        let info = check_firmware_sdf(&data).unwrap();
+        assert_eq!(info.vendor.as_deref(), Some("TestVendor"));
+        assert_eq!(info.model.as_deref(), Some("TestModel"));
+    }
 
     #[test]
     fn known_firmware_database_has_entries() {
@@ -673,6 +902,79 @@ mod tests {
     }
 
     #[test]
+    fn identify_unknown_binary_returns_unknown_form_factor_and_no_encryption() {
+        let data = vec![0u8; 100];
+        let resolved = identify(&data);
+        assert!(resolved.identification.known.is_none());
+        assert_eq!(resolved.form_factor, DriveFormFactor::Unknown);
+        assert!(resolved.model.is_none());
+        assert!(resolved.encrypted.is_none());
+        assert!(resolved.sdf_info.is_none());
+    }
+
+    #[test]
+    fn identify_desktop_firmware_resolves_form_factor_and_model_from_binary() {
+        let mut data = vec![0u8; 40000];
+        let boot = b"MT1959 Boot JB8 ";
+        data[12288..12288 + boot.len()].copy_from_slice(boot);
+        let model = b"BW-16D1HT";
+        data[37600..37600 + model.len()].copy_from_slice(model);
+        let resolved = identify(&data);
+        assert_eq!(resolved.form_factor, DriveFormFactor::Desktop);
+        assert_eq!(resolved.model.as_deref(), Some("BW-16D1HT"));
+    }
+
+    #[test]
+    fn identify_slim_firmware_resolves_form_factor_and_model_from_binary() {
+        let mut data = vec![0u8; 40000];
+        let boot = b"MT1959 Boot BU5 ";
+        data[12288..12288 + boot.len()].copy_from_slice(boot);
+        let model = b"BU40N";
+        data[37900..37900 + model.len()].copy_from_slice(model);
+        let resolved = identify(&data);
+        assert_eq!(resolved.form_factor, DriveFormFactor::Slim);
+        assert_eq!(resolved.model.as_deref(), Some("BU40N"));
+    }
+
+    #[test]
+    fn identify_encrypted_firmware_from_binary_date() {
+        let mut data = vec![0u8; 100_000];
+        let date = b"212005070917";
+        data[50_000..50_000 + date.len()].copy_from_slice(date);
+        let resolved = identify(&data);
+        assert_eq!(resolved.encrypted, Some(true));
+    }
+
+    #[test]
+    fn identify_non_encrypted_firmware_from_binary_date() {
+        let mut data = vec![0u8; 100_000];
+        let date = b"211810291936";
+        data[50_000..50_000 + date.len()].copy_from_slice(date);
+        let resolved = identify(&data);
+        assert_eq!(resolved.encrypted, Some(false));
+    }
+
+    #[test]
+    fn identify_uses_sdf_metadata_when_binary_pcb_absent() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"SDF0");
+        data.extend_from_slice(&1u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&24u32.to_be_bytes());
+        data.extend_from_slice(&0u32.to_be_bytes());
+        let metadata = b"Vendor\0HL-DT-ST\0Model\0BU40N\0";
+        let payload_offset = 24 + metadata.len() as u32;
+        data.extend_from_slice(&payload_offset.to_be_bytes());
+        data.extend_from_slice(metadata);
+        data.resize(payload_offset as usize, 0xAA);
+        data.extend(vec![0u8; 64]);
+        let resolved = identify(&data);
+        assert_eq!(resolved.form_factor, DriveFormFactor::Slim);
+        assert_eq!(resolved.model.as_deref(), Some("BU40N"));
+        assert!(resolved.sdf_info.is_some());
+    }
+
+    #[test]
     fn extract_pcb_type_empty_after_trim() {
         // Boot string is "MT1959 Boot " followed by only spaces/nulls
         let mut data = vec![0u8; 12310];
@@ -692,7 +994,7 @@ mod tests {
                 form_factor: DriveFormFactor::Unknown,
             },
         };
-        let sdf = crate::flash::FirmwareSdfInfo {
+        let sdf = FirmwareSdfInfo {
             vendor: Some("HL-DT-ST".to_string()),
             model: Some("BU40N".to_string()),
             firmware_version: Some("1.00".to_string()),
@@ -714,7 +1016,7 @@ mod tests {
                 form_factor: DriveFormFactor::Unknown,
             },
         };
-        let sdf = crate::flash::FirmwareSdfInfo {
+        let sdf = FirmwareSdfInfo {
             vendor: None,
             model: None,
             firmware_version: None,
@@ -783,7 +1085,7 @@ mod tests {
                 form_factor: DriveFormFactor::Desktop,
             },
         };
-        let sdf = crate::flash::FirmwareSdfInfo {
+        let sdf = FirmwareSdfInfo {
             vendor: None,
             model: Some("ALSO_WRONG".to_string()),
             firmware_version: None,
@@ -805,7 +1107,7 @@ mod tests {
                 form_factor: DriveFormFactor::Desktop,
             },
         };
-        let sdf = crate::flash::FirmwareSdfInfo {
+        let sdf = FirmwareSdfInfo {
             vendor: None,
             model: Some("SHOULD_NOT_USE".to_string()),
             firmware_version: None,
@@ -827,7 +1129,7 @@ mod tests {
                 form_factor: DriveFormFactor::Unknown,
             },
         };
-        let sdf = crate::flash::FirmwareSdfInfo {
+        let sdf = FirmwareSdfInfo {
             vendor: Some("HL-DT-ST".to_string()),
             model: Some("BU40N".to_string()),
             firmware_version: Some("1.00".to_string()),
@@ -863,7 +1165,7 @@ mod tests {
                 form_factor: DriveFormFactor::Unknown,
             },
         };
-        let sdf = crate::flash::FirmwareSdfInfo {
+        let sdf = FirmwareSdfInfo {
             vendor: None,
             model: None,
             firmware_version: None,

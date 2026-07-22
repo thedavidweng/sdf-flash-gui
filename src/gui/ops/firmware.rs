@@ -1,5 +1,5 @@
 //! Firmware load and recovery-token extraction.
-use crate::flash;
+use crate::firmware_db;
 use crate::gui::file_dialog::FileDialog;
 use crate::gui::state::AppState;
 use crate::i18n::{log_error, t, t_with_args, L10nKey};
@@ -18,9 +18,8 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
     let lang = state.chrome.resolved_lang;
     state.flash.firmware_path = path.to_string();
     state.flash.cross_flash_confirmed = false;
-    state.flash.firmware_sdf_info = None;
+    state.flash.firmware_resolved = None;
     state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Unknown;
-    state.flash.firmware_identification = None;
     state.flash.firmware_file_encrypted = None;
     match std::fs::read(path) {
         Ok(data) => {
@@ -32,24 +31,10 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
                 ));
                 state.flash.firmware_data = None;
             } else {
-                let sdf_info = flash::check_firmware_sdf(&data);
-
-                // Identify firmware by hash + binary content analysis (no filename dependency).
-                let id = crate::firmware_db::identify_firmware(&data);
-                state.flash.firmware_form_factor =
-                    crate::firmware_db::resolve_form_factor_with_sdf(&id, sdf_info.as_ref());
-                state.flash.firmware_identification = Some(id);
-                state.flash.firmware_sdf_info = sdf_info;
-
-                // Detect whether the firmware file itself is encrypted (date ≥ 2020).
-                // `rawflash enc` is needed when either the drive's current firmware
-                // or the target firmware file is encrypted.
-                state.flash.firmware_file_encrypted =
-                    crate::firmware_db::resolve_firmware_encrypted(
-                        state.flash.firmware_identification.as_ref().unwrap(),
-                        &data,
-                    );
-
+                let resolved = firmware_db::identify(&data);
+                state.flash.firmware_form_factor = resolved.form_factor;
+                state.flash.firmware_file_encrypted = resolved.encrypted;
+                state.flash.firmware_resolved = Some(resolved);
                 state.flash.firmware_data = Some(data);
             }
         }
@@ -95,7 +80,7 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
             &[
                 ("path", path),
                 ("size", &data.len().to_string()),
-                ("hash", &flash::sha256_hex(data)[..16]),
+                ("hash", &firmware_db::sha256_hex(data)[..16]),
             ],
         ));
     }

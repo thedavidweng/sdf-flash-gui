@@ -1,7 +1,7 @@
 use super::super::state::AppState;
 use super::super::OperationMode;
 use crate::drive::Drive;
-use crate::flash;
+use crate::firmware_db;
 use crate::i18n::{t, L10nKey};
 
 pub fn drive_label(drive: &Drive) -> String {
@@ -49,7 +49,7 @@ pub fn firmware_sha_prefix(state: &AppState) -> String {
         .flash
         .firmware_data
         .as_ref()
-        .map(|data| flash::sha256_hex(data)[..8].to_string())
+        .map(|data| firmware_db::sha256_hex(data)[..8].to_string())
         .unwrap_or_else(|| t(L10nKey::LabelNotAvailable, state.chrome.resolved_lang).to_string())
 }
 

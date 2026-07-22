@@ -17,7 +17,7 @@
 // human-readable diagnostics.
 
 use sdf_flash_gui::command::{self, Backend, Operation, PlanRequest};
-use sdf_flash_gui::flash;
+use sdf_flash_gui::firmware_db;
 use sdf_flash_gui::sdf;
 
 use std::path::{Path, PathBuf};
@@ -126,7 +126,7 @@ fn firmware_pack_all_files_have_unique_sha256() {
     let mut hashes: Vec<(String, String)> = Vec::new();
     for info in &files {
         let data = std::fs::read(&info.path).unwrap();
-        hashes.push((info.filename.clone(), flash::sha256_hex(&data)));
+        hashes.push((info.filename.clone(), firmware_db::sha256_hex(&data)));
     }
 
     for i in 0..hashes.len() {
@@ -223,7 +223,7 @@ fn firmware_pack_end_to_end_full_pipeline() {
             assert_eq!(data.len(), 2_097_152);
 
             // sha256 should be computable
-            let _sha256 = flash::sha256_hex(&data);
+            let _sha256 = firmware_db::sha256_hex(&data);
 
             let device = "/dev/sr0";
             let confirmation = command::required_flash_confirmation(device);

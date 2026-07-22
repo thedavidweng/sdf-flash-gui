@@ -13,12 +13,23 @@ use std::thread;
 
 #[derive(Debug)]
 pub enum WorkerMsg {
+    Stream(StreamEvent),
+    Done(WorkerResult),
+}
+
+/// Incremental events streamed during an operation (log lines, progress, status).
+/// These never produce user-attention notifications — only terminal results do.
+#[derive(Debug)]
+pub enum StreamEvent {
     Log(String),
     Progress(f32),
-    Status {
-        message: String,
-        progress: f32,
-    },
+    Status { message: String, progress: f32 },
+}
+
+/// Terminal result of a worker operation. Exactly one per spawned task.
+/// These are the only messages that can produce user-attention notifications.
+#[derive(Debug)]
+pub enum WorkerResult {
     ProbeComplete {
         drive_idx: usize,
         mt1959: bool,
@@ -48,21 +59,31 @@ pub enum Attention {
 /// Returns an optional attention request (for viewport notification).
 fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> {
     match msg {
-        WorkerMsg::Log(line) => {
-            state.log(&line);
+        WorkerMsg::Stream(event) => {
+            handle_stream(event, state);
             None
         }
-        WorkerMsg::Progress(p) => {
+        WorkerMsg::Done(result) => handle_result(result, state),
+    }
+}
+
+fn handle_stream(event: StreamEvent, state: &mut AppState) {
+    match event {
+        StreamEvent::Log(line) => state.log(&line),
+        StreamEvent::Progress(p) => {
             state.runtime.progress_indeterminate = false;
             state.runtime.progress = p;
-            None
         }
-        WorkerMsg::Status { message, progress } => {
+        StreamEvent::Status { message, progress } => {
             state.runtime.status_message = message;
             state.runtime.progress = progress.clamp(0.0, 100.0);
-            None
         }
-        WorkerMsg::ProbeComplete {
+    }
+}
+
+fn handle_result(result: WorkerResult, state: &mut AppState) -> Option<Attention> {
+    match result {
+        WorkerResult::ProbeComplete {
             drive_idx,
             mt1959,
             mt1939,
@@ -79,9 +100,6 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
                 state.drive.drive_libredrive = libredrive;
                 state.drive.drive_sdf_version = sdf_version;
                 if success {
-                    // Recompute encrypted_write from both the drive's current
-                    // firmware state and the loaded firmware file's encryption.
-                    // If no firmware is loaded, this falls back to drive state only.
                     state.recompute_encrypted_write();
                 }
             }
@@ -103,7 +121,7 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
             }
             None
         }
-        WorkerMsg::OperationComplete {
+        WorkerResult::OperationComplete {
             success,
             status,
             progress,
@@ -127,7 +145,7 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
                 Attention::Critical
             })
         }
-        WorkerMsg::DrivesListed(drives) => {
+        WorkerResult::DrivesListed(drives) => {
             let count = drives.len();
             state.apply_drive_list(drives);
             state.finish_operation();
@@ -139,7 +157,7 @@ fn handle_worker_msg(msg: WorkerMsg, state: &mut AppState) -> Option<Attention> 
             ));
             None
         }
-        WorkerMsg::StopNeedsForceKill => {
+        WorkerResult::StopNeedsForceKill => {
             state.runtime.stop_dialog = super::state::StopDialog::ConfirmForceKill;
             None
         }
@@ -232,7 +250,7 @@ pub fn spawn_probe(
         return;
     };
     if state.config.tool_path.is_empty() {
-        let _ = tx.send(WorkerMsg::ProbeComplete {
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
             drive_idx,
             mt1959: false,
             mt1939: false,
@@ -240,7 +258,7 @@ pub fn spawn_probe(
             libredrive: crate::command::LibreDriveStatus::Unknown,
             sdf_version: None,
             error: Some(t(L10nKey::ReasonNoBackend, state.chrome.resolved_lang).into()),
-        });
+        }));
         return;
     }
 
@@ -251,10 +269,10 @@ pub fn spawn_probe(
     let runner = runner.clone();
     let lang = state.chrome.resolved_lang;
 
-    let _ = tx.send(WorkerMsg::Status {
+    let _ = tx.send(WorkerMsg::Stream(StreamEvent::Status {
         message: t(L10nKey::StatusProbing, lang).into(),
         progress: 0.0,
-    });
+    }));
 
     let control = Arc::new(OperationControl::new());
     state.runtime.probe_control = Some(control.clone());
@@ -262,10 +280,10 @@ pub fn spawn_probe(
 
     run_backend_command(move || {
         let cmd = command::plan_drive_info(backend, &tool_path, &device);
-        let _ = tx.send(WorkerMsg::Log(format!(
+        let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(format!(
             "> {}",
             process::format_command(&cmd)
-        )));
+        ))));
         match crate::orchestration::probe_drive_with(
             backend,
             &tool_path,
@@ -275,9 +293,9 @@ pub fn spawn_probe(
         ) {
             Ok(probe) => {
                 if !probe.output.is_empty() {
-                    let _ = tx.send(WorkerMsg::Log(probe.output.clone()));
+                    let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(probe.output.clone())));
                 }
-                let _ = tx.send(WorkerMsg::ProbeComplete {
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
                     drive_idx,
                     mt1959: probe.safety.mt1959,
                     mt1939: probe.safety.mt1939,
@@ -285,10 +303,10 @@ pub fn spawn_probe(
                     libredrive: probe.safety.libredrive,
                     sdf_version: probe.safety.sdf_version.clone(),
                     error: None,
-                });
+                }));
             }
             Err(crate::orchestration::ProbeError::Cancelled) => {
-                let _ = tx.send(WorkerMsg::ProbeComplete {
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
                     drive_idx,
                     mt1959: false,
                     mt1939: false,
@@ -296,15 +314,15 @@ pub fn spawn_probe(
                     libredrive: crate::command::LibreDriveStatus::Unknown,
                     sdf_version: None,
                     error: Some(t(L10nKey::StatusProbeFailed, lang).into()),
-                });
+                }));
             }
             Err(crate::orchestration::ProbeError::NeedsForceKill) => {
-                let _ = tx.send(WorkerMsg::StopNeedsForceKill);
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill));
             }
             Err(crate::orchestration::ProbeError::Failed(e)) => {
                 // probe_drive_with always supplies a non-empty Failed message.
-                let _ = tx.send(WorkerMsg::Log(e.clone()));
-                let _ = tx.send(WorkerMsg::ProbeComplete {
+                let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(e.clone())));
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
                     drive_idx,
                     mt1959: false,
                     mt1939: false,
@@ -312,7 +330,7 @@ pub fn spawn_probe(
                     libredrive: crate::command::LibreDriveStatus::Unknown,
                     sdf_version: None,
                     error: Some(e),
-                });
+                }));
             }
         }
     });
@@ -332,26 +350,26 @@ pub fn spawn_streaming_command(
     let initial_status = initial_status.to_string();
     let runner = runner.clone();
 
-    let _ = tx.send(WorkerMsg::Status {
+    let _ = tx.send(WorkerMsg::Stream(StreamEvent::Status {
         message: initial_status,
         progress: 0.0,
-    });
-    let _ = tx.send(WorkerMsg::Log(format!(
+    }));
+    let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(format!(
         "> {}",
         process::format_command(&Command {
             program: program.clone(),
             args: args.clone(),
         })
-    )));
+    ))));
 
     run_backend_command(move || {
         let result = runner.run_command_streaming(
             &program,
             &args,
             &|line| {
-                let _ = tx.send(WorkerMsg::Log(line.to_string()));
+                let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(line.to_string())));
                 if let Some(p) = process::parse_progress_percent(line) {
-                    let _ = tx.send(WorkerMsg::Progress(p));
+                    let _ = tx.send(WorkerMsg::Stream(StreamEvent::Progress(p)));
                 }
             },
             Some(control.as_ref()),
@@ -360,7 +378,7 @@ pub fn spawn_streaming_command(
         match result {
             Ok(CommandRunOutcome::Completed(out)) => {
                 let success = out.success();
-                let _ = tx.send(WorkerMsg::OperationComplete {
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
                     success,
                     status: if success {
                         t(L10nKey::StatusOpFinished, lang).into()
@@ -368,26 +386,28 @@ pub fn spawn_streaming_command(
                         t(L10nKey::StatusOpFailed, lang).into()
                     },
                     progress: if success { 100.0 } else { 0.0 },
-                });
+                }));
             }
             Ok(CommandRunOutcome::Cancelled) => {
-                let _ = tx.send(WorkerMsg::Log(t(L10nKey::LogOpCancelled, lang).into()));
-                let _ = tx.send(WorkerMsg::OperationComplete {
+                let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(
+                    t(L10nKey::LogOpCancelled, lang).into(),
+                )));
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
                     success: false,
                     status: t(L10nKey::StatusOpCancelled, lang).into(),
                     progress: 0.0,
-                });
+                }));
             }
             Ok(CommandRunOutcome::NeedsForceKill) => {
-                let _ = tx.send(WorkerMsg::StopNeedsForceKill);
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill));
             }
             Err(e) => {
-                let _ = tx.send(WorkerMsg::Log(log_error(lang, &e)));
-                let _ = tx.send(WorkerMsg::OperationComplete {
+                let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(log_error(lang, &e))));
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
                     success: false,
                     status: t(L10nKey::StatusOpFailed, lang).into(),
                     progress: 0.0,
-                });
+                }));
             }
         }
     });
@@ -418,35 +438,37 @@ pub fn spawn_list_drives(
             Ok(out) => {
                 let combined = out.combined();
                 if !combined.is_empty() {
-                    let _ = tx.send(WorkerMsg::Log(combined));
+                    let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(combined)));
                 }
                 // Parse stdout only (stderr may contain noise).
                 let drives = crate::drive::parse_drive_list(&out.stdout);
-                let _ = tx.send(WorkerMsg::Log(t_with_args(
+                let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(t_with_args(
                     L10nKey::LogParsedDrivesFromOutput,
                     lang,
                     &[("count", &drives.len().to_string())],
-                )));
-                let _ = tx.send(WorkerMsg::DrivesListed(drives));
+                ))));
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(drives)));
             }
             Err(crate::orchestration::BackendOpError::Cancelled) => {
-                let _ = tx.send(WorkerMsg::Log(t(L10nKey::LogOpCancelled, lang).into()));
-                let _ = tx.send(WorkerMsg::OperationComplete {
+                let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(
+                    t(L10nKey::LogOpCancelled, lang).into(),
+                )));
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
                     success: false,
                     status: t(L10nKey::StatusOpCancelled, lang).into(),
                     progress: 0.0,
-                });
+                }));
             }
             Err(crate::orchestration::BackendOpError::NeedsForceKill) => {
-                let _ = tx.send(WorkerMsg::StopNeedsForceKill);
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill));
             }
             Err(crate::orchestration::BackendOpError::Failed(e)) => {
-                let _ = tx.send(WorkerMsg::Log(log_error(lang, &e)));
-                let _ = tx.send(WorkerMsg::OperationComplete {
+                let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(log_error(lang, &e))));
+                let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
                     success: false,
                     status: t(L10nKey::StatusDriveListFailed, lang).into(),
                     progress: 0.0,
-                });
+                }));
             }
         }
     });
@@ -493,7 +515,7 @@ mod tests {
     fn drain_log_message() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::Log("hello".into()));
+        let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log("hello".into())));
         drop(tx);
         let (repaint, attention) = drain_worker_messages(&mut state, &rx);
         assert!(repaint);
@@ -506,7 +528,7 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.runtime.progress_indeterminate = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::Progress(42.0));
+        let _ = tx.send(WorkerMsg::Stream(StreamEvent::Progress(42.0)));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert!(!state.runtime.progress_indeterminate);
@@ -517,10 +539,10 @@ mod tests {
     fn drain_status_message() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::Status {
+        let _ = tx.send(WorkerMsg::Stream(StreamEvent::Status {
             message: "Working".into(),
             progress: 50.0,
-        });
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert_eq!(state.runtime.status_message, "Working");
@@ -531,10 +553,10 @@ mod tests {
     fn drain_status_clamps_progress() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::Status {
+        let _ = tx.send(WorkerMsg::Stream(StreamEvent::Status {
             message: "test".into(),
             progress: 150.0,
-        });
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert!((state.runtime.progress - 100.0).abs() < 0.01);
@@ -547,7 +569,7 @@ mod tests {
         state.drive.selected_drive = Some(0);
         state.runtime.probing = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::ProbeComplete {
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
             drive_idx: 0,
             mt1959: true,
             mt1939: false,
@@ -555,7 +577,7 @@ mod tests {
             libredrive: crate::command::LibreDriveStatus::Unknown,
             sdf_version: None,
             error: None,
-        });
+        }));
         drop(tx);
         let (repaint, attention) = drain_worker_messages(&mut state, &rx);
         assert!(repaint);
@@ -575,7 +597,7 @@ mod tests {
         state.drive.selected_drive = Some(0);
         state.runtime.probing = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::ProbeComplete {
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
             drive_idx: 0,
             mt1959: true,
             mt1939: false,
@@ -583,7 +605,7 @@ mod tests {
             libredrive: crate::command::LibreDriveStatus::Enabled,
             sdf_version: Some("0x00A6".into()),
             error: None,
-        });
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert_eq!(state.drive.drive_sdf_version.as_deref(), Some("0x00A6"));
@@ -600,7 +622,7 @@ mod tests {
         state.drive.selected_drive = Some(0);
         state.runtime.probing = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::ProbeComplete {
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
             drive_idx: 0,
             mt1959: false,
             mt1939: false,
@@ -608,7 +630,7 @@ mod tests {
             libredrive: crate::command::LibreDriveStatus::Unknown,
             sdf_version: None,
             error: Some("probe failed".into()),
-        });
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert!(!state.runtime.probing);
@@ -624,7 +646,7 @@ mod tests {
         state.drive.selected_drive = Some(0);
         state.runtime.probing = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::ProbeComplete {
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
             drive_idx: 1, // different from selected
             mt1959: true,
             mt1939: false,
@@ -632,7 +654,7 @@ mod tests {
             libredrive: crate::command::LibreDriveStatus::Unknown,
             sdf_version: None,
             error: None,
-        });
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         // drive_mt1959 should NOT be updated since drive_idx doesn't match
@@ -646,11 +668,11 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::OperationComplete {
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
             success: true,
             status: "100% Done".into(),
             progress: 100.0,
-        });
+        }));
         drop(tx);
         let (repaint, attention) = drain_worker_messages(&mut state, &rx);
         assert!(repaint);
@@ -665,11 +687,11 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::OperationComplete {
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
             success: false,
             status: "Failed".into(),
             progress: 0.0,
-        });
+        }));
         drop(tx);
         let (repaint, attention) = drain_worker_messages(&mut state, &rx);
         assert!(repaint);
@@ -684,11 +706,11 @@ mod tests {
         state.operation_mode = super::super::OperationMode::Write;
         state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::OperationComplete {
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
             success: false,
             status: "Failed".into(),
             progress: 0.0,
-        });
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert!(state.chrome.show_flash_failure_dialog);
@@ -700,11 +722,11 @@ mod tests {
         state.operation_mode = super::super::OperationMode::Read;
         state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::OperationComplete {
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
             success: false,
             status: "Failed".into(),
             progress: 0.0,
-        });
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert!(!state.chrome.show_flash_failure_dialog);
@@ -715,11 +737,11 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::OperationComplete {
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
             success: true,
             status: "50%".into(),
             progress: 50.0,
-        });
+        }));
         drop(tx);
         let (_, attention) = drain_worker_messages(&mut state, &rx);
         // success=true but progress < 100 → Critical (not fully done)
@@ -731,7 +753,9 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::DrivesListed(vec![test_drive()]));
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(vec![
+            test_drive(),
+        ])));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert_eq!(state.drive.drives.len(), 1);
@@ -747,7 +771,7 @@ mod tests {
         state.drive.drives.push(test_drive());
         state.drive.selected_drive = Some(0);
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::DrivesListed(vec![]));
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(vec![])));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert!(state.drive.drives.is_empty());
@@ -763,7 +787,7 @@ mod tests {
         state.drive.last_probed_drive = Some(0);
         state.drive.drive_probed = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::DrivesListed(vec![
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(vec![
             test_drive(),
             crate::drive::Drive {
                 device: "/dev/sr1".into(),
@@ -772,7 +796,7 @@ mod tests {
                 revision: "R".into(),
                 ..Default::default()
             },
-        ]));
+        ])));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         // Same device path → stay on that drive; probe cache stays valid.
@@ -806,7 +830,9 @@ mod tests {
             ..Default::default()
         };
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::DrivesListed(vec![filler, target]));
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(vec![
+            filler, target,
+        ])));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert_eq!(state.drive.selected_drive, Some(1));
@@ -829,7 +855,7 @@ mod tests {
         state.drive.last_probed_drive = Some(0);
         state.drive.drive_probed = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::DrivesListed(vec![
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(vec![
             crate::drive::Drive {
                 device: "/dev/sr0".into(),
                 vendor: "OTHER".into(),
@@ -844,7 +870,7 @@ mod tests {
                 revision: "1.03".into(),
                 ..Default::default()
             },
-        ]));
+        ])));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert_eq!(state.drive.selected_drive, Some(1));
@@ -861,7 +887,7 @@ mod tests {
         state.drive.selected_drive = Some(0);
         state.runtime.busy = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::DrivesListed(vec![]));
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::DrivesListed(vec![])));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert!(state.drive.drives.is_empty());
@@ -881,7 +907,7 @@ mod tests {
         state.drive.selected_drive = Some(0);
         state.runtime.probing = true;
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::ProbeComplete {
+        let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
             drive_idx: 0,
             mt1959: true,
             mt1939: false,
@@ -889,7 +915,7 @@ mod tests {
             libredrive: crate::command::LibreDriveStatus::PossibleNotEnabled,
             sdf_version: Some("0x00A6".into()),
             error: None,
-        });
+        }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert_eq!(
@@ -904,13 +930,13 @@ mod tests {
     fn drain_multiple_messages() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::Log("line1".into()));
-        let _ = tx.send(WorkerMsg::Progress(25.0));
-        let _ = tx.send(WorkerMsg::Log("line2".into()));
-        let _ = tx.send(WorkerMsg::Status {
+        let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log("line1".into())));
+        let _ = tx.send(WorkerMsg::Stream(StreamEvent::Progress(25.0)));
+        let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log("line2".into())));
+        let _ = tx.send(WorkerMsg::Stream(StreamEvent::Status {
             message: "Working".into(),
             progress: 50.0,
-        });
+        }));
         drop(tx);
         let (repaint, attention) = drain_worker_messages(&mut state, &rx);
         assert!(repaint);
@@ -976,7 +1002,8 @@ mod tests {
             |m| {
                 matches!(
                     m,
-                    WorkerMsg::OperationComplete { .. } | WorkerMsg::StopNeedsForceKill
+                    WorkerMsg::Done(WorkerResult::OperationComplete { .. })
+                        | WorkerMsg::Done(WorkerResult::StopNeedsForceKill)
                 )
             },
             Duration::from_secs(3),
@@ -989,7 +1016,8 @@ mod tests {
             |m| {
                 matches!(
                     m,
-                    WorkerMsg::ProbeComplete { .. } | WorkerMsg::StopNeedsForceKill
+                    WorkerMsg::Done(WorkerResult::ProbeComplete { .. })
+                        | WorkerMsg::Done(WorkerResult::StopNeedsForceKill)
                 )
             },
             Duration::from_secs(3),
@@ -1002,9 +1030,9 @@ mod tests {
             |m| {
                 matches!(
                     m,
-                    WorkerMsg::DrivesListed(_)
-                        | WorkerMsg::OperationComplete { .. }
-                        | WorkerMsg::StopNeedsForceKill
+                    WorkerMsg::Done(WorkerResult::DrivesListed(_))
+                        | WorkerMsg::Done(WorkerResult::OperationComplete { .. })
+                        | WorkerMsg::Done(WorkerResult::StopNeedsForceKill)
                 )
             },
             Duration::from_secs(3),
@@ -1146,7 +1174,7 @@ mod tests {
         assert!(
             matches!(
                 &msg,
-                WorkerMsg::ProbeComplete { error: Some(e), .. } if e.contains("Settings")
+                WorkerMsg::Done(WorkerResult::ProbeComplete { error: Some(e), .. }) if e.contains("Settings")
             ),
             "expected ProbeComplete with Settings error, got {msg:?}"
         );
@@ -1163,9 +1191,12 @@ mod tests {
         spawn_probe(&tx, &mut state, 0, &runner);
         let messages = wait_for_probe_complete(&rx);
         drop(tx);
-        let ok = messages
-            .iter()
-            .any(|m| matches!(m, WorkerMsg::ProbeComplete { error: None, .. }));
+        let ok = messages.iter().any(|m| {
+            matches!(
+                m,
+                WorkerMsg::Done(WorkerResult::ProbeComplete { error: None, .. })
+            )
+        });
         assert!(ok, "expected ProbeComplete ok, msgs: {messages:?}");
     }
 
@@ -1179,9 +1210,9 @@ mod tests {
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
         assert!(
-            messages
-                .iter()
-                .any(|m| matches!(m, WorkerMsg::DrivesListed(d) if d.is_empty())),
+            messages.iter().any(
+                |m| matches!(m, WorkerMsg::Done(WorkerResult::DrivesListed(d)) if d.is_empty())
+            ),
             "msgs: {messages:?}"
         );
     }
@@ -1202,7 +1233,10 @@ mod tests {
         assert!(messages.len() >= 3);
         let probe = messages.last().unwrap();
         assert!(
-            matches!(probe, WorkerMsg::ProbeComplete { error: None, .. }),
+            matches!(
+                probe,
+                WorkerMsg::Done(WorkerResult::ProbeComplete { error: None, .. })
+            ),
             "expected ProbeComplete ok, got {probe:?}"
         );
     }
@@ -1221,7 +1255,7 @@ mod tests {
         assert!(
             matches!(
                 probe,
-                WorkerMsg::ProbeComplete { error: Some(e), .. } if e.contains("mock command failed")
+                WorkerMsg::Done(WorkerResult::ProbeComplete { error: Some(e), .. }) if e.contains("mock command failed")
             ),
             "expected ProbeComplete with mock failure, got {probe:?}"
         );
@@ -1249,7 +1283,10 @@ mod tests {
         assert!(messages.len() >= 4);
         let last = messages.last().unwrap();
         assert!(
-            matches!(last, WorkerMsg::OperationComplete { success: true, .. }),
+            matches!(
+                last,
+                WorkerMsg::Done(WorkerResult::OperationComplete { success: true, .. })
+            ),
             "expected OperationComplete success, got {last:?}"
         );
     }
@@ -1274,7 +1311,10 @@ mod tests {
         drop(tx);
         let last = messages.last().unwrap();
         assert!(
-            matches!(last, WorkerMsg::OperationComplete { success: false, .. }),
+            matches!(
+                last,
+                WorkerMsg::Done(WorkerResult::OperationComplete { success: false, .. })
+            ),
             "expected OperationComplete failure, got {last:?}"
         );
     }
@@ -1303,7 +1343,7 @@ mod tests {
         messages
             .iter()
             .find_map(|m| match m {
-                WorkerMsg::DrivesListed(d) => Some(d.as_slice()),
+                WorkerMsg::Done(WorkerResult::DrivesListed(d)) => Some(d.as_slice()),
                 _ => None,
             })
             .expect("DrivesListed message missing")
@@ -1375,7 +1415,8 @@ Found 1 drives(s)
     fn drain_stop_needs_force_kill_sets_dialog() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
-        tx.send(WorkerMsg::StopNeedsForceKill).unwrap();
+        tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill))
+            .unwrap();
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert_eq!(
@@ -1405,7 +1446,7 @@ Found 1 drives(s)
         let last = messages.last().unwrap();
         assert!(matches!(
             last,
-            WorkerMsg::OperationComplete { success: false, .. }
+            WorkerMsg::Done(WorkerResult::OperationComplete { success: false, .. })
         ));
     }
 
@@ -1429,7 +1470,10 @@ Found 1 drives(s)
         drop(tx);
         assert!(matches!(
             messages.last(),
-            Some(WorkerMsg::OperationComplete { success: false, .. })
+            Some(WorkerMsg::Done(WorkerResult::OperationComplete {
+                success: false,
+                ..
+            }))
         ));
     }
 
@@ -1586,10 +1630,10 @@ Found 1 drives(s)
     fn poll_worker_without_context_drains_only() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
-        tx.send(WorkerMsg::Status {
+        tx.send(WorkerMsg::Stream(StreamEvent::Status {
             message: "working".into(),
             progress: 25.0,
-        })
+        }))
         .unwrap();
         drop(tx);
         poll_worker(&mut state, &rx, None);
@@ -1600,10 +1644,10 @@ Found 1 drives(s)
     fn poll_worker_with_context_drains_messages() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
-        tx.send(WorkerMsg::Status {
+        tx.send(WorkerMsg::Stream(StreamEvent::Status {
             message: "working".into(),
             progress: 50.0,
-        })
+        }))
         .unwrap();
         drop(tx);
         let ctx = egui::Context::default();
@@ -1625,11 +1669,11 @@ Found 1 drives(s)
     fn poll_worker_with_context_requests_attention_on_success() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
-        tx.send(WorkerMsg::OperationComplete {
+        tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
             success: true,
             status: "done".into(),
             progress: 100.0,
-        })
+        }))
         .unwrap();
         drop(tx);
         let ctx = egui::Context::default();
@@ -1642,11 +1686,11 @@ Found 1 drives(s)
         let mut state = AppState::new_no_backend();
         state.operation_mode = super::super::OperationMode::Write;
         let (tx, rx) = std::sync::mpsc::channel();
-        tx.send(WorkerMsg::OperationComplete {
+        tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
             success: false,
             status: "failed".into(),
             progress: 0.0,
-        })
+        }))
         .unwrap();
         drop(tx);
         let ctx = egui::Context::default();
@@ -1666,7 +1710,10 @@ Found 1 drives(s)
         drop(tx);
         assert!(matches!(
             messages.last(),
-            Some(WorkerMsg::ProbeComplete { error: Some(_), .. })
+            Some(WorkerMsg::Done(WorkerResult::ProbeComplete {
+                error: Some(_),
+                ..
+            }))
         ));
     }
 
@@ -1701,7 +1748,10 @@ Found 1 drives(s)
         drop(tx);
         assert!(matches!(
             messages.last(),
-            Some(WorkerMsg::ProbeComplete { error: Some(_), .. })
+            Some(WorkerMsg::Done(WorkerResult::ProbeComplete {
+                error: Some(_),
+                ..
+            }))
         ));
     }
 
@@ -1715,7 +1765,10 @@ Found 1 drives(s)
         drop(tx);
         assert!(matches!(
             messages.last(),
-            Some(WorkerMsg::OperationComplete { success: false, .. })
+            Some(WorkerMsg::Done(WorkerResult::OperationComplete {
+                success: false,
+                ..
+            }))
         ));
     }
 
@@ -1754,7 +1807,7 @@ Found 1 drives(s)
         drop(tx);
         let mut saw_progress = false;
         while let Ok(msg) = rx.try_recv() {
-            if let WorkerMsg::Progress(p) = msg {
+            if let WorkerMsg::Stream(StreamEvent::Progress(p)) = msg {
                 assert!((p - 50.0).abs() < 0.1);
                 saw_progress = true;
             }
@@ -1774,11 +1827,11 @@ Found 1 drives(s)
         assert!(
             matches!(
                 last,
-                WorkerMsg::OperationComplete {
+                WorkerMsg::Done(WorkerResult::OperationComplete {
                     success: false,
                     status,
                     ..
-                } if status.contains("failed")
+                }) if status.contains("failed")
             ),
             "expected OperationComplete failure, got {last:?}"
         );

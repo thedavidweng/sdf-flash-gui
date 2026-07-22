@@ -1517,15 +1517,10 @@ mod tests {
             state.flash.firmware_form_factor,
             crate::platform::DriveFormFactor::Slim
         );
-        assert!(state.flash.firmware_sdf_info.is_some());
+        let resolved = state.flash.firmware_resolved.as_ref().unwrap();
+        assert!(resolved.sdf_info.is_some());
         assert_eq!(
-            state
-                .flash
-                .firmware_sdf_info
-                .as_ref()
-                .unwrap()
-                .model
-                .as_deref(),
+            resolved.sdf_info.as_ref().unwrap().model.as_deref(),
             Some("BU40N")
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -1579,11 +1574,17 @@ mod tests {
             state.flash.firmware_form_factor,
             crate::platform::DriveFormFactor::Desktop
         );
-        let id = state.flash.firmware_identification.as_ref().unwrap();
-        assert_eq!(id.binary_info.pcb_type.as_deref(), Some("JB8"));
-        assert_eq!(id.binary_info.model.as_deref(), Some("BW-16D1HT"));
+        let id = state.flash.firmware_resolved.as_ref().unwrap();
+        assert_eq!(
+            id.identification.binary_info.pcb_type.as_deref(),
+            Some("JB8")
+        );
+        assert_eq!(
+            id.identification.binary_info.model.as_deref(),
+            Some("BW-16D1HT")
+        );
         // Not in known database (synthetic data)
-        assert!(id.known.is_none());
+        assert!(id.identification.known.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1619,9 +1620,9 @@ mod tests {
             state.flash.firmware_form_factor,
             crate::platform::DriveFormFactor::Unknown
         );
-        let id = state.flash.firmware_identification.as_ref().unwrap();
-        assert!(id.known.is_none());
-        assert!(id.binary_info.pcb_type.is_none());
+        let id = state.flash.firmware_resolved.as_ref().unwrap();
+        assert!(id.identification.known.is_none());
+        assert!(id.identification.binary_info.pcb_type.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -152,25 +152,8 @@ pub fn plan_command(request: PlanRequest) -> Result<Plan, PlanError> {
         return Err(PlanError::UnsupportedPlatform);
     }
 
-    let required_confirmation = match request.operation {
-        Operation::Read { .. } => None,
-        Operation::Write { .. } | Operation::Recover { .. } => {
-            Some(required_flash_confirmation(drive))
-        }
-    };
-
-    if let Some(expected) = &required_confirmation {
-        if request.confirmation.trim() != expected {
-            return Err(PlanError::ConfirmationMismatch {
-                expected: expected.clone(),
-            });
-        }
-    }
-
     let mut args = backend_prefix(request.backend);
 
-    // Pass sdf.bin path to sdftool/makemkvcon via -f so it can find the
-    // drive-specific logic database even when MakeMKV is not installed.
     let sdf_path = request.sdf_path.trim();
     if !sdf_path.is_empty() {
         args.extend(["-f".into(), sdf_path.into()]);
@@ -203,6 +186,11 @@ pub fn plan_command(request: PlanRequest) -> Result<Plan, PlanError> {
             if write_modes_conflict(encrypted, include_boot_loader) {
                 return Err(PlanError::ConflictingWriteModes);
             }
+            if request.confirmation.trim() != required_flash_confirmation(drive) {
+                return Err(PlanError::ConfirmationMismatch {
+                    expected: required_flash_confirmation(drive),
+                });
+            }
             args.extend([
                 "--all-yes".into(),
                 "-d".into(),
@@ -225,6 +213,11 @@ pub fn plan_command(request: PlanRequest) -> Result<Plan, PlanError> {
                 return Err(PlanError::MissingFirmware);
             }
             validate_recovery_boot_token(&recovery_boot_token)?;
+            if request.confirmation.trim() != required_flash_confirmation(drive) {
+                return Err(PlanError::ConfirmationMismatch {
+                    expected: required_flash_confirmation(drive),
+                });
+            }
             args.extend([
                 "--all-yes".into(),
                 "-d".into(),
