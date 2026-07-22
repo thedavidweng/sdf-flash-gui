@@ -62,6 +62,10 @@ pub struct DriveState {
 pub struct FlashWorkflow {
     pub include_boot_loader: bool,
     pub encrypted_write: bool,
+    /// Whether the loaded firmware file itself is encrypted (date ≥ 2020).
+    /// `None` when no firmware is loaded or encryption could not be determined.
+    /// `encrypted_write` is computed as `drive_encrypted OR firmware_file_encrypted`.
+    pub firmware_file_encrypted: Option<bool>,
     pub firmware_path: String,
     pub firmware_candidates: Vec<String>,
     pub firmware_picker_items: Vec<(String, String)>,
@@ -138,6 +142,7 @@ impl AppState {
             flash: FlashWorkflow {
                 include_boot_loader: false,
                 encrypted_write: false,
+                firmware_file_encrypted: None,
                 firmware_path: String::new(),
                 firmware_candidates: Vec::new(),
                 firmware_picker_items: Vec::new(),
@@ -264,6 +269,18 @@ impl AppState {
         self.drive.drive_encrypted_firmware = false;
         self.drive.drive_libredrive = crate::command::LibreDriveStatus::Unknown;
         self.drive.drive_sdf_version = None;
+    }
+
+    /// Recompute `encrypted_write` from the drive's current firmware state and
+    /// the loaded firmware file's encryption status.
+    ///
+    /// `rawflash enc` is needed when **either** the drive's current firmware is
+    /// encrypted (date ≥ 2020) **or** the firmware file being written is
+    /// encrypted. If no firmware file is loaded, only the drive state matters.
+    pub fn recompute_encrypted_write(&mut self) {
+        let drive_enc = self.drive.drive_encrypted_firmware;
+        let fw_enc = self.flash.firmware_file_encrypted.unwrap_or(false);
+        self.flash.encrypted_write = drive_enc || fw_enc;
     }
 
     /// Replace the drive list and re-select by path / identity (stable after re-enum).
@@ -460,5 +477,50 @@ mod tests {
         assert!(!state.drive.drive_probed);
         assert!(!state.drive.drive_mt1959);
         assert!(!state.drive.drive_encrypted_firmware);
+    }
+
+    #[test]
+    fn recompute_encrypted_write_drive_only_when_no_firmware() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = true;
+        state.flash.firmware_file_encrypted = None;
+        state.recompute_encrypted_write();
+        assert!(state.flash.encrypted_write);
+    }
+
+    #[test]
+    fn recompute_encrypted_write_firmware_only_when_drive_not_encrypted() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = false;
+        state.flash.firmware_file_encrypted = Some(true);
+        state.recompute_encrypted_write();
+        assert!(state.flash.encrypted_write);
+    }
+
+    #[test]
+    fn recompute_encrypted_write_neither_encrypted() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = false;
+        state.flash.firmware_file_encrypted = Some(false);
+        state.recompute_encrypted_write();
+        assert!(!state.flash.encrypted_write);
+    }
+
+    #[test]
+    fn recompute_encrypted_write_both_encrypted() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = true;
+        state.flash.firmware_file_encrypted = Some(true);
+        state.recompute_encrypted_write();
+        assert!(state.flash.encrypted_write);
+    }
+
+    #[test]
+    fn recompute_encrypted_write_firmware_none_drive_not_encrypted() {
+        let mut state = AppState::new_no_backend();
+        state.drive.drive_encrypted_firmware = false;
+        state.flash.firmware_file_encrypted = None;
+        state.recompute_encrypted_write();
+        assert!(!state.flash.encrypted_write);
     }
 }

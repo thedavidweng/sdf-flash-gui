@@ -26,6 +26,10 @@ pub struct KnownFirmware {
     pub version: &'static str,
     pub form_factor: DriveFormFactor,
     pub is_mk: bool,
+    /// Whether this firmware image itself is encrypted (date ≥ 2020).
+    /// Encrypted firmware requires `rawflash enc` regardless of the
+    /// drive's current firmware state.
+    pub is_encrypted: bool,
 }
 
 /// Database of known firmware hashes from the "All You Need Firmware Pack"
@@ -38,6 +42,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "3.11-MK",
         form_factor: DriveFormFactor::Desktop,
         is_mk: true,
+        is_encrypted: false, // date 2119-02-27
     },
     KnownFirmware {
         sha256: "83ea24bb07b8a7a451bba1856d1db18b7f54b1823b9d148e213f25daf2e0a1d2",
@@ -45,6 +50,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "3.02",
         form_factor: DriveFormFactor::Desktop,
         is_mk: false,
+        is_encrypted: false, // date 2117-11-24
     },
     KnownFirmware {
         sha256: "e04ed8f38ce9e85804bc0709a9321dc43f3e468ce0c0c3bc027a1c9805556f14",
@@ -52,6 +58,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "3.10-MK",
         form_factor: DriveFormFactor::Desktop,
         is_mk: true,
+        is_encrypted: false, // date 2119-01-04
     },
     KnownFirmware {
         sha256: "bdfd6f290ba8172d4c46d8c822013255043f4ad30deb8604608fa0397bddb648",
@@ -59,6 +66,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.02",
         form_factor: DriveFormFactor::Desktop,
         is_mk: false,
+        is_encrypted: false, // date 2115-12-11
     },
     KnownFirmware {
         sha256: "648a16d024eea31ef4901f3ac2180cbfffeda1161d70f9096335d8a6097445bc",
@@ -66,6 +74,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.02",
         form_factor: DriveFormFactor::Desktop,
         is_mk: false,
+        is_encrypted: false, // date 2115-12-11
     },
     KnownFirmware {
         sha256: "87790f053877e3e1bdd22969d70a7b1b6ed36624bb474bfcdee6526ac6e227c0",
@@ -73,6 +82,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.02",
         form_factor: DriveFormFactor::Desktop,
         is_mk: false,
+        is_encrypted: false, // date 2117-03-10
     },
     KnownFirmware {
         sha256: "d133893209392b74cb0c3c1225cc4c0e8b1d927f1f671261ecc82525405e47e0",
@@ -80,6 +90,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.00",
         form_factor: DriveFormFactor::Desktop,
         is_mk: false,
+        is_encrypted: false, // date 2117-04-25
     },
     KnownFirmware {
         sha256: "c5e351d25f647599185b117f569a98c42c1fc54f6bc07d21410677afa6372510",
@@ -87,6 +98,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.02-MK",
         form_factor: DriveFormFactor::Desktop,
         is_mk: true,
+        is_encrypted: false, // date 2118-10-29
     },
     // === Slim External Drives ===
     KnownFirmware {
@@ -95,6 +107,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.03-MK",
         form_factor: DriveFormFactor::Slim,
         is_mk: true,
+        is_encrypted: false, // date 2119-05-14 (Buffalo BRUHD-PU3 BN12-MK)
     },
     KnownFirmware {
         sha256: "58203b539de096786cde232ee3b0ef3fe824b20d7768a96b30f6a96bdac77bfb",
@@ -102,6 +115,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.00",
         form_factor: DriveFormFactor::Slim,
         is_mk: false,
+        is_encrypted: false, // date 2117-05-30 (Buffalo BRUHD-PU3 BU10)
     },
     KnownFirmware {
         sha256: "f98acee01998afb043d9cfaa0c519e7e0799824a58e565789b2c3ca735204231",
@@ -109,6 +123,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.03-MK",
         form_factor: DriveFormFactor::Slim,
         is_mk: true,
+        is_encrypted: false, // date 2119-02-23 (Buffalo BRUHD-PU3 BU12-MK)
     },
     KnownFirmware {
         sha256: "e04aaf44157fbbec5e3c0cbf1a9ba99c81d2aeba7d420c7ece654dc515d503ff",
@@ -116,6 +131,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.03-MK",
         form_factor: DriveFormFactor::Slim,
         is_mk: true,
+        is_encrypted: true, // date 2120-05-07
     },
     KnownFirmware {
         sha256: "04f879f0bf676ede526f7d07f20f5c949caac7e00dbb1b2620d0c1601780d29a",
@@ -123,6 +139,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.00-MK",
         form_factor: DriveFormFactor::Slim,
         is_mk: true,
+        is_encrypted: false, // date 2117-11-21
     },
     KnownFirmware {
         sha256: "cd10fc7396a2cdc77f3b49df6fa553dabc48ac5261584fc5d62cf8a866310fce",
@@ -130,6 +147,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.02-MK",
         form_factor: DriveFormFactor::Slim,
         is_mk: true,
+        is_encrypted: true, // date 2120-05-07
     },
     KnownFirmware {
         sha256: "1227f133eb1c5315d955bb9d9cfcaf84381772a1edfef56b39ad3439b92ca4c0",
@@ -137,6 +155,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.02-MK",
         form_factor: DriveFormFactor::Slim,
         is_mk: true,
+        is_encrypted: true, // date 2121-07-08 (NB12 variant)
     },
     KnownFirmware {
         sha256: "221ad35b7edd402353e125841893ce651064e8fc6b90368fe84ff19a85a506f4",
@@ -144,6 +163,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.00",
         form_factor: DriveFormFactor::Slim,
         is_mk: false,
+        is_encrypted: false, // date 2116-12-20
     },
     KnownFirmware {
         sha256: "64900e8d69212f5d729b9dfa45ef0f317378db8c8b48083a7cb99831235b5d57",
@@ -151,6 +171,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.03-MK",
         form_factor: DriveFormFactor::Slim,
         is_mk: true,
+        is_encrypted: false, // date 2118-10-24
     },
     KnownFirmware {
         sha256: "592e8d22d98aea9c1162c9f010fe2df29b31f6320d539336a699a78ea3af9191",
@@ -158,6 +179,7 @@ pub static KNOWN_FIRMWARES: &[KnownFirmware] = &[
         version: "1.03-MK",
         form_factor: DriveFormFactor::Slim,
         is_mk: true,
+        is_encrypted: true, // date 2120-05-07
     },
 ];
 
@@ -224,6 +246,82 @@ pub fn analyze_firmware_binary(data: &[u8]) -> FirmwareBinaryInfo {
         model,
         form_factor,
     }
+}
+
+/// Year threshold for encrypted firmware (matches MakeMKV forum guide:
+/// "Firmware with a date in 2020 or later is encrypted").
+pub const ENCRYPTED_FIRMWARE_YEAR_THRESHOLD: u32 = 2120;
+
+/// Extract a firmware date stamp from the binary content.
+///
+/// MakeMKV embeds a 12-digit ASCII calendar stamp (`YYMMDDHHMMSS`, e.g.
+/// `212005070917` = 2020-05-07 09:17) inside the firmware image. This scans
+/// the binary for the first plausible date sequence and returns the 4-digit
+/// year prefix (e.g. `2120`).
+///
+/// The offset varies between firmware variants (~1.36–1.61 MB), so this
+/// scans the entire binary rather than reading a fixed offset. The scan is
+/// cheap (single pass, no allocation) and only matches 10–12 digit ASCII
+/// sequences that parse as valid dates.
+pub fn extract_firmware_date_from_binary(data: &[u8]) -> Option<u32> {
+    let mut i = 0;
+    while i < data.len() {
+        if !data[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < data.len() && data[i].is_ascii_digit() {
+            i += 1;
+        }
+        let run_len = i - start;
+        if !(10..=12).contains(&run_len) {
+            continue;
+        }
+        let s = std::str::from_utf8(&data[start..i]).expect("ascii digits are valid utf-8");
+        if let Some(year_prefix) = parse_date_prefix(s) {
+            return Some(year_prefix);
+        }
+    }
+    None
+}
+
+/// Validate a 10–12 digit string as a firmware date and return the 4-digit
+/// year prefix. The caller guarantees the input is 10–12 ASCII digits.
+fn parse_date_prefix(s: &str) -> Option<u32> {
+    let year = parse_u32(&s[0..4])?;
+    let month = parse_u32(&s[4..6])?;
+    let day = parse_u32(&s[6..8])?;
+    if !(2000..=2199).contains(&year) {
+        return None;
+    }
+    if !(1..=12).contains(&month) {
+        return None;
+    }
+    if !(1..=31).contains(&day) {
+        return None;
+    }
+    Some(year)
+}
+
+fn parse_u32(s: &str) -> Option<u32> {
+    s.parse::<u32>().ok()
+}
+
+/// Determine whether a firmware binary is encrypted (date ≥ 2020).
+///
+/// Priority:
+/// 1. Known firmware hash lookup (`known.is_encrypted`) — 100% accurate.
+/// 2. Binary date extraction — scans the firmware content for an embedded
+///    date stamp and checks if the year ≥ 2120.
+/// 3. Returns `None` if neither source yields a result (caller should fall
+///    back to the drive's current firmware state).
+pub fn resolve_firmware_encrypted(id: &FirmwareIdentification, data: &[u8]) -> Option<bool> {
+    if let Some(known) = id.known {
+        return Some(known.is_encrypted);
+    }
+    let date_prefix = extract_firmware_date_from_binary(data)?;
+    Some(date_prefix >= ENCRYPTED_FIRMWARE_YEAR_THRESHOLD)
 }
 
 /// Look up a firmware by its SHA-256 hash in the known database.
@@ -771,5 +869,200 @@ mod tests {
             firmware_version: None,
         };
         assert!(resolve_model_with_sdf(&id, Some(&sdf)).is_none());
+    }
+
+    // === Firmware date extraction tests ===
+
+    #[test]
+    fn extract_firmware_date_finds_encrypted_date() {
+        // Simulate a firmware binary with a 2120 date stamp embedded.
+        let mut data = vec![0u8; 1_400_000];
+        let date = b"212005070917";
+        data[1_370_000..1_370_000 + date.len()].copy_from_slice(date);
+        let prefix = extract_firmware_date_from_binary(&data);
+        assert_eq!(prefix, Some(2120));
+    }
+
+    #[test]
+    fn extract_firmware_date_finds_non_encrypted_date() {
+        let mut data = vec![0u8; 1_400_000];
+        let date = b"211810291936";
+        data[1_370_000..1_370_000 + date.len()].copy_from_slice(date);
+        let prefix = extract_firmware_date_from_binary(&data);
+        assert_eq!(prefix, Some(2118));
+    }
+
+    #[test]
+    fn extract_firmware_date_finds_10_digit_stamp() {
+        // 10-digit date (YYMMDDHHMM) should also be accepted.
+        let mut data = vec![0u8; 100_000];
+        let date = b"2120050709";
+        data[50_000..50_000 + date.len()].copy_from_slice(date);
+        let prefix = extract_firmware_date_from_binary(&data);
+        assert_eq!(prefix, Some(2120));
+    }
+
+    #[test]
+    fn extract_firmware_date_none_when_no_date() {
+        let data = vec![0u8; 100_000];
+        assert!(extract_firmware_date_from_binary(&data).is_none());
+    }
+
+    #[test]
+    fn extract_firmware_date_none_for_short_digit_runs() {
+        // 9-digit runs are too short (minimum is 10).
+        let mut data = vec![0u8; 1000];
+        let digits = b"212005070";
+        data[100..100 + digits.len()].copy_from_slice(digits);
+        assert!(extract_firmware_date_from_binary(&data).is_none());
+    }
+
+    #[test]
+    fn extract_firmware_date_rejects_invalid_month() {
+        let mut data = vec![0u8; 100_000];
+        // Year 2120, month 13 — invalid.
+        let date = b"212013070917";
+        data[50_000..50_000 + date.len()].copy_from_slice(date);
+        assert!(extract_firmware_date_from_binary(&data).is_none());
+    }
+
+    #[test]
+    fn extract_firmware_date_rejects_invalid_day() {
+        let mut data = vec![0u8; 100_000];
+        // Year 2120, month 05, day 32 — invalid.
+        let date = b"212005320917";
+        data[50_000..50_000 + date.len()].copy_from_slice(date);
+        assert!(extract_firmware_date_from_binary(&data).is_none());
+    }
+
+    #[test]
+    fn extract_firmware_date_rejects_year_out_of_range() {
+        let mut data = vec![0u8; 100_000];
+        // Year 1990 — before 2000, not a plausible firmware date.
+        let date = b"199005070917";
+        data[50_000..50_000 + date.len()].copy_from_slice(date);
+        assert!(extract_firmware_date_from_binary(&data).is_none());
+    }
+
+    #[test]
+    fn extract_firmware_date_skips_short_digit_runs_finds_real_date() {
+        let mut data = vec![0u8; 100_000];
+        // A short 5-digit run followed by the real date.
+        data[100..105].copy_from_slice(b"12345");
+        let date = b"211810291936";
+        data[50_000..50_000 + date.len()].copy_from_slice(date);
+        let prefix = extract_firmware_date_from_binary(&data);
+        assert_eq!(prefix, Some(2118));
+    }
+
+    #[test]
+    fn extract_firmware_date_empty_data() {
+        assert!(extract_firmware_date_from_binary(&[]).is_none());
+    }
+
+    // === resolve_firmware_encrypted tests ===
+
+    #[test]
+    fn resolve_firmware_encrypted_known_encrypted() {
+        // BP50NB40 1.03-MK hash — known to be encrypted (date 2120).
+        let hash = "e04aaf44157fbbec5e3c0cbf1a9ba99c81d2aeba7d420c7ece654dc515d503ff";
+        let id = FirmwareIdentification {
+            sha256: hash.to_string(),
+            known: lookup_known_firmware(hash),
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: None,
+                model: None,
+                form_factor: DriveFormFactor::Unknown,
+            },
+        };
+        assert_eq!(resolve_firmware_encrypted(&id, &[]), Some(true));
+    }
+
+    #[test]
+    fn resolve_firmware_encrypted_known_non_encrypted() {
+        // WH16NS60 1.02-MK hash — known to be non-encrypted (date 2118).
+        let hash = "c5e351d25f647599185b117f569a98c42c1fc54f6bc07d21410677afa6372510";
+        let id = FirmwareIdentification {
+            sha256: hash.to_string(),
+            known: lookup_known_firmware(hash),
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: None,
+                model: None,
+                form_factor: DriveFormFactor::Unknown,
+            },
+        };
+        assert_eq!(resolve_firmware_encrypted(&id, &[]), Some(false));
+    }
+
+    #[test]
+    fn resolve_firmware_encrypted_unknown_falls_back_to_binary_encrypted() {
+        let mut data = vec![0u8; 100_000];
+        let date = b"212005070917";
+        data[50_000..50_000 + date.len()].copy_from_slice(date);
+        let id = FirmwareIdentification {
+            sha256: "unknown".to_string(),
+            known: None,
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: None,
+                model: None,
+                form_factor: DriveFormFactor::Unknown,
+            },
+        };
+        assert_eq!(resolve_firmware_encrypted(&id, &data), Some(true));
+    }
+
+    #[test]
+    fn resolve_firmware_encrypted_unknown_falls_back_to_binary_non_encrypted() {
+        let mut data = vec![0u8; 100_000];
+        let date = b"211810291936";
+        data[50_000..50_000 + date.len()].copy_from_slice(date);
+        let id = FirmwareIdentification {
+            sha256: "unknown".to_string(),
+            known: None,
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: None,
+                model: None,
+                form_factor: DriveFormFactor::Unknown,
+            },
+        };
+        assert_eq!(resolve_firmware_encrypted(&id, &data), Some(false));
+    }
+
+    #[test]
+    fn resolve_firmware_encrypted_unknown_no_date_returns_none() {
+        let data = vec![0u8; 100_000];
+        let id = FirmwareIdentification {
+            sha256: "unknown".to_string(),
+            known: None,
+            binary_info: FirmwareBinaryInfo {
+                pcb_type: None,
+                model: None,
+                form_factor: DriveFormFactor::Unknown,
+            },
+        };
+        assert!(resolve_firmware_encrypted(&id, &data).is_none());
+    }
+
+    #[test]
+    fn known_firmware_encrypted_flags_are_set() {
+        let encrypted: Vec<_> = KNOWN_FIRMWARES
+            .iter()
+            .filter(|f| f.is_encrypted)
+            .map(|f| (f.model, f.version))
+            .collect();
+        // Exactly 4 known firmware files are encrypted (date ≥ 2120):
+        // BP50NB40 1.03-MK, BP60NB10 1.02-MK (x2 variants), WP50NB40 1.03-MK.
+        assert_eq!(encrypted.len(), 4);
+        // All encrypted ones are slim external drives.
+        assert!(encrypted
+            .iter()
+            .all(|(m, _)| m.starts_with("BP") || m.starts_with("WP")));
+    }
+
+    #[test]
+    fn known_firmware_non_encrypted_flags_are_false() {
+        let non_encrypted = KNOWN_FIRMWARES.iter().filter(|f| !f.is_encrypted).count();
+        // 18 total - 4 encrypted = 14 non-encrypted.
+        assert_eq!(non_encrypted, 14);
     }
 }
