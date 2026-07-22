@@ -74,3 +74,18 @@ CI runs `cargo clippy` and `cargo test` on Linux, macOS (Intel + Apple Silicon),
 ## Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `test:`, `ci:`, `refactor:`). Release notes are generated via `git-cliff` from commit history.
+
+## Architecture decisions
+
+ADRs live in [`docs/adr/`](docs/adr/) and record decisions that constrain future changes. Read all existing ADRs before making non-trivial changes. When you discover a non-obvious constraint or external reason that the code alone cannot express, write a new ADR (next number, same directory) rather than burying it in a comment.
+
+## Code must be self-explanatory
+
+Per [ADR 0002](docs/adr/0002-self-explanatory-code-no-explanatory-comments.md): do not add explanatory comments. Code should communicate its intent through naming, structure, and tests. If a non-obvious constraint or external reason prevents the code from being self-explanatory, record it in an ADR and add at most a one-line reference comment pointing to that ADR.
+
+This overrides the general "do not add or remove comments unless asked" rule for this repository:
+
+- **Do not** add explanatory comments to new or edited code.
+- **May** remove explanatory comments from code already in your diff.
+- **Do not** mass-remove comments from code you are not otherwise touching.
+- **Preserve** doc comments (`///`, `//!`), reference comments (citations to ADRs, specs, or reverse-engineering findings), and section markers in data tables.
