@@ -15,6 +15,11 @@ use std::sync::mpsc;
 use super::super::{icon_button, icon_rich, GAP_MEDIUM, GAP_SMALL, GAP_TINY};
 use super::main_panel::file_picker;
 
+const SETTINGS_WIDTH: f32 = 500.0;
+const SETTINGS_HEIGHT: f32 = 380.0;
+const SETTINGS_MIN_WIDTH: f32 = 500.0;
+const SETTINGS_MIN_HEIGHT: f32 = 380.0;
+
 #[allow(deprecated)] // viewport has no parent Ui; CentralPanel::show(ctx) is still required
 pub fn show_settings_window(
     ctx: &egui::Context,
@@ -28,8 +33,8 @@ pub fn show_settings_window(
         egui::ViewportId::from_hash_of("settings_viewport"),
         egui::ViewportBuilder::default()
             .with_title(t(L10nKey::TitleSettings, state.chrome.resolved_lang))
-            .with_inner_size([400.0, 320.0])
-            .with_min_inner_size([320.0, 240.0])
+            .with_inner_size([SETTINGS_WIDTH, SETTINGS_HEIGHT])
+            .with_min_inner_size([SETTINGS_MIN_WIDTH, SETTINGS_MIN_HEIGHT])
             .with_resizable(true),
         |ctx, _class| {
             let close_shortcut =
@@ -265,4 +270,15 @@ pub fn show_settings_window(
             });
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn settings_window_min_matches_default_content_floor() {
+        assert_eq!(super::SETTINGS_MIN_WIDTH, super::SETTINGS_WIDTH);
+        assert_eq!(super::SETTINGS_MIN_HEIGHT, super::SETTINGS_HEIGHT);
+        assert!(super::SETTINGS_WIDTH >= 480.0);
+        assert_eq!(super::SETTINGS_HEIGHT, 380.0);
+    }
 }
