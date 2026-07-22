@@ -74,8 +74,6 @@ pub fn show_main_ui(
             )
         });
         if refresh_resp.on_hover_text(refresh_hint).clicked() {
-            // Backend `-l` is the source of truth (macOS USB optical uses
-            // /IOBDServices/… paths that OS enumeration cannot produce).
             spawn_list_drives(worker_tx, state, runner, true);
         }
         let settings_text = t(L10nKey::TooltipSettings, state.chrome.resolved_lang);
@@ -97,7 +95,6 @@ pub fn show_main_ui(
         }
         let settings_resp = ui.add(settings_btn);
         settings_btn_rect = settings_resp.rect;
-        // Soft outer glow: fixed-width stroke drawn *outside* the widget (no layout shift).
         if settings_highlight > 0.05 {
             let accent = ui.visuals().selection.bg_fill;
             let glow_alpha = (settings_highlight * 220.0).clamp(0.0, 220.0) as u8;
@@ -227,7 +224,6 @@ pub fn show_main_ui(
         });
     }
 
-    // Operational controls require a configured backend and idle runtime.
     let controls_enabled = backend_ok && !state.runtime.busy && !state.runtime.probing;
 
     ui.add_enabled_ui(controls_enabled, |ui| {
@@ -558,7 +554,6 @@ pub fn show_main_ui(
         );
     }
 
-    // Low-intrusion first-run: no modal. Clicks outside Settings / Get MakeMKV pulse the gear.
     if !backend_ok && ctx.input(|i| i.pointer.primary_clicked()) {
         if let Some(pos) = ctx.pointer_interact_pos() {
             let on_settings = settings_btn_rect.contains(pos);
@@ -840,7 +835,6 @@ fn show_confirmation_summary(ui: &mut egui::Ui, state: &AppState, drive: &crate:
 fn show_safety_warnings(ui: &mut egui::Ui, state: &mut AppState, drive: &crate::drive::Drive) {
     let lang = state.chrome.resolved_lang;
 
-    // Warning 1: Platform mismatch with cross-flash confirmation
     let drive_ff = platform::classify_drive(&drive.product);
     let fw_ff = state.flash.firmware_form_factor;
     if drive_ff != DriveFormFactor::Unknown
@@ -862,7 +856,6 @@ fn show_safety_warnings(ui: &mut egui::Ui, state: &mut AppState, drive: &crate::
         );
     }
 
-    // Warning 2: Two-step flash guidance
     if platform::needs_two_step_flash(&drive.product) {
         ui.add_space(GAP_TINY);
         ui.colored_label(
@@ -871,7 +864,6 @@ fn show_safety_warnings(ui: &mut egui::Ui, state: &mut AppState, drive: &crate::
         );
     }
 
-    // Warning 3: Version downgrade (from known firmware database)
     if let Some(resolved) = &state.flash.firmware_resolved {
         if let Some(known) = resolved.identification.known {
             let direction = crate::firmware_db::compare_versions(&drive.revision, known.version);
@@ -889,7 +881,6 @@ fn show_safety_warnings(ui: &mut egui::Ui, state: &mut AppState, drive: &crate::
         }
     }
 
-    // Warning 4: Firmware-drive model match info (from binary analysis or known database)
     if let Some(resolved) = &state.flash.firmware_resolved {
         if let Some(fw_model) = &resolved.model {
             if !drive.product.contains(fw_model.as_str()) && !fw_model.contains(&drive.product) {

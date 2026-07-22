@@ -110,9 +110,6 @@ pub fn confirm_force_kill(state: &mut AppState) {
 }
 
 pub fn decline_force_kill(state: &mut AppState) {
-    // User chose to wait: keep busy + active_operation (or an active probe) so another
-    // flash cannot start while the backend is still mutating the drive. Leave the
-    // force-kill dialog open so the user can retry a hard stop if needed.
     if state.runtime.active_operation.is_some() {
         state.runtime.waiting_for_backend_stop = true;
         state.set_status_key(L10nKey::StatusCancelling, state.runtime.progress);

@@ -119,7 +119,6 @@ mod tests {
 
     #[test]
     fn classify_drive_slim_checked_before_desktop() {
-        // Shorter slim names should not be confused with desktop names.
         assert_eq!(classify_drive("BU40N"), DriveFormFactor::Slim);
     }
 
@@ -157,7 +156,6 @@ mod tests {
         for m in SLIM_MODELS {
             assert!(models.contains(m), "missing slim model {m}");
         }
-        // Desktop-only model remains classifiable after list unification.
         assert_eq!(classify_drive("BW-16D1X-U"), DriveFormFactor::Desktop);
     }
 }

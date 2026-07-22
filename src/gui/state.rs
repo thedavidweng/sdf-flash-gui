@@ -398,8 +398,6 @@ impl AppState {
             .and_then(|i| self.drive.drives.get(i));
         let new_device = selected.map(|d| d.device.as_str());
         let new_identity = selected.map(|d| d.identity_key());
-        // Path, selection index, or hardware identity at the same path changed
-        // (e.g. different drive re-enumerated as /dev/sr0).
         if old_device != new_device
             || self.drive.selected_drive != prev_idx
             || old_identity != new_identity
@@ -624,20 +622,9 @@ mod tests {
             state.log(&format!("line {i}"));
         }
         let lines: Vec<&str> = state.runtime.log_text.lines().collect();
-        assert!(
-            lines.len() <= LOG_MAX_LINES,
-            "log has {} lines, cap is {LOG_MAX_LINES}",
-            lines.len()
-        );
-        assert!(
-            state.runtime.log_text.contains("truncated"),
-            "truncation marker missing"
-        );
-        assert!(
-            lines.last().is_some_and(|l| l.contains("line 549")),
-            "last line should be the most recent; got {:?}",
-            lines.last()
-        );
+        assert!(lines.len() <= LOG_MAX_LINES);
+        assert!(state.runtime.log_text.contains("truncated"));
+        assert_eq!(lines.last().copied(), Some("line 549"));
     }
 
     #[test]

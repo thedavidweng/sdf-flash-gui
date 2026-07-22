@@ -71,7 +71,6 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::ReasonNoFirmware => "Select a firmware file",
         L10nKey::ReasonConflict => "Encrypted and boot-loader modes conflict",
         L10nKey::ReasonEnterToken => "Enter recovery token and confirmation",
-        // gui/mod.rs
         L10nKey::LabelManufacturer => "Manufacturer:",
         L10nKey::LabelProduct => "Product:",
         L10nKey::LabelRevision => "Revision:",
@@ -102,7 +101,6 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::StatusNotFound => "✗ Not found",
         L10nKey::StatusPathValid => "✓ Path is valid",
         L10nKey::StatusOptional => "Optional",
-        // gui/ops.rs
         L10nKey::StatusHintRead => "Select output folder when you start",
         L10nKey::StatusHintWrite => "Load firmware, then confirm",
         L10nKey::StatusHintRecover => "Recovery needs boot token from wrong firmware",
@@ -112,19 +110,16 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::StatusWritingFirmware => "Writing firmware",
         L10nKey::StatusRecoveringDrive => "Recovering drive",
         L10nKey::DialogTitleWrongFirmware => "Wrong firmware (for token extraction)",
-        // gui/workers.rs
         L10nKey::StatusOpFinished => "Operation finished — please wait…",
         L10nKey::StatusOpFailed => "Operation failed",
         L10nKey::StatusListingDrives => "Listing drives",
         L10nKey::StatusDriveListFailed => "Drive list failed",
-        // gui/validation.rs
         L10nKey::ValPathEmpty => "Path is empty",
         L10nKey::ValFileNotExist => "File does not exist",
         L10nKey::ValPathNotFile => "Path is not a file",
         L10nKey::ValMustContainSdftool => "Filename must contain 'sdftool'",
         L10nKey::ValMustContainMakemkv => "Filename must contain 'makemkvcon' or 'makemkv'",
         L10nKey::ValExtMustBeBin => "File extension must be '.bin'",
-        // flash.rs
         L10nKey::ThemeSystem => "System",
         L10nKey::ThemeDark => "Dark",
         L10nKey::ThemeLight => "Light",
@@ -210,5 +205,3 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::DialogFilterExecutable => "Executable",
     }
 }
-
-// Each language function defines a full translation table.

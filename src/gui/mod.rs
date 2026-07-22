@@ -1,8 +1,3 @@
-// egui-based GUI for SDFtool Flasher — stock egui native style.
-//
-// This module owns the UI rendering and the eframe::App lifecycle.
-// Business logic lives in ops.rs, workers in workers.rs, state in state.rs.
-
 pub mod file_dialog;
 mod ops;
 mod start_gate;
@@ -157,7 +152,7 @@ pub fn run() -> Result<(), eframe::Error> {
         ..Default::default()
     };
     eframe::run_native(
-        crate::branding::DISPLAY_NAME, // window title (OS-level, not translatable)
+        crate::branding::DISPLAY_NAME,
         options,
         Box::new(|cc| {
             let mut fonts = egui::FontDefinitions::default();
@@ -189,13 +184,9 @@ impl App {
         let runner: std::sync::Arc<dyn crate::process::ProcessRunner> =
             std::sync::Arc::new(NativeRunner);
 
-        // Prefer backend `-l` when a tool is configured: on macOS, USB optical
-        // drives only appear as MakeMKV IOKit paths (/IOBDServices/…), which OS
-        // enumeration cannot supply. Fall back to OS discovery otherwise.
         if ops::backend_configured(&state) {
             spawn_list_drives(&worker_tx, &mut state, &runner, false);
         } else {
-            // No backend: best-effort OS discovery (macOS: drutil / diskutil).
             ops::refresh_drives(&mut state);
         }
 

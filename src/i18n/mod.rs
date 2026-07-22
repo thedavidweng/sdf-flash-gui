@@ -185,7 +185,6 @@ pub(crate) fn detect_system_language_from_locale(locale: Option<&str>) -> Langua
         if primary != Language::English {
             return primary;
         }
-        // Region/script fallback: e.g. pt-PT → pt, zh-Hant-TW → zh (when translations exist).
         let mut remainder = locale;
         while let Some((_, rest)) = remainder.rsplit_once(['-', '_']) {
             remainder = rest;
@@ -283,7 +282,6 @@ pub enum L10nKey {
     ReasonNoFirmware,
     ReasonConflict,
     ReasonEnterToken,
-    // gui/mod.rs — drive properties
     LabelManufacturer,
     LabelProduct,
     LabelRevision,
@@ -314,7 +312,6 @@ pub enum L10nKey {
     StatusNotFound,
     StatusPathValid,
     StatusOptional,
-    // gui/ops.rs
     StatusHintRead,
     StatusHintWrite,
     StatusHintRecover,
@@ -324,23 +321,19 @@ pub enum L10nKey {
     StatusWritingFirmware,
     StatusRecoveringDrive,
     DialogTitleWrongFirmware,
-    // gui/workers.rs
     StatusOpFinished,
     StatusOpFailed,
     StatusListingDrives,
     StatusDriveListFailed,
-    // gui/validation.rs
     ValPathEmpty,
     ValFileNotExist,
     ValPathNotFile,
     ValMustContainSdftool,
     ValMustContainMakemkv,
     ValExtMustBeBin,
-    // flash.rs
     ThemeSystem,
     ThemeDark,
     ThemeLight,
-    // gui log messages (GUI-generated only; backend stdout is shown as-is)
     LogErrGeneric,
     LogFirmwareEmpty,
     LogFirmwareReadFailed,
@@ -357,7 +350,6 @@ pub enum L10nKey {
     LogSdfFlags,
     LogSdfExtraField,
     LogSdfReadFailed,
-    // flash confirmation summary & failure recovery
     LabelFlashSummaryTitle,
     LabelFlashSummaryDrive,
     LabelFlashSummaryFirmware,
@@ -380,7 +372,6 @@ pub enum L10nKey {
     HintFlashNoCancel,
     HelpEmptyDrives,
     LabelTokenLength,
-    // Platform safety warnings
     WarnPlatformMismatch,
     WarnCrossFlashConfirm,
     ReasonCrossFlashNotConfirmed,
@@ -467,17 +458,14 @@ mod tests {
 
     #[test]
     fn test_locale_region_fallback_from_unknown_primary() {
-        // Primary tag is unknown; suffix "pt" should resolve via region fallback.
         assert_eq!(
             detect_system_language_from_locale(Some("xx-pt")),
             Language::Portuguese
         );
-        // Underscore separator + German suffix (covers rsplit fallback return).
         assert_eq!(
             detect_system_language_from_locale(Some("zz_de")),
             Language::German
         );
-        // Unknown primary and region → English primary after exhausted fallbacks.
         assert_eq!(
             detect_system_language_from_locale(Some("zz-yy")),
             Language::English
@@ -491,13 +479,10 @@ mod tests {
 
     #[test]
     fn test_resolve_language() {
-        // Test that resolving a specific language returns itself
         assert_eq!(resolve_language(Language::French), Language::French);
         assert_eq!(resolve_language(Language::Spanish), Language::Spanish);
 
-        // Test resolving Auto
         let resolved = resolve_language(Language::Auto);
-        // It should match whatever detect_system_language() returns
         assert_eq!(resolved, detect_system_language());
     }
 
@@ -836,7 +821,7 @@ mod tests {
             ("uk-UA", Language::Ukrainian),
             ("en", Language::English),
             ("en-US", Language::English),
-            ("ja", Language::English), // unsupported → English
+            ("ja", Language::English),
             ("zh-CN", Language::English),
         ];
         for (locale, expected) in &cases {
@@ -859,7 +844,6 @@ mod tests {
 
     #[test]
     fn test_display_name_japanese_not_present() {
-        // Japanese is not in the supported list
         assert!(!Language::ALL
             .iter()
             .any(|l| l.display_name().contains("Japanese")));
@@ -883,7 +867,6 @@ mod tests {
 
     #[test]
     fn test_t_with_args_multiple_args() {
-        // LabelTypeToConfirm has {required} placeholder
         let args = [("required", "FLASH H:")];
         let text = t_with_args(L10nKey::LabelTypeToConfirm, Language::English, &args);
         assert!(text.contains("FLASH H:"));
@@ -891,7 +874,6 @@ mod tests {
 
     #[test]
     fn test_t_with_args_missing_placeholder() {
-        // If placeholder doesn't exist, text should be unchanged
         let args = [("nonexistent", "value")];
         let text = t_with_args(L10nKey::TitleDriveProperties, Language::English, &args);
         assert_eq!(text, "Drive Properties");
@@ -899,13 +881,11 @@ mod tests {
 
     #[test]
     fn test_language_all_count() {
-        // 31 languages including Auto
         assert_eq!(Language::ALL.len(), 31);
     }
 
     #[test]
     fn test_translation_dispatch_returns_language_specific_text() {
-        // German has real translations — should differ from English
         let en = t(L10nKey::TitleSettings, Language::English);
         let de = t(L10nKey::TitleSettings, Language::German);
         assert_eq!(en, "Settings");
@@ -915,7 +895,6 @@ mod tests {
 
     #[test]
     fn test_auto_language_falls_back_to_english() {
-        // Language::Auto should return English (resolve happens outside t())
         let en = t(L10nKey::TitleSettings, Language::English);
         let auto = t(L10nKey::TitleSettings, Language::Auto);
         assert_eq!(en, auto, "Language::Auto should fall back to English");
@@ -923,7 +902,6 @@ mod tests {
 
     #[test]
     fn test_german_translations_complete() {
-        // German has full translations — spot-check keys where the text must differ
         let must_differ = [
             L10nKey::TitleSettings,
             L10nKey::LabelToolPath,
@@ -944,7 +922,6 @@ mod tests {
                 "German should have a real translation for {key:?}, not English fallback"
             );
         }
-        // Keys like "Backend:", "sdf.bin:" are the same in German — just verify non-empty
         let same_in_both = [L10nKey::LabelBackend, L10nKey::LabelSdfPath];
         for key in same_in_both {
             let text = t(key, Language::German);
@@ -992,7 +969,6 @@ mod tests {
                     localized += 1;
                 }
             }
-            // Allow a few technical strings to match English (e.g. SDF0 header, ERROR prefix).
             let min_localized = LOG_KEYS.len() - 6;
             assert!(
                 localized >= min_localized,

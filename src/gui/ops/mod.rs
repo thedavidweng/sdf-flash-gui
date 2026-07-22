@@ -1,5 +1,3 @@
-// Pure helpers that operate on AppState — no UI rendering or thread spawning.
-
 mod drives;
 mod firmware;
 mod labels;
@@ -165,7 +163,6 @@ mod tests {
         let until = start + SETTINGS_NUDGE_SECONDS;
         assert_eq!(settings_nudge_highlight(None, start, false), 0.0);
 
-        // Mid first pulse ≈ peak (half-sine at u=0.5 → 1.0)
         let p1_mid = start + f64::from(NUDGE_PULSE1_START + NUDGE_PULSE1_DUR * 0.5);
         let h1 = settings_nudge_highlight(Some(until), p1_mid, false);
         assert!(
@@ -173,14 +170,12 @@ mod tests {
             "first peak expected ~1.0, got {h1}"
         );
 
-        // Gap between pulses ≈ 0
         let gap_mid = start
             + f64::from(NUDGE_PULSE1_START + NUDGE_PULSE1_DUR)
             + f64::from(NUDGE_PULSE2_START - (NUDGE_PULSE1_START + NUDGE_PULSE1_DUR)) * 0.5;
         let h_gap = settings_nudge_highlight(Some(until), gap_mid, false);
         assert!(h_gap < 0.05, "gap should be near 0, got {h_gap}");
 
-        // Mid second pulse ≈ gain (weaker)
         let p2_mid = start + f64::from(NUDGE_PULSE2_START + NUDGE_PULSE2_DUR * 0.5);
         let h2 = settings_nudge_highlight(Some(until), p2_mid, false);
         assert!(
@@ -222,7 +217,6 @@ mod tests {
 
     #[test]
     fn settings_nudge_highlight_before_window_start_is_zero() {
-        // until is set, but `now` is still before (until - SETTINGS_NUDGE_SECONDS).
         let until = 200.0;
         let before_start = until - SETTINGS_NUDGE_SECONDS - 0.05;
         assert!(before_start < until);
@@ -230,7 +224,6 @@ mod tests {
             settings_nudge_highlight(Some(until), before_start, false),
             0.0
         );
-        // Reduced-motion still holds strength only inside the window.
         assert_eq!(
             settings_nudge_highlight(Some(until), before_start, true),
             0.0
@@ -586,13 +579,11 @@ mod tests {
         state.drive.selected_drive = Some(0);
         state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Read;
-        // Need a valid tool path — create a temp file
         let temp_dir = std::env::temp_dir().join("sdf_flash_test_ops");
         let _ = std::fs::create_dir_all(&temp_dir);
         let tool = temp_dir.join("sdftool_test");
         std::fs::write(&tool, b"").unwrap();
         state.config.tool_path = tool.to_string_lossy().to_string();
-        // validate_sdf_path with empty is ok
         state.config.sdf_path = String::new();
         assert!(can_start(&state));
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -689,7 +680,7 @@ mod tests {
         std::fs::write(&tool, b"").unwrap();
         let mut state = AppState::new_no_backend();
         state.config.tool_path = tool.to_string_lossy().to_string();
-        state.config.sdf_path = String::new(); // empty sdf_path is OK (validate_sdf_path returns Ok for empty)
+        state.config.sdf_path = String::new();
         (state, temp_dir)
     }
 
@@ -810,7 +801,6 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.drive.selected_drive = Some(0);
         refresh_drives(&mut state);
-        // On CI there are no optical drives — verify postcondition
         assert!(
             !state.drive.drives.is_empty() || state.drive.selected_drive.is_none(),
             "when no drives found, selected_drive must be None"
@@ -861,7 +851,6 @@ mod tests {
 
     #[test]
     fn apply_drive_list_index_shift_same_path_invalidates_probe() {
-        // Devin: same device path at a new index must not keep stale probe flags.
         let mut state = AppState::new_no_backend();
         let target = crate::drive::Drive {
             device: "/dev/sr0".into(),
@@ -891,8 +880,6 @@ mod tests {
 
     #[test]
     fn apply_drive_list_same_path_new_identity_invalidates_probe() {
-        // Same /dev/sr0 after re-enum, but vendor/product changed → must not keep
-        // previous MT1959/encrypted probe results (would skip re-probe gates).
         let mut state = AppState::new_no_backend();
         state.drive.drives.push(crate::drive::Drive {
             device: "/dev/sr0".into(),
@@ -927,7 +914,6 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.flash.wrong_firmware_path = String::new();
         extract_recovery_token_from_wrong_firmware(&mut state);
-        // Should not crash, should not log error
         assert!(state.runtime.log_text.is_empty());
     }
 
@@ -975,7 +961,6 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.flash.wrong_firmware_path = "/some/path.bin".into();
         prompt_recovery_wrong_firmware(&mut state, &no_dialog());
-        // Should not log anything since path is already set
         assert!(state.runtime.log_text.is_empty());
     }
 
@@ -1008,7 +993,6 @@ mod tests {
         state.drive.selected_drive = None;
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
-        // Should not crash
     }
 
     #[test]
@@ -1018,10 +1002,9 @@ mod tests {
         state.drive.selected_drive = Some(0);
         state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Write;
-        state.flash.firmware_data = None; // no firmware → validation fails
+        state.flash.firmware_data = None;
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
-        // Should not crash
         assert!(!state.runtime.busy);
     }
 
@@ -1039,7 +1022,6 @@ mod tests {
             crate::command::required_flash_confirmation(&test_drive().device);
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
-        // Shared prepare_firmware_op planned the write → begin_operation
         assert!(state.runtime.busy, "log: {}", state.runtime.log_text);
         let _ = std::fs::remove_dir_all(temp_dir);
     }
@@ -1068,7 +1050,6 @@ mod tests {
         state.drive.selected_drive = None;
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
-        // Returns early — no drive selected
         assert!(!state.runtime.busy);
     }
 
@@ -1082,7 +1063,6 @@ mod tests {
         state.operation_mode = OperationMode::Write;
         state.flash.firmware_data = Some(data);
         state.flash.firmware_path = "fw.bin".into();
-        // Wrong confirmation → would_execute false via shared prepare
         state.flash.confirmation = "WRONG".into();
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
@@ -1099,7 +1079,6 @@ mod tests {
         state.operation_mode = OperationMode::Recover;
         state.flash.firmware_path = "fw.bin".into();
         state.flash.recovery_token = "ABCDEFGHIJKLMNOP".into();
-        // Wrong confirmation → would_execute false via shared prepare
         state.flash.confirmation = "WRONG".into();
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
@@ -1114,12 +1093,10 @@ mod tests {
         state.drive.selected_drive = None;
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
-        // Should not crash
     }
 
     #[test]
     fn load_firmware_root_path_no_parent() {
-        // "/" has no parent → if let Some(parent) is false, skips candidates
         let mut state = AppState::new_no_backend();
         load_firmware(&mut state, "/");
         assert!(state.flash.firmware_candidates.is_empty());
@@ -1133,7 +1110,6 @@ mod tests {
         state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Read;
         let reason = start_disabled_reason(&state);
-        // Read mode with valid paths should return empty (can start)
         assert!(
             reason.is_empty(),
             "read mode should be startable, got: {reason}"
@@ -1150,7 +1126,6 @@ mod tests {
         state.operation_mode = OperationMode::Write;
         state.flash.firmware_data = Some(vec![0u8; 100]);
         state.flash.firmware_path = "fw.bin".into();
-        // No confirmation → reason is not empty
         let reason = start_disabled_reason(&state);
         assert!(!reason.is_empty());
         let _ = std::fs::remove_dir_all(temp_dir);
@@ -1166,7 +1141,6 @@ mod tests {
         state.flash.recovery_token = "ABCDEFGHIJKLMNOP".into();
         state.flash.firmware_path = "fw.bin".into();
         let reason = start_disabled_reason(&state);
-        // Should return ReasonEnterToken
         assert!(!reason.is_empty());
         let _ = std::fs::remove_dir_all(temp_dir);
     }
@@ -1267,7 +1241,6 @@ mod tests {
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
         assert!(!state.runtime.busy);
-        // log_error prefixes ERROR; body includes mode-conflict text.
         assert!(
             state.runtime.log_text.contains("ERROR"),
             "log: {}",
@@ -1368,7 +1341,6 @@ mod tests {
         let mut state = AppState::new_no_backend();
         load_firmware(&mut state, &dir.join("a.bin").to_string_lossy());
         assert!(state.flash.firmware_data.is_some());
-        // Should find .bin files but not .txt
         assert!(state
             .flash
             .firmware_candidates
@@ -1387,8 +1359,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    // --- FileDialog trait tests ---
-
     #[test]
     fn execute_start_read_no_drive_selected() {
         let mut state = AppState::new_no_backend();
@@ -1406,7 +1376,6 @@ mod tests {
         state.drive.drive_mt1959 = true;
         state.operation_mode = OperationMode::Read;
         let (tx, _rx) = std::sync::mpsc::channel();
-        // Dialog returns no folder → early return
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
         assert!(!state.runtime.busy);
         let _ = std::fs::remove_dir_all(temp_dir);
@@ -1422,7 +1391,6 @@ mod tests {
         let dialog = MockDialog::returning_folder("/tmp/output");
         let (tx, _rx) = std::sync::mpsc::channel();
         execute_start(&mut state, &tx, &dialog, &mock_runner());
-        // plan_command should succeed and begin_operation should be called
         assert!(state.runtime.busy);
         let _ = std::fs::remove_dir_all(temp_dir);
     }
@@ -1489,7 +1457,6 @@ mod tests {
     fn prompt_recovery_wrong_firmware_dialog_no_selection() {
         let mut state = AppState::new_no_backend();
         prompt_recovery_wrong_firmware(&mut state, &no_dialog());
-        // Dialog returns nothing → log message but no token
         assert!(state.runtime.log_text.contains("Recover"));
         assert!(state.flash.wrong_firmware_path.is_empty());
     }
@@ -1580,8 +1547,6 @@ mod tests {
     fn load_firmware_identifies_known_firmware_by_hash() {
         let dir = std::env::temp_dir().join("sdf_flash_test_known_hash");
         let _ = std::fs::create_dir_all(&dir);
-        // Build a synthetic firmware with the BW-16D1HT 3.02 hash is not feasible,
-        // but we can test that binary analysis extracts PCB type and model.
         let mut data = vec![0u8; 40000];
         let boot = b"MT1959 Boot JB8 ";
         data[12288..12288 + boot.len()].copy_from_slice(boot);
@@ -1604,7 +1569,6 @@ mod tests {
             id.identification.binary_info.model.as_deref(),
             Some("BW-16D1HT")
         );
-        // Not in known database (synthetic data)
         assert!(id.identification.known.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1666,10 +1630,6 @@ mod tests {
 
     #[test]
     fn load_firmware_detects_encrypted_firmware_file_even_when_drive_not_encrypted() {
-        // Simulate loading a firmware file with an embedded 2120 date stamp
-        // onto a drive that currently has non-encrypted firmware.
-        // This is the gap the firmware-file encryption detection closes:
-        // without it, the code would use non-enc mode and silently fail.
         let dir = std::env::temp_dir().join("sdf_flash_test_fw_enc");
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join("DE_LG_BP50NB40_1.03_MK.bin");

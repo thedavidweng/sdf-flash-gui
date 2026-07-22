@@ -1,5 +1,3 @@
-// sdf-flash-gui library — public API for integration tests and CLI.
-
 pub mod branding;
 pub mod command;
 pub mod drive;

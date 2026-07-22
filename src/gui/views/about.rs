@@ -6,7 +6,7 @@ use eframe::egui;
 
 use super::super::{APP_VERSION, GAP_SMALL};
 
-#[allow(deprecated)] // viewport has no parent Ui; CentralPanel::show(ctx) is still required
+#[allow(deprecated)]
 pub fn show_about_window(ctx: &egui::Context, state: &mut AppState) {
     ctx.show_viewport_immediate(
         egui::ViewportId::from_hash_of("about_viewport"),

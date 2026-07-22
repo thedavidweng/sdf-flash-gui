@@ -325,7 +325,6 @@ pub fn spawn_probe(
                 let _ = tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill));
             }
             Err(crate::orchestration::ProbeError::Failed(e)) => {
-                // probe_drive_with always supplies a non-empty Failed message.
                 let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(e.clone())));
                 let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
                     drive_idx,
@@ -437,7 +436,6 @@ pub fn spawn_list_drives(
     let tool_path = state.config.tool_path.clone();
     let runner = runner.clone();
     run_backend_command(move || {
-        // Shared list path with CLI `run_list_backend` (same runner seam + success rules).
         match crate::orchestration::run_list_backend_with(
             backend,
             &tool_path,
@@ -445,7 +443,6 @@ pub fn spawn_list_drives(
             Some(control.as_ref()),
         ) {
             Ok(out) => {
-                // Parse stdout only (stderr may contain noise).
                 let drives = crate::drive::parse_drive_list(&out.stdout);
                 if verbose {
                     let combined = out.combined();
@@ -498,8 +495,6 @@ pub fn spawn_list_drives(
     });
 }
 
-// ponytail: spawn_* share run_backend_command; ProcessRunner kept for test mocks
-
 fn run_backend_command<F>(f: F)
 where
     F: FnOnce() + Send + 'static,
@@ -510,8 +505,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- drain_worker_messages tests ---
 
     use super::super::state::AppState;
 
@@ -671,7 +664,7 @@ mod tests {
         state.runtime.probing = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
-            drive_idx: 1, // different from selected
+            drive_idx: 1,
             mt1959: true,
             mt1939: false,
             encrypted_firmware: true,
@@ -681,9 +674,7 @@ mod tests {
         }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
-        // drive_mt1959 should NOT be updated since drive_idx doesn't match
         assert!(!state.drive.drive_mt1959);
-        // but probing should still be cleared
         assert!(!state.runtime.probing);
     }
 
@@ -768,7 +759,6 @@ mod tests {
         }));
         drop(tx);
         let (_, attention) = drain_worker_messages(&mut state, &rx);
-        // success=true but progress < 100 → Critical (not fully done)
         assert_eq!(attention, Some(Attention::Critical));
     }
 
@@ -818,7 +808,6 @@ mod tests {
         drop(tx);
         drain_worker_messages(&mut state, &rx);
         assert!(state.drive.drives.is_empty());
-        // Empty list clears selection (no stale index into vanished list).
         assert_eq!(state.drive.selected_drive, None);
         assert!(state.runtime.log_text.is_empty());
     }
@@ -861,7 +850,6 @@ mod tests {
         }));
         drop(tx);
         drain_worker_messages(&mut state, &rx);
-        // Same device path → stay on that drive; probe cache stays valid.
         assert_eq!(state.drive.selected_drive, Some(0));
         assert_eq!(state.drive.drives.len(), 2);
         assert_eq!(state.drive.last_probed_drive, Some(0));
@@ -870,8 +858,6 @@ mod tests {
 
     #[test]
     fn drain_drives_listed_same_device_new_index_invalidates_probe() {
-        // Cover `selected_drive != prev_idx` when the device *path* is unchanged
-        // (path match moves from index 0 → 1).
         let mut state = AppState::new_no_backend();
         let target = crate::drive::Drive {
             device: "/dev/sr0".into(),
@@ -905,7 +891,6 @@ mod tests {
 
     #[test]
     fn drain_drives_listed_reselects_by_identity_after_path_change() {
-        // After flash, MakeMKV notes the drive may re-enumerate under a new path.
         let mut state = AppState::new_no_backend();
         state.drive.drives.push(crate::drive::Drive {
             device: "/dev/sg1".into(),
@@ -928,7 +913,7 @@ mod tests {
                     ..Default::default()
                 },
                 crate::drive::Drive {
-                    device: "/dev/sg2".into(), // path changed, same identity
+                    device: "/dev/sg2".into(),
                     vendor: "HL-DT-ST".into(),
                     product: "BU40N".into(),
                     revision: "1.03".into(),
@@ -941,7 +926,6 @@ mod tests {
         drain_worker_messages(&mut state, &rx);
         assert_eq!(state.drive.selected_drive, Some(1));
         assert_eq!(state.drive.drives[1].device, "/dev/sg2");
-        // Path/index changed → invalidate probe cache.
         assert!(state.drive.last_probed_drive.is_none());
         assert!(!state.drive.drive_probed);
     }
@@ -962,7 +946,6 @@ mod tests {
         assert!(state.drive.drives.is_empty());
         assert_eq!(state.drive.selected_drive, None);
         assert!(!state.runtime.busy);
-        // Exact status key — avoid dead `||` branches in loose substring asserts (patch coverage).
         assert_eq!(
             state.runtime.status_message,
             t(L10nKey::StatusNoDrives, state.chrome.resolved_lang)
@@ -1012,11 +995,9 @@ mod tests {
         assert!(attention.is_none());
         assert!(state.runtime.log_text.contains("line1"));
         assert!(state.runtime.log_text.contains("line2"));
-        assert!((state.runtime.progress - 50.0).abs() < 0.01); // last Status wins
+        assert!((state.runtime.progress - 50.0).abs() < 0.01);
         assert_eq!(state.runtime.status_message, "Working");
     }
-
-    // --- ProcessRunner mock and spawn tests ---
 
     use crate::process::ProcessRunner;
     use std::sync::Arc;
@@ -1040,7 +1021,6 @@ mod tests {
                     }
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    // Keep polling until the overall deadline.
                     continue;
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -1053,12 +1033,10 @@ mod tests {
 
     #[test]
     fn collect_worker_msgs_timeout_and_disconnect() {
-        // Timeout arm: no sender traffic until deadline expires.
         let (_tx, rx) = std::sync::mpsc::channel::<WorkerMsg>();
         let empty = collect_worker_msgs(&rx, |_| false, Duration::from_millis(80));
         assert!(empty.is_empty());
 
-        // Disconnected arm: all senders dropped before wait.
         let (tx, rx) = std::sync::mpsc::channel::<WorkerMsg>();
         drop(tx);
         let after_disconnect = collect_worker_msgs(&rx, |_| false, Duration::from_millis(200));
@@ -1201,7 +1179,6 @@ mod tests {
     }
 
     fn make_output(stdout: &str) -> crate::process::CommandOutput {
-        // Use a real subprocess to get a valid ExitStatus
         let status = std::process::Command::new("true").status().unwrap();
         crate::process::CommandOutput {
             status,
@@ -1225,7 +1202,6 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
         spawn_probe(&tx, &mut state, 0, &runner);
-        // No drive at index 0 → early return, no messages
         drop(tx);
         assert!(rx.try_recv().is_err());
     }
@@ -1239,7 +1215,6 @@ mod tests {
         spawn_probe(&tx, &mut state, 0, &runner);
         drop(tx);
         let msg = rx.try_recv().unwrap();
-        // Prefer matches! over match+panic so the never-taken arm is not a patch DA.
         assert!(
             matches!(
                 &msg,
@@ -1255,7 +1230,6 @@ mod tests {
         state.drive.drives.push(test_drive());
         state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
-        // Empty stdout/stderr → probe.output empty → skip intermediate Log of output.
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
         spawn_probe(&tx, &mut state, 0, &runner);
         let messages = wait_for_probe_complete(&rx);
@@ -1335,10 +1309,8 @@ mod tests {
         let runner: Arc<dyn ProcessRunner> =
             Arc::new(MockRunner::success("Vendor: HL-DT-ST\nProduct: BU40N\n"));
         spawn_probe(&tx, &mut state, 0, &runner);
-        // Wait for thread to finish
         let messages = wait_for_probe_complete(&rx);
         drop(tx);
-        // Should have: Status, Log (> command), Log (output), ProbeComplete
         assert!(messages.len() >= 3);
         let probe = expect_probe_complete_ok(&messages);
         assert!(
@@ -1383,7 +1355,6 @@ mod tests {
         );
         let messages = wait_for_operation_complete(&rx);
         drop(tx);
-        // Should have: Status, Log (> command), Log (line1), Log (line2), OperationComplete
         assert!(messages.len() >= 4);
         let success = expect_operation_success(&messages);
         let success = success.expect("expected OperationComplete message");
@@ -1781,7 +1752,6 @@ Found 1 drives(s)
 
     #[test]
     fn poll_worker_with_context_no_messages_skips_repaint() {
-        // ctx present, no msgs, not waiting on backend stop → !repaint early return.
         let mut state = AppState::new_no_backend();
         let (_tx, rx) = std::sync::mpsc::channel();
         let ctx = egui::Context::default();
@@ -1971,19 +1941,17 @@ Found 1 drives(s)
         assert!(!state.runtime.log_text.contains('>'));
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
-        assert!(
-            messages.iter().any(|m| match m {
-                WorkerMsg::Stream(StreamEvent::Log(s)) => s.starts_with("> "),
-                _ => false,
-            }),
-            "quiet failure should still stream the command: {messages:?}"
-        );
-        assert!(
-            messages.iter().any(|m| matches!(
+        let streamed_cmd = messages.iter().any(|m| match m {
+            WorkerMsg::Stream(StreamEvent::Log(s)) => s.starts_with("> "),
+            _ => false,
+        });
+        assert!(streamed_cmd);
+        let failed = messages.iter().any(|m| {
+            matches!(
                 m,
                 WorkerMsg::Done(WorkerResult::OperationComplete { success: false, .. })
-            )),
-            "msgs: {messages:?}"
-        );
+            )
+        });
+        assert!(failed);
     }
 }

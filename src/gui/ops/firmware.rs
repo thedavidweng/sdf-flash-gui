@@ -48,7 +48,6 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
         }
     }
 
-    // Recompute encrypted_write: drive_encrypted OR firmware_file_encrypted.
     state.recompute_encrypted_write();
 
     if let Some(parent) = std::path::Path::new(path).parent() {
