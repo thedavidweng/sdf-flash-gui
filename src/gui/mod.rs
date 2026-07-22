@@ -17,7 +17,7 @@ use eframe::egui;
 
 use crate::process_runner::NativeRunner;
 use file_dialog::NativeDialog;
-use state::{AppState, StopDialog};
+use state::{AppState, PersistedSettings, StopDialog, SETTINGS_STORAGE_KEY};
 use views::{
     handle_global_shortcuts, show_about_window, show_flash_failure_dialog, show_force_kill_dialog,
     show_main_ui, show_quit_confirmation_dialog, show_settings_window,
@@ -116,8 +116,14 @@ pub fn run() -> Result<(), eframe::Error> {
             let mut fonts = egui::FontDefinitions::default();
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             cc.egui_ctx.set_fonts(fonts);
-            cc.egui_ctx.set_visuals(egui::Visuals::dark());
-            Ok(Box::new(App::new()))
+
+            let persisted = cc
+                .storage
+                .and_then(|s| eframe::get_value::<PersistedSettings>(s, SETTINGS_STORAGE_KEY));
+            let state = AppState::with_persisted(persisted.as_ref());
+            cc.egui_ctx.set_theme(state.chrome.theme.to_egui());
+
+            Ok(Box::new(App::new(state)))
         }),
     )
 }
@@ -130,9 +136,8 @@ struct App {
 }
 
 impl App {
-    fn new() -> Self {
+    fn new(mut state: AppState) -> Self {
         let (worker_tx, worker_rx) = std::sync::mpsc::channel();
-        let mut state = AppState::new();
         let runner: std::sync::Arc<dyn crate::process::ProcessRunner> =
             std::sync::Arc::new(NativeRunner);
 
@@ -140,7 +145,7 @@ impl App {
         // drives only appear as MakeMKV IOKit paths (/IOBDServices/…), which OS
         // enumeration cannot supply. Fall back to OS discovery otherwise.
         if ops::backend_configured(&state) {
-            spawn_list_drives(&worker_tx, &mut state, &runner);
+            spawn_list_drives(&worker_tx, &mut state, &runner, false);
         } else {
             // No backend: best-effort OS discovery (macOS: drutil / diskutil).
             ops::refresh_drives(&mut state);
@@ -191,7 +196,7 @@ impl eframe::App for App {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if self.state.chrome.exiting {
             egui::CentralPanel::default().show_inside(ui, |_ui| {});
             return;
@@ -208,14 +213,7 @@ impl eframe::App for App {
             .frame(panel_frame)
             .show_inside(ui, |ui| {
                 ui.add_enabled_ui(!modal_open, |ui| {
-                    show_main_ui(
-                        ui,
-                        &ctx,
-                        frame,
-                        &mut self.state,
-                        &self.worker_tx,
-                        &self.runner,
-                    );
+                    show_main_ui(ui, &ctx, &mut self.state, &self.worker_tx, &self.runner);
                 });
             });
 
@@ -246,6 +244,11 @@ impl eframe::App for App {
         if self.state.runtime.stop_dialog == StopDialog::ConfirmForceKill {
             show_force_kill_dialog(&ctx, &mut self.state);
         }
+    }
+
+    fn save(&mut self, _storage: &mut dyn eframe::Storage) {
+        let settings = self.state.snapshot_settings();
+        eframe::set_value(_storage, SETTINGS_STORAGE_KEY, &settings);
     }
 }
 
@@ -409,7 +412,7 @@ mod tests {
         use super::state::AppState;
         use crate::drive::Drive;
 
-        let mut state = AppState::new();
+        let mut state = AppState::with_persisted(None);
         assert_eq!(state.runtime.status_message, "Ready");
         assert_eq!(state.runtime.progress, 0.0);
         assert!(!state.runtime.busy);

@@ -33,6 +33,8 @@ cargo test
 
 ### Coverage (required when touching `src/`)
 
+This repo enforces a **100% patch coverage** constraint: every changed executable line in non-ignored `src/` must be hit by a test. There is no "no drop vs main" carve-out — coverage is measured against an absolute floor.
+
 Matches CI on Linux. Codecov (and the local/CI gate) enforce:
 
 - **project** line coverage ≥ **99%** absolute floor (`codecov.yml` + `coverage-gate.py`; not “no drop vs main”)
@@ -89,3 +91,17 @@ This overrides the general "do not add or remove comments unless asked" rule for
 - **May** remove explanatory comments from code already in your diff.
 - **Do not** mass-remove comments from code you are not otherwise touching.
 - **Preserve** doc comments (`///`, `//!`), reference comments (citations to ADRs, specs, or reverse-engineering findings), and section markers in data tables.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues for `thedavidweng/sdf-flash-gui` (uses `gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical labels used as-is. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — `CONTEXT.md` at repo root, `docs/adr/` for decisions. See `docs/agents/domain.md`.

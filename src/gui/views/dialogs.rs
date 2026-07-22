@@ -38,7 +38,7 @@ pub fn handle_global_shortcuts(
             && !state.runtime.busy
             && !state.runtime.probing
         {
-            crate::gui::workers::spawn_list_drives(worker_tx, state, runner);
+            crate::gui::workers::spawn_list_drives(worker_tx, state, runner, true);
         }
 
         let close_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::W);

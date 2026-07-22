@@ -302,6 +302,7 @@ pub enum L10nKey {
     LogReady,
     StatusNoDrivesFound,
     StatusDrivesFound,
+    StatusOneDriveFound,
     LabelToken,
     WarnFirmwareLoadFailed,
     LabelAppName,
@@ -348,6 +349,7 @@ pub enum L10nKey {
     LogRecoveryTokenExtracted,
     LogProbeResult,
     LogParsedDrivesFromOutput,
+    LogParsedOneDriveFromOutput,
     LogSdfHeader,
     LogSdfVendor,
     LogSdfModel,
@@ -386,6 +388,7 @@ pub enum L10nKey {
     WarnFirmwareDowngrade,
     InfoFirmwareModelMismatch,
     ReasonMt1939NotCompatible,
+    LogTruncated,
 }
 
 pub fn t(key: L10nKey, lang: Language) -> &'static str {
@@ -582,6 +585,7 @@ mod tests {
         L10nKey::LogReady,
         L10nKey::StatusNoDrivesFound,
         L10nKey::StatusDrivesFound,
+        L10nKey::StatusOneDriveFound,
         L10nKey::LabelToken,
         L10nKey::WarnFirmwareLoadFailed,
         L10nKey::LabelAppName,
@@ -623,6 +627,7 @@ mod tests {
         L10nKey::LogRecoveryTokenExtracted,
         L10nKey::LogProbeResult,
         L10nKey::LogParsedDrivesFromOutput,
+        L10nKey::LogParsedOneDriveFromOutput,
         L10nKey::LogSdfHeader,
         L10nKey::LogSdfVendor,
         L10nKey::LogSdfModel,
@@ -659,6 +664,7 @@ mod tests {
         L10nKey::WarnFirmwareDowngrade,
         L10nKey::InfoFirmwareModelMismatch,
         L10nKey::ReasonMt1939NotCompatible,
+        L10nKey::LogTruncated,
     ];
 
     #[test]
@@ -677,7 +683,7 @@ mod tests {
     fn test_translation_keys() {
         assert_eq!(
             ALL_KEYS.len(),
-            164,
+            167,
             "L10nKey variant count changed — update ALL_KEYS if intentional"
         );
         for key in ALL_KEYS {
@@ -923,6 +929,7 @@ mod tests {
         L10nKey::LogRecoveryTokenExtracted,
         L10nKey::LogProbeResult,
         L10nKey::LogParsedDrivesFromOutput,
+        L10nKey::LogParsedOneDriveFromOutput,
         L10nKey::LogSdfHeader,
         L10nKey::LogSdfVendor,
         L10nKey::LogSdfModel,

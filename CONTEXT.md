@@ -38,9 +38,8 @@ never from filenames.
 ### SDF0 container
 
 A container format wrapping some firmware binaries. Parsed by
-[`parse_sdf0`](src/sdf.rs). Contains metadata fields (vendor, model, firmware
-version) used as a fallback for identification when the binary content and
-known-hash lookup are inconclusive.
+[`parse_sdf0`](src/sdf.rs). Contains a model field used as a fallback for
+identification when the binary content and known-hash lookup are inconclusive.
 
 ### Firmware identification
 
@@ -51,7 +50,7 @@ encryption status) from its binary content. Implemented in
 1. SHA-256 hash lookup against [`KNOWN_FIRMWARES`](src/firmware_db.rs) (known
    firmware database with curated metadata).
 2. Binary content analysis (PCB type from boot string, embedded model string).
-3. SDF0 metadata parse (vendor, model, firmware version from container header).
+3. SDF0 metadata parse (model from container header).
 
 ### ResolvedFirmware
 

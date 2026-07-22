@@ -5,23 +5,23 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::TitleDriveProperties => "Drive Properties",
         L10nKey::LabelDevice => "Device",
         L10nKey::SectionOperation => "Operation",
-        L10nKey::TabWrite => "WRITE Firmware",
-        L10nKey::TabRead => "READ Firmware",
-        L10nKey::TabRecover => "RECOVER Drive",
+        L10nKey::TabWrite => "Write Firmware",
+        L10nKey::TabRead => "Read Firmware",
+        L10nKey::TabRecover => "Recover Drive",
         L10nKey::OptionBootloader => "Include boot-loader (dangerous)",
         L10nKey::OptionEncrypted => "Encrypted rawflash",
         L10nKey::SectionFirmwareImage => "Firmware Image",
         L10nKey::BtnBrowse => "Browse…",
         L10nKey::SectionStatus => "Status",
         L10nKey::LabelTypeToConfirm => "Type \"{required}\" to confirm:",
-        L10nKey::LabelWrongFw => "Wrong FW",
+        L10nKey::LabelWrongFw => "Wrong firmware",
         L10nKey::BtnExtract => "Extract",
         L10nKey::BtnStart => "START",
         L10nKey::BtnStop => "STOP",
         L10nKey::MenuQuit => "Quit",
         L10nKey::TooltipStop => "Stop the current operation",
-        L10nKey::TitleStopWarning => "Stop Warning",
-        L10nKey::LabelStopWarningMsg => "⚠️ Warning: An operation is in progress!",
+        L10nKey::TitleStopWarning => "Confirm Stop",
+        L10nKey::LabelStopWarningMsg => "⚠️ An operation is in progress!",
         L10nKey::LabelStopWarningDesc => "Stopping now may interrupt the flashing process and brick your optical drive.",
         L10nKey::LabelStopWarningAsk => "Are you sure you want to stop this operation?",
         L10nKey::BtnStopNo => "No, Keep Running",
@@ -44,8 +44,8 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::TooltipSettings => "Settings",
         L10nKey::TooltipAbout => "About",
         L10nKey::TooltipStartEnabled => "Start the selected operation",
-        L10nKey::TitleExitWarning => "Exit Warning",
-        L10nKey::LabelExitWarningMsg => "⚠️ Warning: An operation is in progress!",
+        L10nKey::TitleExitWarning => "Confirm Exit",
+        L10nKey::LabelExitWarningMsg => "⚠️ An operation is in progress!",
         L10nKey::LabelExitWarningDesc => "Closing the application now may interrupt the flashing process and brick your optical drive.",
         L10nKey::LabelExitWarningAsk => "Are you sure you want to force exit?",
         L10nKey::BtnNoCancel => "No, Cancel",
@@ -89,7 +89,8 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::StatusReadyText => "READY",
         L10nKey::LogReady => "Ready.",
         L10nKey::StatusNoDrivesFound => "No drives found",
-        L10nKey::StatusDrivesFound => "{count} drive(s) found",
+        L10nKey::StatusDrivesFound => "{count} drives found",
+        L10nKey::StatusOneDriveFound => "1 drive found",
         L10nKey::LabelToken => "Token:",
         L10nKey::WarnFirmwareLoadFailed => "⚠ Failed to load or invalid firmware file",
         L10nKey::LabelAppName => "SDF Flash GUI",
@@ -112,7 +113,7 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::StatusRecoveringDrive => "Recovering drive",
         L10nKey::DialogTitleWrongFirmware => "Wrong firmware (for token extraction)",
         // gui/workers.rs
-        L10nKey::StatusOpFinished => "100% Operation finished. Please wait…",
+        L10nKey::StatusOpFinished => "Operation finished — please wait…",
         L10nKey::StatusOpFailed => "Operation failed",
         L10nKey::StatusListingDrives => "Listing drives",
         L10nKey::StatusDriveListFailed => "Drive list failed",
@@ -134,11 +135,12 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
             "Loaded firmware: {path} ({size} bytes, sha256 {hash})"
         }
         L10nKey::LogRecoverSelectWrongFw => {
-            "RECOVER: select the wrong firmware file to extract boot token"
+            "Recover: select the wrong firmware file to extract boot token"
         }
         L10nKey::LogRecoveryTokenExtracted => "Extracted recovery boot token: {token}",
         L10nKey::LogProbeResult => "MT1959: {mt1959} | Encrypted FW: {encrypted}",
-        L10nKey::LogParsedDrivesFromOutput => "Parsed {count} drive(s) from output.",
+        L10nKey::LogParsedDrivesFromOutput => "Parsed {count} drives from output.",
+        L10nKey::LogParsedOneDriveFromOutput => "Parsed 1 drive from output.",
         L10nKey::LogSdfHeader => {
             "SDF0 v{version} | header_size={header_size} | payload_offset={offset}"
         }
@@ -162,7 +164,7 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::LabelFlashFailureStep1 => "Do not power off or eject the drive.",
         L10nKey::LabelFlashFailureStep2 => "Check the log below for error details.",
         L10nKey::LabelFlashFailureStep3 => {
-            "If the drive is unresponsive, switch to RECOVER Drive mode and use a recovery token."
+            "If the drive is unresponsive, switch to Recover Drive mode and use a recovery token."
         }
         L10nKey::BtnFlashFailureDismiss => "I Understand",
         L10nKey::LabelNotAvailable => "N/A",
@@ -172,7 +174,26 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::LogDryRunCommand => "Dry-run — command that would run:\n{command}",
         L10nKey::HintFlashNoCancel => "Flash in progress — do not power off. Stop may brick the drive.",
         L10nKey::HelpEmptyDrives => {
-            "No optical drives detected. Check the connection, permissions (Linux: cdrom group), and refresh."
+            #[cfg(target_os = "linux")]
+            {
+                "Check the connection, permissions (cdrom group), and refresh."
+            }
+            #[cfg(target_os = "macos")]
+            {
+                "Check the connection, power/USB, and refresh."
+            }
+            #[cfg(target_os = "windows")]
+            {
+                "Check the connection and refresh."
+            }
+            #[cfg(not(any(
+                target_os = "linux",
+                target_os = "macos",
+                target_os = "windows"
+            )))]
+            {
+                "Check the connection and refresh."
+            }
         }
         L10nKey::LabelTokenLength => "{current}/16",
         L10nKey::WarnPlatformMismatch => "WARNING: This firmware is for {firmware} drives but your drive is {drive}. Flashing wrong form factor firmware can BRICK your drive.",
@@ -182,6 +203,7 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::WarnFirmwareDowngrade => "This is a firmware downgrade (current: {current}, target: {target}). If downgrading from encrypted firmware, ensure 'Encrypted' is checked.",
         L10nKey::InfoFirmwareModelMismatch => "Firmware is for {firmware}, your drive is {drive}. This is normal for cross-flashing.",
         L10nKey::ReasonMt1939NotCompatible => "This drive uses the older MT1939 chip and is NOT compatible with OmniDrive or MK firmware. See: https://wiki.redump.info/index.php?title=Flashing_Older_HLDS_Drives",
+        L10nKey::LogTruncated => "… (older log entries truncated)",
     }
 }
 

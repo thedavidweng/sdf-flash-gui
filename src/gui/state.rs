@@ -14,12 +14,52 @@ pub enum StopDialog {
     ConfirmForceKill,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ThemeChoice {
     System,
     Dark,
     Light,
 }
+
+impl ThemeChoice {
+    pub fn to_egui(self) -> eframe::egui::ThemePreference {
+        match self {
+            Self::System => eframe::egui::ThemePreference::System,
+            Self::Dark => eframe::egui::ThemePreference::Dark,
+            Self::Light => eframe::egui::ThemePreference::Light,
+        }
+    }
+}
+
+/// Persisted user settings, stored via eframe `Storage` and restored on launch.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PersistedSettings {
+    pub backend: Backend,
+    pub tool_path: String,
+    pub sdf_path: String,
+    pub auto_detected: bool,
+    pub language: Language,
+    pub theme: ThemeChoice,
+}
+
+impl Default for PersistedSettings {
+    fn default() -> Self {
+        Self {
+            backend: Backend::SdfTool,
+            tool_path: String::new(),
+            sdf_path: String::new(),
+            auto_detected: false,
+            language: Language::Auto,
+            theme: ThemeChoice::System,
+        }
+    }
+}
+
+/// eframe `Storage` key under which [`PersistedSettings`] is saved.
+pub const SETTINGS_STORAGE_KEY: &str = "sdf-flash-gui-settings";
+
+/// Maximum log lines retained in [`OperationRuntime::log_text`].
+const LOG_MAX_LINES: usize = 500;
 
 #[derive(Debug)]
 pub struct Chrome {
@@ -172,22 +212,52 @@ impl AppState {
         }
     }
 
-    pub fn new() -> Self {
-        let (backend, path, auto) =
+    /// Build [`AppState`] applying optional persisted settings on top of OS auto-detection.
+    pub fn with_persisted(persisted: Option<&PersistedSettings>) -> Self {
+        let (detected_backend, detected_path, detected_auto) =
             resolved_discovered_backend(drive::find_backend(Backend::SdfTool));
+        let detected_sdf = drive::find_sdf_bin();
+
+        let (backend, tool_path, sdf_path, auto_detected) = match persisted {
+            Some(p) if !p.tool_path.is_empty() => (
+                p.backend,
+                p.tool_path.clone(),
+                p.sdf_path.clone(),
+                p.auto_detected,
+            ),
+            _ => (detected_backend, detected_path, detected_sdf, detected_auto),
+        };
+
+        let language = persisted.map(|p| p.language).unwrap_or(Language::Auto);
+        let theme = persisted.map(|p| p.theme).unwrap_or(ThemeChoice::System);
+
         Self {
             config: ToolConfig {
                 backend,
-                tool_path: path,
-                sdf_path: drive::find_sdf_bin(),
-                auto_detected: auto,
+                tool_path,
+                sdf_path,
+                auto_detected,
                 ..Self::defaults().config
             },
             chrome: Chrome {
-                resolved_lang: i18n::detect_system_language(),
+                language,
+                resolved_lang: i18n::resolve_language(language),
+                theme,
                 ..Self::defaults().chrome
             },
             ..Self::defaults()
+        }
+    }
+
+    /// Snapshot the user-configurable fields into a persistable struct.
+    pub fn snapshot_settings(&self) -> PersistedSettings {
+        PersistedSettings {
+            backend: self.config.backend,
+            tool_path: self.config.tool_path.clone(),
+            sdf_path: self.config.sdf_path.clone(),
+            auto_detected: self.config.auto_detected,
+            language: self.chrome.language,
+            theme: self.chrome.theme,
         }
     }
 
@@ -196,6 +266,31 @@ impl AppState {
             self.runtime.log_text.push('\n');
         }
         self.runtime.log_text.push_str(msg);
+        self.trim_log();
+    }
+
+    fn trim_log(&mut self) {
+        let line_count = self.runtime.log_text.matches('\n').count() + 1;
+        if line_count <= LOG_MAX_LINES {
+            return;
+        }
+        let keep = LOG_MAX_LINES - 1;
+        let bytes = self.runtime.log_text.as_bytes();
+        let mut newlines_seen = 0usize;
+        let mut cut_from = 0usize;
+        for (i, &b) in bytes.iter().enumerate() {
+            if b == b'\n' {
+                newlines_seen += 1;
+                if newlines_seen == line_count - keep {
+                    cut_from = i + 1;
+                    break;
+                }
+            }
+        }
+        let mut truncated = String::from(t(L10nKey::LogTruncated, self.chrome.resolved_lang));
+        truncated.push('\n');
+        truncated.push_str(&self.runtime.log_text[cut_from..]);
+        self.runtime.log_text = truncated;
     }
 
     pub fn selected_drive(&self) -> Option<&Drive> {
@@ -326,7 +421,7 @@ impl AppState {
 
 /// Map OS backend discovery into `(backend, tool_path, auto_detected)`.
 ///
-/// Kept free of `drive::` I/O so both outcomes are unit-testable; `AppState::new`
+/// Kept free of `drive::` I/O so both outcomes are unit-testable; `AppState::with_persisted`
 /// is the only caller that hits the real enumerator.
 fn resolved_discovered_backend(found: Option<(Backend, String)>) -> (Backend, String, bool) {
     match found {
@@ -520,5 +615,97 @@ mod tests {
         state.flash.firmware_file_encrypted = None;
         state.recompute_encrypted_write();
         assert!(!state.flash.encrypted_write);
+    }
+
+    #[test]
+    fn log_truncation_caps_line_count() {
+        let mut state = AppState::new_no_backend();
+        for i in 0..(LOG_MAX_LINES + 50) {
+            state.log(&format!("line {i}"));
+        }
+        let lines: Vec<&str> = state.runtime.log_text.lines().collect();
+        assert!(
+            lines.len() <= LOG_MAX_LINES,
+            "log has {} lines, cap is {LOG_MAX_LINES}",
+            lines.len()
+        );
+        assert!(
+            state.runtime.log_text.contains("truncated"),
+            "truncation marker missing"
+        );
+        assert!(
+            lines.last().is_some_and(|l| l.contains("line 549")),
+            "last line should be the most recent; got {:?}",
+            lines.last()
+        );
+    }
+
+    #[test]
+    fn log_truncation_not_triggered_under_cap() {
+        let mut state = AppState::new_no_backend();
+        for i in 0..10 {
+            state.log(&format!("line {i}"));
+        }
+        assert!(!state.runtime.log_text.contains("truncated"));
+        assert_eq!(state.runtime.log_text.lines().count(), 10);
+    }
+
+    #[test]
+    fn snapshot_and_with_persisted_round_trip() {
+        let mut state = AppState::new_no_backend();
+        state.config.backend = Backend::MakeMkvCon;
+        state.config.tool_path = "/custom/makemkvcon".into();
+        state.config.sdf_path = "/custom/sdf.bin".into();
+        state.config.auto_detected = false;
+        state.chrome.language = Language::German;
+        state.chrome.theme = ThemeChoice::Light;
+
+        let snapshot = state.snapshot_settings();
+        let restored = AppState::with_persisted(Some(&snapshot));
+        assert_eq!(restored.config.backend, Backend::MakeMkvCon);
+        assert_eq!(restored.config.tool_path, "/custom/makemkvcon");
+        assert_eq!(restored.config.sdf_path, "/custom/sdf.bin");
+        assert_eq!(restored.chrome.language, Language::German);
+        assert_eq!(restored.chrome.theme, ThemeChoice::Light);
+    }
+
+    #[test]
+    fn with_persisted_falls_back_to_auto_detect_when_tool_path_empty() {
+        let persisted = PersistedSettings {
+            backend: Backend::SdfTool,
+            tool_path: String::new(),
+            sdf_path: String::new(),
+            auto_detected: false,
+            language: Language::French,
+            theme: ThemeChoice::Dark,
+        };
+        let state = AppState::with_persisted(Some(&persisted));
+        assert_eq!(state.chrome.language, Language::French);
+        assert_eq!(state.chrome.theme, ThemeChoice::Dark);
+    }
+
+    #[test]
+    fn theme_choice_to_egui_mapping() {
+        assert_eq!(
+            ThemeChoice::System.to_egui(),
+            eframe::egui::ThemePreference::System
+        );
+        assert_eq!(
+            ThemeChoice::Dark.to_egui(),
+            eframe::egui::ThemePreference::Dark
+        );
+        assert_eq!(
+            ThemeChoice::Light.to_egui(),
+            eframe::egui::ThemePreference::Light
+        );
+    }
+
+    #[test]
+    fn persisted_settings_default_is_system_auto() {
+        let d = PersistedSettings::default();
+        assert_eq!(d.backend, Backend::SdfTool);
+        assert_eq!(d.language, Language::Auto);
+        assert_eq!(d.theme, ThemeChoice::System);
+        assert!(d.tool_path.is_empty());
     }
 }

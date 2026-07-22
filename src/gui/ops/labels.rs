@@ -1,5 +1,6 @@
 use super::super::state::AppState;
 use super::super::OperationMode;
+use super::firmware::firmware_picker_label;
 use crate::drive::Drive;
 use crate::firmware_db;
 use crate::i18n::{t, L10nKey};
@@ -58,9 +59,5 @@ pub fn firmware_basename(state: &AppState) -> String {
     if state.flash.firmware_path.is_empty() {
         return t(L10nKey::LabelNotAvailable, state.chrome.resolved_lang).to_string();
     }
-    std::path::Path::new(&state.flash.firmware_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(str::to_string)
-        .unwrap_or_else(|| state.flash.firmware_path.clone())
+    firmware_picker_label(&state.flash.firmware_path)
 }
