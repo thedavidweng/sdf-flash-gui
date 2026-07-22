@@ -2,8 +2,15 @@
 //!
 //! Non-UI module relative to views: returns reasons that ops maps through i18n.
 //! Single place for "may Start enable" so can_start and tooltips cannot drift.
+//!
+//! Plan-level rules (mt1959, mode conflict, confirmation, recover token,
+//! firmware path) are delegated to [`command::plan_command`] — the same deep
+//! module that `prepare_firmware_op` and the CLI use. The gate maps
+//! `PlanError` variants to `StartBlock` reasons. GUI-only pre-checks (busy,
+//! probing, cross-flash confirmation, path validation, firmware loaded) stay
+//! here because they are UI state, not plan rules.
 
-use crate::command::{self, Backend};
+use crate::command::{self, Backend, Operation, PlanError, PlanRequest};
 
 use super::validation::{validate_sdf_path, validate_tool_path};
 use crate::i18n::Language;
@@ -74,49 +81,64 @@ pub fn evaluate(input: &StartGateInput<'_>) -> Option<StartBlock> {
             is_mt1939: input.drive_mt1939,
         });
     }
-    // Path errors are already localized; GUI wraps via ReasonInvalid* keys.
     if let Err(e) = validate_tool_path(input.tool_path, input.backend, input.lang) {
         return Some(StartBlock::InvalidToolPath(e));
     }
     if let Err(e) = validate_sdf_path(input.sdf_path, input.lang) {
         return Some(StartBlock::InvalidSdfPath(e));
     }
+    if input.cross_flash_required && !input.cross_flash_confirmed {
+        return Some(StartBlock::CrossFlashNotConfirmed);
+    }
     match input.mode {
         StartMode::Read => None,
         StartMode::Write => {
-            if !input.has_firmware_data || input.firmware_path.is_empty() {
+            if !input.has_firmware_data {
                 return Some(StartBlock::NoFirmware);
             }
-            if command::write_modes_conflict(input.encrypted_write, input.include_boot_loader) {
-                return Some(StartBlock::WriteModeConflict);
-            }
-            if input.cross_flash_required && !input.cross_flash_confirmed {
-                return Some(StartBlock::CrossFlashNotConfirmed);
-            }
-            if !command::confirmation_matches(input.device, input.confirmation) {
-                return Some(StartBlock::NeedConfirmation);
-            }
-            None
+            plan_block(
+                input,
+                Operation::Write {
+                    firmware_path: input.firmware_path.to_string(),
+                    encrypted: input.encrypted_write,
+                    include_boot_loader: input.include_boot_loader,
+                },
+            )
         }
-        StartMode::Recover => {
-            if input.firmware_path.is_empty() {
-                return Some(StartBlock::NoFirmware);
-            }
-            // Match plan_command / extract_recovery_boot_token: 16 printable ASCII bytes.
-            if input.recovery_token.len() != 16
-                || !input
-                    .recovery_token
-                    .as_bytes()
-                    .iter()
-                    .all(u8::is_ascii_graphic)
-            {
-                return Some(StartBlock::NeedConfirmation);
-            }
-            if !command::confirmation_matches(input.device, input.confirmation) {
-                return Some(StartBlock::NeedConfirmation);
-            }
-            None
+        StartMode::Recover => plan_block(
+            input,
+            Operation::Recover {
+                firmware_path: input.firmware_path.to_string(),
+                recovery_boot_token: input.recovery_token.to_string(),
+            },
+        ),
+    }
+}
+
+fn plan_block(input: &StartGateInput<'_>, operation: Operation) -> Option<StartBlock> {
+    let request = PlanRequest {
+        backend: input.backend,
+        tool_path: input.tool_path.to_string(),
+        sdf_path: input.sdf_path.to_string(),
+        drive: input.device.to_string(),
+        drive_is_mt1959: input.drive_mt1959,
+        confirmation: input.confirmation.to_string(),
+        operation,
+    };
+    match command::plan_command(request) {
+        Ok(_) => None,
+        Err(PlanError::MissingFirmware) => Some(StartBlock::NoFirmware),
+        Err(PlanError::ConflictingWriteModes) => Some(StartBlock::WriteModeConflict),
+        Err(PlanError::ConfirmationMismatch { .. }) => Some(StartBlock::NeedConfirmation),
+        Err(PlanError::MissingRecoveryBootToken) | Err(PlanError::InvalidRecoveryBootToken) => {
+            Some(StartBlock::NeedConfirmation)
         }
+        Err(PlanError::UnsupportedPlatform) => Some(StartBlock::NotMt1959 {
+            is_mt1939: input.drive_mt1939,
+        }),
+        Err(PlanError::MissingDrive) => Some(StartBlock::NoDrive),
+        Err(PlanError::MissingToolPath) => Some(StartBlock::InvalidToolPath(String::new())),
+        Err(PlanError::MissingOutputDirectory) => None,
     }
 }
 

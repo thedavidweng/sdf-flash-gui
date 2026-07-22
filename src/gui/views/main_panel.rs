@@ -1,6 +1,6 @@
 use crate::branding::MAKEMKV_DOWNLOAD_URL;
 use crate::command;
-use crate::flash::FlashDirection;
+use crate::firmware_db::FlashDirection;
 use crate::gui::file_dialog::{FileDialog, NativeDialog};
 use crate::gui::ops;
 use crate::gui::state::{AppState, ThemeChoice};
@@ -802,9 +802,9 @@ fn show_safety_warnings(ui: &mut egui::Ui, state: &mut AppState, drive: &crate::
     }
 
     // Warning 3: Version downgrade (from known firmware database)
-    if let Some(id) = &state.flash.firmware_identification {
-        if let Some(known) = id.known {
-            let direction = crate::flash::compare_versions(&drive.revision, known.version);
+    if let Some(resolved) = &state.flash.firmware_resolved {
+        if let Some(known) = resolved.identification.known {
+            let direction = crate::firmware_db::compare_versions(&drive.revision, known.version);
             if direction == FlashDirection::Downgrade {
                 ui.add_space(GAP_TINY);
                 ui.colored_label(
@@ -820,10 +820,8 @@ fn show_safety_warnings(ui: &mut egui::Ui, state: &mut AppState, drive: &crate::
     }
 
     // Warning 4: Firmware-drive model match info (from binary analysis or known database)
-    if let Some(id) = &state.flash.firmware_identification {
-        let fw_model =
-            crate::firmware_db::resolve_model_with_sdf(id, state.flash.firmware_sdf_info.as_ref());
-        if let Some(fw_model) = &fw_model {
+    if let Some(resolved) = &state.flash.firmware_resolved {
+        if let Some(fw_model) = &resolved.model {
             if !drive.product.contains(fw_model.as_str()) && !fw_model.contains(&drive.product) {
                 ui.add_space(GAP_TINY);
                 ui.colored_label(
