@@ -389,6 +389,10 @@ pub enum L10nKey {
     InfoFirmwareModelMismatch,
     ReasonMt1939NotCompatible,
     LogTruncated,
+    StatusYes,
+    StatusNo,
+    DialogFilterFirmware,
+    DialogFilterExecutable,
 }
 
 pub fn t(key: L10nKey, lang: Language) -> &'static str {
@@ -665,6 +669,10 @@ mod tests {
         L10nKey::InfoFirmwareModelMismatch,
         L10nKey::ReasonMt1939NotCompatible,
         L10nKey::LogTruncated,
+        L10nKey::StatusYes,
+        L10nKey::StatusNo,
+        L10nKey::DialogFilterFirmware,
+        L10nKey::DialogFilterExecutable,
     ];
 
     #[test]
@@ -683,7 +691,7 @@ mod tests {
     fn test_translation_keys() {
         assert_eq!(
             ALL_KEYS.len(),
-            167,
+            171,
             "L10nKey variant count changed — update ALL_KEYS if intentional"
         );
         for key in ALL_KEYS {
@@ -693,6 +701,31 @@ mod tests {
                 "empty translation for key: {key:?}"
             );
         }
+    }
+
+    #[test]
+    fn english_warnings_have_no_emoji_prefixes() {
+        let keys = [
+            L10nKey::LabelStopWarningMsg,
+            L10nKey::LabelForceKillMsg,
+            L10nKey::LabelExitWarningMsg,
+            L10nKey::LabelFlashFailureMsg,
+            L10nKey::WarnCannotCombine,
+            L10nKey::WarnFirmwareLoadFailed,
+        ];
+        for key in keys {
+            let s = t(key, Language::English);
+            assert!(
+                !s.contains('\u{26A0}'),
+                "{key:?} still has warning emoji: {s}"
+            );
+        }
+        assert_eq!(t(L10nKey::StatusYes, Language::English), "Yes");
+        assert_eq!(t(L10nKey::StatusNo, Language::English), "No");
+        assert_eq!(
+            t(L10nKey::DialogFilterFirmware, Language::English),
+            "Firmware"
+        );
     }
 
     #[test]

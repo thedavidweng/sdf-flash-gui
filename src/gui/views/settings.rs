@@ -28,8 +28,8 @@ pub fn show_settings_window(
         egui::ViewportId::from_hash_of("settings_viewport"),
         egui::ViewportBuilder::default()
             .with_title(t(L10nKey::TitleSettings, state.chrome.resolved_lang))
-            .with_inner_size([480.0, 320.0])
-            .with_min_inner_size([480.0, 320.0])
+            .with_inner_size([400.0, 320.0])
+            .with_min_inner_size([320.0, 240.0])
             .with_resizable(true),
         |ctx, _class| {
             let close_shortcut =
@@ -71,7 +71,7 @@ pub fn show_settings_window(
                                 if file_picker(
                                     ui,
                                     &mut state.config.tool_path,
-                                    "Executable",
+                                    t(L10nKey::DialogFilterExecutable, state.chrome.resolved_lang),
                                     &[],
                                     state.chrome.resolved_lang,
                                     dialog,
@@ -127,7 +127,7 @@ pub fn show_settings_window(
                                 state.config.backend,
                                 state.chrome.resolved_lang,
                             ) {
-                                ui.colored_label(error_color, format!("⚠ {e}"));
+                                ui.colored_label(error_color, &e);
                             } else {
                                 ui.colored_label(
                                     valid_color,
@@ -172,7 +172,7 @@ pub fn show_settings_window(
                                 &state.config.sdf_path,
                                 state.chrome.resolved_lang,
                             ) {
-                                ui.colored_label(error_color, format!("⚠ {e}"));
+                                ui.colored_label(error_color, &e);
                             } else if !state.config.sdf_path.is_empty() {
                                 ui.colored_label(
                                     valid_color,

@@ -33,7 +33,7 @@ mod tests {
     use super::lifecycle::begin_app_shutdown;
     use super::nudge::{
         half_sine_bell, NUDGE_PULSE1_DUR, NUDGE_PULSE1_START, NUDGE_PULSE2_DUR, NUDGE_PULSE2_GAIN,
-        NUDGE_PULSE2_START,
+        NUDGE_PULSE2_START, NUDGE_REDUCED_MOTION_STRENGTH,
     };
     use super::start::cross_flash_confirmation_required;
     use super::*;
@@ -163,11 +163,11 @@ mod tests {
     fn settings_nudge_highlight_two_soft_pulses_with_decay() {
         let start = 100.0;
         let until = start + SETTINGS_NUDGE_SECONDS;
-        assert_eq!(settings_nudge_highlight(None, start), 0.0);
+        assert_eq!(settings_nudge_highlight(None, start, false), 0.0);
 
         // Mid first pulse ≈ peak (half-sine at u=0.5 → 1.0)
         let p1_mid = start + f64::from(NUDGE_PULSE1_START + NUDGE_PULSE1_DUR * 0.5);
-        let h1 = settings_nudge_highlight(Some(until), p1_mid);
+        let h1 = settings_nudge_highlight(Some(until), p1_mid, false);
         assert!(
             (h1 - 1.0).abs() < 0.02,
             "first peak expected ~1.0, got {h1}"
@@ -177,12 +177,12 @@ mod tests {
         let gap_mid = start
             + f64::from(NUDGE_PULSE1_START + NUDGE_PULSE1_DUR)
             + f64::from(NUDGE_PULSE2_START - (NUDGE_PULSE1_START + NUDGE_PULSE1_DUR)) * 0.5;
-        let h_gap = settings_nudge_highlight(Some(until), gap_mid);
+        let h_gap = settings_nudge_highlight(Some(until), gap_mid, false);
         assert!(h_gap < 0.05, "gap should be near 0, got {h_gap}");
 
         // Mid second pulse ≈ gain (weaker)
         let p2_mid = start + f64::from(NUDGE_PULSE2_START + NUDGE_PULSE2_DUR * 0.5);
-        let h2 = settings_nudge_highlight(Some(until), p2_mid);
+        let h2 = settings_nudge_highlight(Some(until), p2_mid, false);
         assert!(
             (h2 - NUDGE_PULSE2_GAIN).abs() < 0.05,
             "second peak expected ~{}, got {h2}",
@@ -190,8 +190,21 @@ mod tests {
         );
         assert!(h2 < h1, "second pulse should be softer than first");
 
-        assert_eq!(settings_nudge_highlight(Some(until), until), 0.0);
-        assert_eq!(settings_nudge_highlight(Some(until), until + 1.0), 0.0);
+        assert_eq!(settings_nudge_highlight(Some(until), until, false), 0.0);
+        assert_eq!(
+            settings_nudge_highlight(Some(until), until + 1.0, false),
+            0.0
+        );
+    }
+
+    #[test]
+    fn settings_nudge_highlight_reduced_motion_is_steady() {
+        let start = 50.0;
+        let until = start + SETTINGS_NUDGE_SECONDS;
+        let mid = start + SETTINGS_NUDGE_SECONDS * 0.5;
+        let h = settings_nudge_highlight(Some(until), mid, true);
+        assert!((h - NUDGE_REDUCED_MOTION_STRENGTH).abs() < 1e-5);
+        assert_eq!(settings_nudge_highlight(Some(until), until, true), 0.0);
     }
 
     #[test]
@@ -213,7 +226,15 @@ mod tests {
         let until = 200.0;
         let before_start = until - SETTINGS_NUDGE_SECONDS - 0.05;
         assert!(before_start < until);
-        assert_eq!(settings_nudge_highlight(Some(until), before_start), 0.0);
+        assert_eq!(
+            settings_nudge_highlight(Some(until), before_start, false),
+            0.0
+        );
+        // Reduced-motion still holds strength only inside the window.
+        assert_eq!(
+            settings_nudge_highlight(Some(until), before_start, true),
+            0.0
+        );
     }
 
     #[test]
