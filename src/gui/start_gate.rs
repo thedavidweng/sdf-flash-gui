@@ -290,4 +290,91 @@ mod tests {
             );
         });
     }
+
+    // --- plan_block defensive branch tests ---
+    // These exercise the PlanError → StartBlock mapping in plan_block directly,
+    // bypassing evaluate's pre-checks so the defensive branches are covered.
+
+    #[test]
+    fn plan_block_unsupported_platform_maps_to_not_mt1959() {
+        with_tool(|tool| {
+            let mut i = base(tool);
+            i.drive_mt1959 = false;
+            i.drive_mt1939 = true;
+            i.mode = StartMode::Write;
+            i.has_firmware_data = true;
+            i.firmware_path = "fw.bin";
+            i.confirmation = "FLASH /dev/sr0";
+            assert_eq!(
+                plan_block(
+                    &i,
+                    Operation::Write {
+                        firmware_path: "fw.bin".into(),
+                        encrypted: false,
+                        include_boot_loader: false,
+                    }
+                ),
+                Some(StartBlock::NotMt1959 { is_mt1939: true })
+            );
+        });
+    }
+
+    #[test]
+    fn plan_block_missing_drive_maps_to_no_drive() {
+        with_tool(|tool| {
+            let i = StartGateInput {
+                device: "",
+                ..base(tool)
+            };
+            assert_eq!(
+                plan_block(
+                    &i,
+                    Operation::Write {
+                        firmware_path: "fw.bin".into(),
+                        encrypted: false,
+                        include_boot_loader: false,
+                    }
+                ),
+                Some(StartBlock::NoDrive)
+            );
+        });
+    }
+
+    #[test]
+    fn plan_block_missing_tool_path_maps_to_invalid_tool_path() {
+        let i = StartGateInput {
+            tool_path: "",
+            device: "/dev/sr0",
+            drive_mt1959: true,
+            confirmation: "FLASH /dev/sr0",
+            ..base("")
+        };
+        assert_eq!(
+            plan_block(
+                &i,
+                Operation::Write {
+                    firmware_path: "fw.bin".into(),
+                    encrypted: false,
+                    include_boot_loader: false,
+                }
+            ),
+            Some(StartBlock::InvalidToolPath(String::new()))
+        );
+    }
+
+    #[test]
+    fn plan_block_missing_output_directory_maps_to_none() {
+        with_tool(|tool| {
+            let i = base(tool);
+            assert_eq!(
+                plan_block(
+                    &i,
+                    Operation::Read {
+                        output_dir: String::new()
+                    }
+                ),
+                None
+            );
+        });
+    }
 }

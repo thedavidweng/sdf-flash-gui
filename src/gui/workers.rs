@@ -1231,13 +1231,10 @@ mod tests {
         drop(tx);
         // Should have: Status, Log (> command), Log (output), ProbeComplete
         assert!(messages.len() >= 3);
-        let probe = messages.last().unwrap();
+        let probe = expect_probe_complete_ok(&messages);
         assert!(
-            matches!(
-                probe,
-                WorkerMsg::Done(WorkerResult::ProbeComplete { error: None, .. })
-            ),
-            "expected ProbeComplete ok, got {probe:?}"
+            probe.is_none(),
+            "expected ProbeComplete ok, got {messages:?}"
         );
     }
 
@@ -1251,13 +1248,11 @@ mod tests {
         spawn_probe(&tx, &mut state, 0, &runner);
         let messages = wait_for_probe_complete(&rx);
         drop(tx);
-        let probe = messages.last().unwrap();
+        let error = expect_probe_complete_failed(&messages);
+        let error = error.expect("expected ProbeComplete with error");
         assert!(
-            matches!(
-                probe,
-                WorkerMsg::Done(WorkerResult::ProbeComplete { error: Some(e), .. }) if e.contains("mock command failed")
-            ),
-            "expected ProbeComplete with mock failure, got {probe:?}"
+            error.contains("mock command failed"),
+            "expected mock failure, got {error}"
         );
     }
 
@@ -1281,14 +1276,9 @@ mod tests {
         drop(tx);
         // Should have: Status, Log (> command), Log (line1), Log (line2), OperationComplete
         assert!(messages.len() >= 4);
-        let last = messages.last().unwrap();
-        assert!(
-            matches!(
-                last,
-                WorkerMsg::Done(WorkerResult::OperationComplete { success: true, .. })
-            ),
-            "expected OperationComplete success, got {last:?}"
-        );
+        let success = expect_operation_success(&messages);
+        let success = success.expect("expected OperationComplete message");
+        assert!(success, "expected OperationComplete success");
     }
 
     #[test]
@@ -1309,14 +1299,9 @@ mod tests {
         );
         let messages = wait_for_operation_complete(&rx);
         drop(tx);
-        let last = messages.last().unwrap();
-        assert!(
-            matches!(
-                last,
-                WorkerMsg::Done(WorkerResult::OperationComplete { success: false, .. })
-            ),
-            "expected OperationComplete failure, got {last:?}"
-        );
+        let success = expect_operation_success(&messages);
+        let success = success.expect("expected OperationComplete message");
+        assert!(!success, "expected OperationComplete failure");
     }
 
     #[test]
@@ -1347,6 +1332,27 @@ mod tests {
                 _ => None,
             })
             .expect("DrivesListed message missing")
+    }
+
+    fn expect_probe_complete_ok(messages: &[WorkerMsg]) -> Option<&String> {
+        messages.iter().find_map(|m| match m {
+            WorkerMsg::Done(WorkerResult::ProbeComplete { error, .. }) => error.as_ref(),
+            _ => None,
+        })
+    }
+
+    fn expect_probe_complete_failed(messages: &[WorkerMsg]) -> Option<String> {
+        messages.iter().find_map(|m| match m {
+            WorkerMsg::Done(WorkerResult::ProbeComplete { error: Some(e), .. }) => Some(e.clone()),
+            _ => None,
+        })
+    }
+
+    fn expect_operation_success(messages: &[WorkerMsg]) -> Option<bool> {
+        messages.iter().find_map(|m| match m {
+            WorkerMsg::Done(WorkerResult::OperationComplete { success, .. }) => Some(*success),
+            _ => None,
+        })
     }
 
     #[test]
