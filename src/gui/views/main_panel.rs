@@ -14,8 +14,8 @@ use egui_phosphor::regular as icon;
 use std::sync::mpsc;
 
 use super::super::{
-    button_text_size, icon_button, icon_rich, section_heading, OperationMode, GAP_MEDIUM,
-    GAP_SMALL, GAP_TINY,
+    button_text_size, combo_label_text, icon_button, icon_rich, section_heading, OperationMode,
+    GAP_MEDIUM, GAP_SMALL, GAP_TINY,
 };
 
 pub fn show_main_ui(
@@ -156,48 +156,55 @@ pub fn show_main_ui(
         if state.runtime.busy || state.runtime.probing {
             ui.spinner();
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let lang = state.chrome.resolved_lang;
-            let current = state.chrome.theme;
-            for (choice, glyph, key, pref) in [
-                (
-                    ThemeChoice::Light,
-                    icon::SUN,
-                    L10nKey::ThemeLight,
-                    egui::ThemePreference::Light,
-                ),
-                (
-                    ThemeChoice::Dark,
-                    icon::MOON,
-                    L10nKey::ThemeDark,
-                    egui::ThemePreference::Dark,
-                ),
-                (
-                    ThemeChoice::System,
-                    icon::DESKTOP,
-                    L10nKey::ThemeSystem,
-                    egui::ThemePreference::System,
-                ),
-            ] {
-                let label = t(key, lang);
-                let resp = ui.selectable_label(
-                    current == choice,
-                    icon_rich(ui, glyph, label, egui::TextStyle::Body),
-                );
-                resp.widget_info(|| {
-                    egui::WidgetInfo::selected(
-                        egui::WidgetType::SelectableLabel,
-                        true,
-                        current == choice,
-                        label,
-                    )
-                });
-                if resp.clicked() {
-                    state.chrome.theme = choice;
-                    ctx.set_theme(pref);
+        let theme_width = ui.available_width();
+        ui.allocate_ui_with_layout(
+            egui::vec2(theme_width, ui.available_height()),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                let lang = state.chrome.resolved_lang;
+                let current = state.chrome.theme;
+                for (choice, glyph, key, pref) in [
+                    (
+                        ThemeChoice::Light,
+                        icon::SUN,
+                        L10nKey::ThemeLight,
+                        egui::ThemePreference::Light,
+                    ),
+                    (
+                        ThemeChoice::Dark,
+                        icon::MOON,
+                        L10nKey::ThemeDark,
+                        egui::ThemePreference::Dark,
+                    ),
+                    (
+                        ThemeChoice::System,
+                        icon::DESKTOP,
+                        L10nKey::ThemeSystem,
+                        egui::ThemePreference::System,
+                    ),
+                ] {
+                    let label = t(key, lang);
+                    let resp = ui
+                        .selectable_label(
+                            current == choice,
+                            egui::RichText::new(glyph).size(button_text_size(ui)),
+                        )
+                        .on_hover_text(label);
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::SelectableLabel,
+                            true,
+                            current == choice,
+                            label,
+                        )
+                    });
+                    if resp.clicked() {
+                        state.chrome.theme = choice;
+                        ctx.set_theme(pref);
+                    }
                 }
-            }
-        });
+            },
+        );
     });
 
     if !backend_ok {
@@ -237,17 +244,18 @@ pub fn show_main_ui(
             .map(ops::drive_label)
             .unwrap_or_else(|| no_drives_msg.to_string());
         let combo_resp = egui::ComboBox::from_id_salt("drive_selector")
-            .selected_text(&selected_label)
+            .selected_text(combo_label_text(ui, &selected_label))
             .width(ui.available_width())
             .show_ui(ui, |ui| {
                 if state.drive.drives.is_empty() {
-                    ui.label(no_drives_msg);
+                    ui.label(combo_label_text(ui, no_drives_msg));
                 } else {
                     for (i, drive) in state.drive.drives.iter().enumerate() {
+                        let label = ops::drive_label(drive);
                         ui.selectable_value(
                             &mut state.drive.selected_drive,
                             Some(i),
-                            ops::drive_label(drive),
+                            combo_label_text(ui, &label),
                         );
                     }
                 }
@@ -471,18 +479,14 @@ pub fn show_main_ui(
             );
         }
     } else {
-        ui.label(
-            egui::RichText::new(t(L10nKey::StatusReadyText, state.chrome.resolved_lang)).strong(),
+        ui.add(
+            egui::ProgressBar::new(0.0)
+                .fill(egui::Color32::TRANSPARENT)
+                .text(t(L10nKey::StatusReadyText, state.chrome.resolved_lang)),
         );
     }
 
     ui.add_space(GAP_SMALL);
-    let start_enabled = ops::can_start(state);
-    let disabled_reason = if !state.runtime.busy && !start_enabled {
-        ops::start_disabled_reason(state)
-    } else {
-        String::new()
-    };
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if state.runtime.busy {
@@ -498,6 +502,7 @@ pub fn show_main_ui(
                     ops::request_stop(state);
                 }
             } else {
+                let start_enabled = ops::can_start(state);
                 let start_label = t(L10nKey::BtnStart, state.chrome.resolved_lang);
                 let start_text = t(L10nKey::TooltipStartEnabled, state.chrome.resolved_lang);
                 let start_hint = if cfg!(target_os = "macos") {
@@ -506,7 +511,7 @@ pub fn show_main_ui(
                     format!("{start_text} (Enter / Ctrl+Enter)")
                 };
                 let hover = if !start_enabled {
-                    disabled_reason.clone()
+                    ops::start_disabled_reason(state)
                 } else {
                     start_hint
                 };
@@ -514,8 +519,7 @@ pub fn show_main_ui(
                 ui.add_enabled_ui(start_enabled, |ui| {
                     let resp = ui
                         .add(icon_button(ui, icon::PLAY, start_label))
-                        .on_disabled_hover_text(&hover)
-                        .on_hover_text(&hover);
+                        .on_disabled_hover_text(&hover);
                     resp.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
@@ -530,15 +534,8 @@ pub fn show_main_ui(
             }
         });
     });
-    if !disabled_reason.is_empty() {
-        ui.label(
-            egui::RichText::new(&disabled_reason)
-                .small()
-                .color(ui.visuals().weak_text_color()),
-        );
-    }
 
-    ui.add_space(GAP_TINY);
+    ui.add_space(GAP_MEDIUM);
     let log_height = ui.available_height() - 20.0;
     let log_height = log_height.max(40.0);
     show_log_panel(ui, state, log_height);
@@ -602,29 +599,52 @@ fn show_log_panel(ui: &mut egui::Ui, state: &AppState, log_height: f32) {
         .map(|f| f.size)
         .unwrap_or(12.0);
     let row_height = mono_size + 2.0;
+    let frame_pad = 6.0_f32;
+    let inner_height = (log_height - frame_pad * 2.0).max(row_height);
 
-    if state.runtime.log_text.is_empty() {
+    let fill = ui.visuals().widgets.inactive.weak_bg_fill;
+    let frame = egui::Frame::new()
+        .fill(fill)
+        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+        .corner_radius(ui.visuals().widgets.noninteractive.corner_radius)
+        .inner_margin(egui::Margin::same(frame_pad as i8));
+
+    frame.show(ui, |ui| {
+        let text_color = ui.visuals().widgets.inactive.text_color();
+        if state.runtime.log_text.is_empty() {
+            egui::ScrollArea::vertical()
+                .stick_to_bottom(true)
+                .max_height(inner_height)
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.set_min_height(inner_height);
+                    ui.label(
+                        egui::RichText::new(t(L10nKey::LogReady, state.chrome.resolved_lang))
+                            .monospace()
+                            .size(mono_size)
+                            .color(text_color),
+                    );
+                });
+            return;
+        }
+
+        let lines: Vec<&str> = state.runtime.log_text.lines().collect();
+        let num_rows = lines.len();
         egui::ScrollArea::vertical()
             .stick_to_bottom(true)
-            .max_height(log_height)
-            .show(ui, |ui| {
+            .max_height(inner_height)
+            .show_rows(ui, row_height, num_rows, |ui, row_range| {
                 ui.set_min_width(ui.available_width());
-                ui.weak(t(L10nKey::LogReady, state.chrome.resolved_lang));
+                for row in row_range {
+                    ui.label(
+                        egui::RichText::new(lines[row])
+                            .monospace()
+                            .size(mono_size)
+                            .color(text_color),
+                    );
+                }
             });
-        return;
-    }
-
-    let lines: Vec<&str> = state.runtime.log_text.lines().collect();
-    let num_rows = lines.len();
-    egui::ScrollArea::vertical()
-        .stick_to_bottom(true)
-        .max_height(log_height)
-        .show_rows(ui, row_height, num_rows, |ui, row_range| {
-            ui.set_min_width(ui.available_width());
-            for row in row_range {
-                ui.label(egui::RichText::new(lines[row]).monospace().size(mono_size));
-            }
-        });
+    });
 }
 
 fn show_firmware_selector(ui: &mut egui::Ui, state: &mut AppState, dialog: &impl FileDialog) {

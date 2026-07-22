@@ -25,23 +25,22 @@ use views::{
 };
 use workers::{spawn_list_drives, spawn_probe, WorkerMsg};
 
-const WINDOW_WIDTH: f32 = 380.0;
-const WINDOW_HEIGHT: f32 = 640.0;
-/// Allow shrinking for small displays / large OS scale (default size stays 380×640).
-const WINDOW_MIN_WIDTH: f32 = 320.0;
-const WINDOW_MIN_HEIGHT: f32 = 480.0;
-/// Minimum interactive size for icon-only toolbar controls (logical points).
-const TOOLBAR_HIT_MIN: f32 = 28.0;
+const WINDOW_WIDTH: f32 = 480.0;
+const WINDOW_HEIGHT: f32 = 720.0;
+const WINDOW_MIN_WIDTH: f32 = 400.0;
+const WINDOW_MIN_HEIGHT: f32 = 620.0;
 
 pub(crate) const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // ── Spacing constants ──────────────────────────────────────────────
 /// Between tightly coupled elements (label ↔ input, checkbox ↔ checkbox).
-pub(crate) const GAP_TINY: f32 = 2.0;
+pub(crate) const GAP_TINY: f32 = 3.0;
 /// Between related elements (input ↔ hint, button ↔ button).
-pub(crate) const GAP_SMALL: f32 = 4.0;
+pub(crate) const GAP_SMALL: f32 = 6.0;
 /// Between loosely related groups inside the same section.
-pub(crate) const GAP_MEDIUM: f32 = 8.0;
+pub(crate) const GAP_MEDIUM: f32 = 12.0;
+/// Outer padding of the main panel (egui `Margin` uses i8).
+pub(crate) const PANEL_MARGIN: i8 = 10;
 
 pub(crate) fn button_text_size(ui: &egui::Ui) -> f32 {
     ui.style()
@@ -51,9 +50,16 @@ pub(crate) fn button_text_size(ui: &egui::Ui) -> f32 {
         .unwrap_or(14.0)
 }
 
+pub(crate) fn body_text_size(ui: &egui::Ui) -> f32 {
+    ui.style()
+        .text_styles
+        .get(&egui::TextStyle::Body)
+        .map(|font| font.size)
+        .unwrap_or(14.0)
+}
+
 pub(crate) fn toolbar_icon_button(ui: &egui::Ui, glyph: &'static str) -> egui::Button<'static> {
     egui::Button::new(egui::RichText::new(glyph).size(button_text_size(ui)))
-        .min_size(egui::vec2(TOOLBAR_HIT_MIN, TOOLBAR_HIT_MIN))
 }
 
 pub(crate) fn icon_button(
@@ -77,6 +83,10 @@ pub(crate) fn icon_rich(
         .map(|font| font.size)
         .unwrap_or(14.0);
     egui::RichText::new(format!("{glyph}  {text}")).size(size)
+}
+
+pub(crate) fn combo_label_text(ui: &egui::Ui, text: &str) -> egui::RichText {
+    egui::RichText::new(text).size(body_text_size(ui))
 }
 
 pub(crate) fn section_heading(ui: &mut egui::Ui, glyph: &'static str, text: &str) {
@@ -106,6 +116,37 @@ pub(crate) fn window_icon() -> std::sync::Arc<egui::IconData> {
     .clone()
 }
 
+fn apply_app_text_styles(ctx: &egui::Context) {
+    use egui::{FontFamily, FontId, TextStyle};
+    use std::collections::BTreeMap;
+
+    let text_styles: BTreeMap<TextStyle, FontId> = [
+        (
+            TextStyle::Small,
+            FontId::new(10.0, FontFamily::Proportional),
+        ),
+        (TextStyle::Body, FontId::new(14.0, FontFamily::Proportional)),
+        (
+            TextStyle::Button,
+            FontId::new(14.0, FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Heading,
+            FontId::new(19.0, FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Monospace,
+            FontId::new(13.0, FontFamily::Monospace),
+        ),
+    ]
+    .into();
+    ctx.all_styles_mut(move |style| {
+        style.text_styles = text_styles.clone();
+        style.spacing.item_spacing = egui::vec2(6.0, 4.0);
+        style.spacing.button_padding = egui::vec2(6.0, 3.0);
+    });
+}
+
 pub fn run() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -122,6 +163,7 @@ pub fn run() -> Result<(), eframe::Error> {
             let mut fonts = egui::FontDefinitions::default();
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             cc.egui_ctx.set_fonts(fonts);
+            apply_app_text_styles(&cc.egui_ctx);
 
             let persisted = cc
                 .storage
@@ -214,7 +256,7 @@ impl eframe::App for App {
             || self.state.runtime.stop_dialog != StopDialog::None;
 
         let panel_frame =
-            egui::Frame::central_panel(ui.style()).inner_margin(egui::Margin::same(6));
+            egui::Frame::central_panel(ui.style()).inner_margin(egui::Margin::same(PANEL_MARGIN));
         egui::CentralPanel::default()
             .frame(panel_frame)
             .show_inside(ui, |ui| {
@@ -271,6 +313,38 @@ mod tests {
             icon.rgba.len(),
             (icon.width as usize) * (icon.height as usize) * 4
         );
+    }
+
+    #[test]
+    fn default_window_is_larger_than_minimum() {
+        assert!(super::WINDOW_WIDTH > super::WINDOW_MIN_WIDTH);
+        assert!(super::WINDOW_HEIGHT > super::WINDOW_MIN_HEIGHT);
+        assert!(super::WINDOW_WIDTH >= 480.0);
+        assert!(super::WINDOW_HEIGHT >= 720.0);
+    }
+
+    #[test]
+    fn apply_app_text_styles_raises_body_above_egui_default() {
+        let ctx = eframe::egui::Context::default();
+        super::apply_app_text_styles(&ctx);
+        let body = ctx
+            .global_style()
+            .text_styles
+            .get(&eframe::egui::TextStyle::Body)
+            .map(|f| f.size);
+        let button = ctx
+            .global_style()
+            .text_styles
+            .get(&eframe::egui::TextStyle::Button)
+            .map(|f| f.size);
+        let heading = ctx
+            .global_style()
+            .text_styles
+            .get(&eframe::egui::TextStyle::Heading)
+            .map(|f| f.size);
+        assert_eq!(body, Some(14.0));
+        assert_eq!(button, Some(14.0));
+        assert_eq!(heading, Some(19.0));
     }
 
     #[test]

@@ -170,7 +170,7 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::LabelNotAvailable => "N/A",
         L10nKey::BannerNoBackend => "No backend tool configured.",
         L10nKey::LinkGetMakeMkv => "Get MakeMKV",
-        L10nKey::OptionDryRunOnly => "Dry-run only (validate and show command, do not write)",
+        L10nKey::OptionDryRunOnly => "Dry-run only (no write)",
         L10nKey::LogDryRunCommand => "Dry-run — command that would run:\n{command}",
         L10nKey::HintFlashNoCancel => "Flash in progress — do not power off. Stop may brick the drive.",
         L10nKey::HelpEmptyDrives => {
