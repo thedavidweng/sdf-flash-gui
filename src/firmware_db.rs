@@ -264,16 +264,12 @@ pub const ENCRYPTED_FIRMWARE_YEAR_THRESHOLD: u32 = 2120;
 /// cheap (single pass, no allocation) and only matches 10–12 digit ASCII
 /// sequences that parse as valid dates.
 pub fn extract_firmware_date_from_binary(data: &[u8]) -> Option<u32> {
-    // Date stamps are 10–12 ASCII digits starting with 20xx or 21xx.
-    // We scan for the first sequence of 10+ consecutive ASCII digits and
-    // validate it as a plausible date (year 2000–2199, month 1–12, day 1–31).
     let mut i = 0;
     while i < data.len() {
         if !data[i].is_ascii_digit() {
             i += 1;
             continue;
         }
-        // Collect the run of ASCII digits starting at i.
         let start = i;
         while i < data.len() && data[i].is_ascii_digit() {
             i += 1;
@@ -282,23 +278,17 @@ pub fn extract_firmware_date_from_binary(data: &[u8]) -> Option<u32> {
         if !(10..=12).contains(&run_len) {
             continue;
         }
-        if let Ok(s) = std::str::from_utf8(&data[start..i]) {
-            if let Some(year_prefix) = parse_date_prefix(s) {
-                return Some(year_prefix);
-            }
+        let s = std::str::from_utf8(&data[start..i]).expect("ascii digits are valid utf-8");
+        if let Some(year_prefix) = parse_date_prefix(s) {
+            return Some(year_prefix);
         }
     }
     None
 }
 
-/// Validate a digit string as a firmware date and return the 4-digit year
-/// prefix (`2120` for `212005070917`). Returns `None` if the string does not
-/// look like a valid `YYMMDDHHMM(SS)` stamp.
+/// Validate a 10–12 digit string as a firmware date and return the 4-digit
+/// year prefix. The caller guarantees the input is 10–12 ASCII digits.
 fn parse_date_prefix(s: &str) -> Option<u32> {
-    let bytes = s.as_bytes();
-    if bytes.len() < 10 || !bytes.iter().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
     let year = parse_u32(&s[0..4])?;
     let month = parse_u32(&s[4..6])?;
     let day = parse_u32(&s[6..8])?;
