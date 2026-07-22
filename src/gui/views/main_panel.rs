@@ -513,9 +513,12 @@ pub fn show_main_ui(
                 };
 
                 ui.add_enabled_ui(start_enabled, |ui| {
-                    let resp = ui
-                        .add(icon_button(ui, icon::PLAY, start_label))
-                        .on_disabled_hover_text(&hover);
+                    let resp = ui.add(icon_button(ui, icon::PLAY, start_label));
+                    let resp = if start_enabled {
+                        resp.on_hover_text(&hover)
+                    } else {
+                        resp.on_disabled_hover_text(&hover)
+                    };
                     resp.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
