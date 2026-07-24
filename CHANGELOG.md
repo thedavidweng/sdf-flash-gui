@@ -4,18 +4,31 @@ All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 ## [Unreleased]
 
+### <!-- 0 -->🚀 Features
+
+- Persist settings and quiet empty-drive idle UI
+
 ### <!-- 1 -->🐛 Bug Fixes
 
 - Detect firmware encryption from binary content + ADRs 0001/0002 (#23)
 - Cover plan_block defensive branches and test assertion patterns
+- **ui:** Harden accessibility, theming, and empty-state density
+- **ui:** Refine density, log panel, and settings window sizing
+- **ui:** Show Start shortcut tooltip when the button is enabled
 
 ### <!-- 2 -->🚜 Refactor
 
 - Deepen firmware_db, start_gate, and WorkerMsg interfaces
 
+### <!-- 6 -->🧪 Testing
+
+- Hit remaining patch lines for 100% codecov
+- Cover quiet list-drives match skip arm for patch gate
+
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
 - **changelog:** Sync CHANGELOG.md for v0.4.0
+- **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 ## [0.4.0] - 2026-07-10
 
