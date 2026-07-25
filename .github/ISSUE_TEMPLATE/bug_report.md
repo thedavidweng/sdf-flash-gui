@@ -1,7 +1,7 @@
 ---
 name: Bug Report
 about: Report a problem
-labels: bug
+labels: needs-triage
 ---
 
 **Platform:** macOS / Linux / Windows (version)
