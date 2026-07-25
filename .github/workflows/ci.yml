@@ -47,8 +47,27 @@ jobs:
           count=$(awk '/^#\[cfg\(test\)\]/{exit} {print}' src/sdf.rs | grep -cF '.unwrap(' || true)
           test "$count" -eq 0
 
+  comment-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: No explanatory comments on added lines (ADR 0002)
+        shell: bash
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || github.event.before || '' }}"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            BASE="origin/main"
+          fi
+          if ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            BASE="origin/main"
+          fi
+          python3 scripts/comment-gate.py --base "$BASE"
+
   test:
-    needs: [fmt, clippy, sdf-parser-policy]
+    needs: [fmt, clippy, sdf-parser-policy, comment-policy]
     strategy:
       fail-fast: false
       matrix:

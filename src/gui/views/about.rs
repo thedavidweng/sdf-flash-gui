@@ -16,12 +16,7 @@ pub fn show_about_window(ctx: &egui::Context, state: &mut AppState) {
             .with_min_inner_size([320.0, 180.0])
             .with_resizable(true),
         |ctx, _class| {
-            let close_shortcut =
-                egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::W);
-            let should_close = ctx
-                .input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape))
-                || ctx.input_mut(|i| i.consume_shortcut(&close_shortcut));
-            if should_close {
+            if super::viewport_close_requested(ctx) {
                 state.chrome.show_about = false;
             }
             egui::CentralPanel::default().show(ctx, |ui| {

@@ -6,8 +6,8 @@ SDF Flash GUI writes firmware to optical drives. A failed or misdirected flash c
 
 | Version | Supported |
 | ------- | --------- |
-| 0.2.x   | Yes       |
-| < 0.2   | No        |
+| 0.4.x   | Yes       |
+| < 0.4   | No        |
 
 ## Reporting a Vulnerability
 

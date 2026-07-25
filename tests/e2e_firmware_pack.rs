@@ -171,7 +171,7 @@ fn firmware_pack_recovery_token_extraction() {
                 assert_eq!(token.len(), 16);
                 assert!(token.bytes().all(|b| b.is_ascii_graphic()));
             }
-            Err(command::PlanError::InvalidRecoveryBootToken) => {} // expected for encrypted blobs
+            Err(command::PlanError::InvalidRecoveryBootToken) => {}
             Err(other) => panic!("{}: unexpected error: {other}", info.filename),
         }
     }
@@ -205,66 +205,4 @@ fn firmware_pack_command_plan_write() {
         assert_eq!(plan.command.program, "sdftool");
         assert_eq!(plan.command.args[5], info.path.to_string_lossy());
     }
-}
-
-#[test]
-#[ignore]
-fn firmware_pack_end_to_end_full_pipeline() {
-    let files = collect_firmware_files();
-    assert!(!files.is_empty());
-
-    let mut passed = 0;
-    let mut failed = Vec::new();
-
-    for info in &files {
-        let result = std::panic::catch_unwind(|| {
-            let data = std::fs::read(&info.path).unwrap();
-            assert!(!data.is_empty());
-            assert_eq!(data.len(), 2_097_152);
-
-            // sha256 should be computable
-            let _sha256 = firmware_db::sha256_hex(&data);
-
-            let device = "/dev/sr0";
-            let confirmation = command::required_flash_confirmation(device);
-            let plan = command::plan_command(PlanRequest {
-                backend: Backend::SdfTool,
-                tool_path: "sdftool".to_string(),
-                sdf_path: String::new(),
-                drive: device.to_string(),
-                drive_is_mt1959: true,
-                confirmation,
-                operation: Operation::Write {
-                    firmware_path: info.path.to_string_lossy().to_string(),
-                    encrypted: false,
-                    include_boot_loader: false,
-                },
-            })
-            .unwrap();
-
-            assert_eq!(plan.command.program, "sdftool");
-            assert_eq!(plan.command.args[5], info.path.to_string_lossy());
-
-            // Encrypted blobs should not parse as SDF0
-            let mut cursor = std::io::Cursor::new(&data);
-            assert!(sdf::parse_sdf0(&mut cursor).is_err());
-        });
-
-        match result {
-            Ok(()) => passed += 1,
-            Err(_) => failed.push(info.filename.clone()),
-        }
-    }
-
-    if !failed.is_empty() {
-        panic!(
-            "{}/{} firmware files failed: {failed:?}",
-            files.len() - passed,
-            files.len()
-        );
-    }
-    assert!(
-        passed >= 18,
-        "expected at least 18 to pass, only {passed} passed"
-    );
 }

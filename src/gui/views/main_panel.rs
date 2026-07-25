@@ -51,11 +51,7 @@ pub fn show_main_ui(
 
     ui.horizontal(|ui| {
         let refresh_text = t(L10nKey::TooltipRefresh, state.chrome.resolved_lang);
-        let mut refresh_hint = if cfg!(target_os = "macos") {
-            format!("{refresh_text} (⌘R)")
-        } else {
-            format!("{refresh_text} (Ctrl+R)")
-        };
+        let mut refresh_hint = shortcut_hint(refresh_text, "⌘R", "Ctrl+R");
         if state.drive.drives.is_empty() {
             refresh_hint = format!(
                 "{refresh_hint}\n{}",
@@ -77,11 +73,7 @@ pub fn show_main_ui(
             spawn_list_drives(worker_tx, state, runner, true);
         }
         let settings_text = t(L10nKey::TooltipSettings, state.chrome.resolved_lang);
-        let settings_hint = if cfg!(target_os = "macos") {
-            format!("{settings_text} (⌘,)")
-        } else {
-            format!("{settings_text} (Ctrl+,)")
-        };
+        let settings_hint = shortcut_hint(settings_text, "⌘,", "Ctrl+,");
         let mut settings_btn = super::super::toolbar_icon_button(ui, icon::GEAR);
         if settings_highlight > 0.0 {
             let accent = ui.visuals().selection.bg_fill;
@@ -125,11 +117,7 @@ pub fn show_main_ui(
             state.chrome.settings_nudge_until = None;
         }
         let about_text = t(L10nKey::TooltipAbout, state.chrome.resolved_lang);
-        let about_hint = if cfg!(target_os = "macos") {
-            format!("{about_text} (⌘I)")
-        } else {
-            format!("{about_text} (Ctrl+I)")
-        };
+        let about_hint = shortcut_hint(about_text, "⌘I", "Ctrl+I");
         let about_resp = ui.add(super::super::toolbar_icon_button(ui, icon::INFO));
         about_resp.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, about_resp.enabled(), about_text)
@@ -138,11 +126,7 @@ pub fn show_main_ui(
             state.chrome.show_about = true;
         }
         let quit_text = t(L10nKey::MenuQuit, state.chrome.resolved_lang);
-        let quit_hint = if cfg!(target_os = "macos") {
-            format!("{quit_text} (⌘Q)")
-        } else {
-            format!("{quit_text} (Alt+F4)")
-        };
+        let quit_hint = shortcut_hint(quit_text, "⌘Q", "Alt+F4");
         let quit_resp = ui.add(super::super::toolbar_icon_button(ui, icon::X));
         quit_resp.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, quit_resp.enabled(), quit_text)
@@ -350,62 +334,31 @@ pub fn show_main_ui(
             t(L10nKey::SectionOperation, state.chrome.resolved_lang),
         );
         let prev = state.operation_mode;
-        let mode_label = match state.operation_mode {
-            OperationMode::Read => icon_rich(
-                ui,
-                icon::DOWNLOAD_SIMPLE,
-                t(L10nKey::TabRead, state.chrome.resolved_lang),
-                egui::TextStyle::Body,
-            ),
-            OperationMode::Write => icon_rich(
-                ui,
-                icon::UPLOAD_SIMPLE,
-                t(L10nKey::TabWrite, state.chrome.resolved_lang),
-                egui::TextStyle::Body,
-            ),
-            OperationMode::Recover => icon_rich(
-                ui,
-                icon::FIRST_AID,
-                t(L10nKey::TabRecover, state.chrome.resolved_lang),
-                egui::TextStyle::Body,
-            )
-            .color(ui.visuals().error_fg_color),
+        let lang = state.chrome.resolved_lang;
+        let mode_label = |ui: &egui::Ui, mode: OperationMode| {
+            let (glyph, key) = match mode {
+                OperationMode::Read => (icon::DOWNLOAD_SIMPLE, L10nKey::TabRead),
+                OperationMode::Write => (icon::UPLOAD_SIMPLE, L10nKey::TabWrite),
+                OperationMode::Recover => (icon::FIRST_AID, L10nKey::TabRecover),
+            };
+            let rich = icon_rich(ui, glyph, t(key, lang), egui::TextStyle::Body);
+            if mode == OperationMode::Recover {
+                rich.color(ui.visuals().error_fg_color)
+            } else {
+                rich
+            }
         };
         egui::ComboBox::from_id_salt("operation_mode")
-            .selected_text(mode_label)
+            .selected_text(mode_label(ui, state.operation_mode))
             .width(ui.available_width())
             .show_ui(ui, |ui| {
-                ui.selectable_value(
-                    &mut state.operation_mode,
+                for mode in [
                     OperationMode::Read,
-                    icon_rich(
-                        ui,
-                        icon::DOWNLOAD_SIMPLE,
-                        t(L10nKey::TabRead, state.chrome.resolved_lang),
-                        egui::TextStyle::Body,
-                    ),
-                );
-                ui.selectable_value(
-                    &mut state.operation_mode,
                     OperationMode::Write,
-                    icon_rich(
-                        ui,
-                        icon::UPLOAD_SIMPLE,
-                        t(L10nKey::TabWrite, state.chrome.resolved_lang),
-                        egui::TextStyle::Body,
-                    ),
-                );
-                ui.selectable_value(
-                    &mut state.operation_mode,
                     OperationMode::Recover,
-                    icon_rich(
-                        ui,
-                        icon::FIRST_AID,
-                        t(L10nKey::TabRecover, state.chrome.resolved_lang),
-                        egui::TextStyle::Body,
-                    )
-                    .color(ui.visuals().error_fg_color),
-                );
+                ] {
+                    ui.selectable_value(&mut state.operation_mode, mode, mode_label(ui, mode));
+                }
             });
 
         if state.operation_mode != prev {
@@ -501,11 +454,7 @@ pub fn show_main_ui(
                 let start_enabled = ops::can_start(state);
                 let start_label = t(L10nKey::BtnStart, state.chrome.resolved_lang);
                 let start_text = t(L10nKey::TooltipStartEnabled, state.chrome.resolved_lang);
-                let start_hint = if cfg!(target_os = "macos") {
-                    format!("{start_text} (Enter / ⌘Enter)")
-                } else {
-                    format!("{start_text} (Enter / Ctrl+Enter)")
-                };
+                let start_hint = shortcut_hint(start_text, "Enter / ⌘Enter", "Enter / Ctrl+Enter");
                 let hover = if !start_enabled {
                     ops::start_disabled_reason(state)
                 } else {
@@ -566,6 +515,15 @@ pub fn show_main_ui(
             }
         }
     }
+}
+
+fn shortcut_hint(base: &str, mac: &str, other: &str) -> String {
+    let combo = if cfg!(target_os = "macos") {
+        mac
+    } else {
+        other
+    };
+    format!("{base} ({combo})")
 }
 
 fn status_indicator(ui: &mut egui::Ui, lang: Language, probing: bool, probed: bool, ok: bool) {
@@ -719,15 +677,7 @@ fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState, dialog: &
                 ui.add_space(GAP_SMALL);
                 show_confirmation_summary(ui, state, &drive);
                 show_safety_warnings(ui, state, &drive);
-                ui.label(t_with_args(
-                    L10nKey::LabelTypeToConfirm,
-                    state.chrome.resolved_lang,
-                    &[("required", &required)],
-                ));
-                ui.add(
-                    egui::TextEdit::singleline(&mut state.flash.confirmation)
-                        .desired_width(ui.available_width()),
-                );
+                show_confirmation_input(ui, state, &required);
             }
         }
         OperationMode::Recover => {
@@ -792,15 +742,7 @@ fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState, dialog: &
                 let required = command::required_flash_confirmation(&drive.device);
                 ui.add_space(GAP_SMALL);
                 show_confirmation_summary(ui, state, drive);
-                ui.label(t_with_args(
-                    L10nKey::LabelTypeToConfirm,
-                    state.chrome.resolved_lang,
-                    &[("required", &required)],
-                ));
-                ui.add(
-                    egui::TextEdit::singleline(&mut state.flash.confirmation)
-                        .desired_width(ui.available_width()),
-                );
+                show_confirmation_input(ui, state, &required);
             }
         }
     }
@@ -833,6 +775,18 @@ fn show_confirmation_summary(ui: &mut egui::Ui, state: &AppState, drive: &crate:
         lang,
         &[("mode", &ops::flash_mode_label(state))],
     ));
+}
+
+fn show_confirmation_input(ui: &mut egui::Ui, state: &mut AppState, required: &str) {
+    ui.label(t_with_args(
+        L10nKey::LabelTypeToConfirm,
+        state.chrome.resolved_lang,
+        &[("required", required)],
+    ));
+    ui.add(
+        egui::TextEdit::singleline(&mut state.flash.confirmation)
+            .desired_width(ui.available_width()),
+    );
 }
 
 fn show_safety_warnings(ui: &mut egui::Ui, state: &mut AppState, drive: &crate::drive::Drive) {
@@ -936,19 +890,12 @@ pub(crate) fn file_picker(
                 }
             }
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                let before = path.clone();
-                let path_hint = if path.is_empty() {
-                    String::new()
-                } else {
-                    path.clone()
-                };
+                let hint = path.clone();
                 let edit = egui::TextEdit::singleline(path).desired_width(ui.available_width());
                 let resp = ui.add(edit);
-                if !path_hint.is_empty() {
-                    resp.on_hover_text(&path_hint);
-                }
-                if *path != before {
-                    changed = true;
+                changed |= resp.changed();
+                if !hint.is_empty() {
+                    resp.on_hover_text(hint);
                 }
             });
         });

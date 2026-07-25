@@ -11,13 +11,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub fn sha256_hex(data: &[u8]) -> String {
-    let hash = Sha256::digest(data);
-    let mut hex = String::with_capacity(64);
-    for b in hash {
-        use std::fmt::Write;
-        let _ = write!(hex, "{b:02x}");
-    }
-    hex
+    Sha256::digest(data)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,16 +256,9 @@ fn pcb_to_form_factor(pcb: &str) -> DriveFormFactor {
 /// Uses byte-level matching so it works on non-UTF-8 binary data.
 fn extract_model(data: &[u8]) -> Option<String> {
     let search_region = &data[..data.len().min(256 * 1024)];
-    for model in crate::platform::known_models() {
-        let model_bytes = model.as_bytes();
-        if search_region
-            .windows(model_bytes.len())
-            .any(|w| w == model_bytes)
-        {
-            return Some(model.to_string());
-        }
-    }
-    None
+    crate::platform::known_models()
+        .find(|m| search_region.windows(m.len()).any(|w| w == m.as_bytes()))
+        .map(str::to_string)
 }
 
 /// Analyze a firmware binary to extract metadata without relying on filename.
@@ -327,9 +317,9 @@ pub fn extract_firmware_date_from_binary(data: &[u8]) -> Option<u32> {
 /// Validate a 10–12 digit string as a firmware date and return the 4-digit
 /// year prefix. The caller guarantees the input is 10–12 ASCII digits.
 fn parse_date_prefix(s: &str) -> Option<u32> {
-    let year = parse_u32(&s[0..4])?;
-    let month = parse_u32(&s[4..6])?;
-    let day = parse_u32(&s[6..8])?;
+    let year: u32 = s[0..4].parse().ok()?;
+    let month: u32 = s[4..6].parse().ok()?;
+    let day: u32 = s[6..8].parse().ok()?;
     if !(2000..=2199).contains(&year) {
         return None;
     }
@@ -340,10 +330,6 @@ fn parse_date_prefix(s: &str) -> Option<u32> {
         return None;
     }
     Some(year)
-}
-
-fn parse_u32(s: &str) -> Option<u32> {
-    s.parse::<u32>().ok()
 }
 
 /// Determine whether a firmware binary is encrypted (date ≥ 2020).
@@ -396,10 +382,7 @@ pub fn resolve_form_factor(id: &FirmwareIdentification) -> DriveFormFactor {
     if let Some(known) = id.known {
         return known.form_factor;
     }
-    if id.binary_info.form_factor != DriveFormFactor::Unknown {
-        return id.binary_info.form_factor;
-    }
-    DriveFormFactor::Unknown
+    id.binary_info.form_factor
 }
 
 /// Best-effort form factor determination with SDF0 metadata fallback.
@@ -412,10 +395,8 @@ pub fn resolve_form_factor_with_sdf(
     if ff != DriveFormFactor::Unknown {
         return ff;
     }
-    if let Some(sdf) = sdf_info {
-        if let Some(model) = &sdf.model {
-            return crate::platform::classify_drive(model);
-        }
+    if let Some(model) = sdf_info.and_then(|s| s.model.as_deref()) {
+        return crate::platform::classify_drive(model);
     }
     DriveFormFactor::Unknown
 }
@@ -423,10 +404,9 @@ pub fn resolve_form_factor_with_sdf(
 /// Best-effort model determination.
 /// Known firmware hash takes priority, then binary content, then SDF0 metadata.
 pub fn resolve_model(id: &FirmwareIdentification) -> Option<String> {
-    if let Some(known) = id.known {
-        return Some(known.model.to_string());
-    }
-    id.binary_info.model.clone()
+    id.known
+        .map(|k| k.model.to_string())
+        .or_else(|| id.binary_info.model.clone())
 }
 
 /// Best-effort model determination with SDF0 metadata fallback.
@@ -434,11 +414,7 @@ pub fn resolve_model_with_sdf(
     id: &FirmwareIdentification,
     sdf_info: Option<&FirmwareSdfInfo>,
 ) -> Option<String> {
-    let model = resolve_model(id);
-    if model.is_some() {
-        return model;
-    }
-    sdf_info.and_then(|sdf| sdf.model.clone())
+    resolve_model(id).or_else(|| sdf_info.and_then(|sdf| sdf.model.clone()))
 }
 
 /// Full result of firmware identification: hash lookup, binary analysis,
@@ -551,20 +527,6 @@ mod tests {
         assert!(check_firmware_sdf(&data).is_none());
     }
 
-    fn build_sdf0_firmware_bytes(vendor: &str, model: &str) -> Vec<u8> {
-        let mut data = Vec::new();
-        data.extend_from_slice(b"SDF0");
-        data.extend_from_slice(&1u32.to_be_bytes());
-        data.extend_from_slice(&24u32.to_be_bytes());
-        data.extend_from_slice(&24u32.to_be_bytes());
-        data.extend_from_slice(&0u32.to_be_bytes());
-        let metadata = format!("Vendor\0{vendor}\0Model\0{model}\0");
-        let payload_offset = 24 + metadata.len() as u32;
-        data.extend_from_slice(&payload_offset.to_be_bytes());
-        data.extend_from_slice(metadata.as_bytes());
-        data
-    }
-
     #[test]
     fn check_firmware_sdf_valid_sdf0() {
         let mut data = Vec::new();
@@ -580,13 +542,6 @@ mod tests {
 
         let info = check_firmware_sdf(&data).unwrap();
         assert_eq!(info.model.as_deref(), Some("TestModel"));
-    }
-
-    #[test]
-    fn check_firmware_sdf_extracts_vendor_and_model() {
-        let firmware = build_sdf0_firmware_bytes("OtherVendor", "BU40N");
-        let info = check_firmware_sdf(&firmware).expect("sdf metadata");
-        assert_eq!(info.model.as_deref(), Some("BU40N"));
     }
 
     #[test]

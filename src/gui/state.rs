@@ -274,19 +274,13 @@ impl AppState {
         if line_count <= LOG_MAX_LINES {
             return;
         }
-        let keep = LOG_MAX_LINES - 1;
-        let bytes = self.runtime.log_text.as_bytes();
-        let mut newlines_seen = 0usize;
-        let mut cut_from = 0usize;
-        for (i, &b) in bytes.iter().enumerate() {
-            if b == b'\n' {
-                newlines_seen += 1;
-                if newlines_seen == line_count - keep {
-                    cut_from = i + 1;
-                    break;
-                }
-            }
-        }
+        let drop_lines = line_count - (LOG_MAX_LINES - 1);
+        let cut_from = self
+            .runtime
+            .log_text
+            .match_indices('\n')
+            .nth(drop_lines - 1)
+            .map_or(0, |(i, _)| i + 1);
         let mut truncated = String::from(t(L10nKey::LogTruncated, self.chrome.resolved_lang));
         truncated.push('\n');
         truncated.push_str(&self.runtime.log_text[cut_from..]);
@@ -364,12 +358,8 @@ impl AppState {
         self.drive.drive_sdf_version = None;
     }
 
-    /// Recompute `encrypted_write` from the drive's current firmware state and
-    /// the loaded firmware file's encryption status.
-    ///
-    /// `rawflash enc` is needed when **either** the drive's current firmware is
-    /// encrypted (date ≥ 2020) **or** the firmware file being written is
-    /// encrypted. If no firmware file is loaded, only the drive state matters.
+    /// Recompute `encrypted_write` from the drive's firmware state and the
+    /// loaded firmware file's encryption status.
     pub fn recompute_encrypted_write(&mut self) {
         let drive_enc = self.drive.drive_encrypted_firmware;
         let fw_enc = self.flash.firmware_file_encrypted.unwrap_or(false);

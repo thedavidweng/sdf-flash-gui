@@ -143,7 +143,6 @@ jobs:
             dist/*.appimage
             dist/*.deb
             dist/*.msi
-            dist/*.nsis
             dist/SHA256SUMS.txt
 
   build-macos:

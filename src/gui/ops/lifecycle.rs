@@ -54,17 +54,23 @@ pub fn on_viewport_close_requested(ctx: &eframe::egui::Context, state: &mut AppS
     }
 }
 
+fn force_kill_active_controls(state: &AppState) {
+    for control in state
+        .runtime
+        .probe_control
+        .iter()
+        .chain(&state.runtime.active_operation)
+    {
+        control.request_force_kill();
+    }
+}
+
 /// Force-kill any running backend and close immediately.
 ///
 /// Clears `busy` before requesting close so `on_viewport_close_requested` does not
 /// re-issue `CancelClose` while the worker is still winding down.
 pub fn confirm_force_quit_exit(ctx: &eframe::egui::Context, state: &mut AppState) {
-    if let Some(control) = state.runtime.probe_control.as_ref() {
-        control.request_force_kill();
-    }
-    if let Some(control) = state.runtime.active_operation.as_ref() {
-        control.request_force_kill();
-    }
+    force_kill_active_controls(state);
     state.finish_probe();
     state.finish_operation();
     prepare_app_exit(ctx, state);
@@ -91,12 +97,7 @@ pub fn confirm_graceful_stop(state: &mut AppState) {
 }
 
 pub fn confirm_force_kill(state: &mut AppState) {
-    if let Some(control) = state.runtime.probe_control.as_ref() {
-        control.request_force_kill();
-    }
-    if let Some(control) = state.runtime.active_operation.as_ref() {
-        control.request_force_kill();
-    }
+    force_kill_active_controls(state);
     state.log(t(L10nKey::LogOpCancelled, state.chrome.resolved_lang));
     if state.runtime.probe_control.is_some() {
         state.finish_probe_failure();

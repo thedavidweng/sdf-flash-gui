@@ -1,10 +1,8 @@
 //! Product branding shared across GUI, CLI, and packaging.
-//!
-//! Keep in sync with `Cargo.toml` `[package.metadata.packager] product-name` and
-//! `build.rs` (Windows PE metadata).
 
 /// User-facing application name shown in window titles, installers, and help text.
-pub const DISPLAY_NAME: &str = "SDF Flash GUI";
+/// Sourced from `Cargo.toml` `[package.metadata.packager] product-name` via `build.rs`.
+pub const DISPLAY_NAME: &str = env!("PRODUCT_NAME");
 
 /// Official MakeMKV home page (About acknowledgements).
 pub const MAKEMKV_HOME_URL: &str = "https://www.makemkv.com/";

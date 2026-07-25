@@ -9,20 +9,17 @@ pub fn drive_label(drive: &Drive) -> String {
     if drive.vendor.is_empty() {
         drive.device.clone()
     } else {
-        let mut parts = vec![
+        [
             drive.device.as_str(),
             drive.vendor.as_str(),
             drive.product.as_str(),
             drive.revision.as_str(),
-        ];
-        if !drive.serial.is_empty() {
-            parts.push(drive.serial.as_str());
-        }
-        parts
-            .into_iter()
-            .filter(|p| !p.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ")
+            drive.serial.as_str(),
+        ]
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
     }
 }
 

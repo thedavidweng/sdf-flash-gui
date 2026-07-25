@@ -6,6 +6,11 @@ use sdf_flash_gui::sdf;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    let flag = |name: &str| {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|i| args.get(i + 1))
+    };
 
     if args.len() <= 1 {
         if let Err(e) = sdf_flash_gui::gui::run() {
@@ -29,12 +34,7 @@ fn main() {
                 eprintln!("Usage: sdf-flash-gui dump <device> -o <output_dir>");
                 std::process::exit(1);
             }
-            let output_dir = args
-                .iter()
-                .position(|a| a == "-o")
-                .and_then(|i| args.get(i + 1))
-                .map(String::as_str)
-                .unwrap_or(".");
+            let output_dir = flag("-o").map(String::as_str).unwrap_or(".");
             cmd_dump(&args[2], output_dir);
         }
         "flash" => {
@@ -51,25 +51,13 @@ fn main() {
             cmd_flash(
                 &args[2],
                 FlashArgs {
-                    firmware: args
-                        .iter()
-                        .position(|a| a == "-i")
-                        .and_then(|i| args.get(i + 1)),
-                    sdf_path: args
-                        .iter()
-                        .position(|a| a == "--sdf")
-                        .and_then(|i| args.get(i + 1)),
+                    firmware: flag("-i"),
+                    sdf_path: flag("--sdf"),
                     encrypted: args.contains(&"--encrypted".to_string()),
                     include_boot_loader: args.contains(&"--include-boot-loader".to_string()),
                     recover: args.contains(&"--recover".to_string()),
-                    wrong_firmware: args
-                        .iter()
-                        .position(|a| a == "--wrong-firmware")
-                        .and_then(|i| args.get(i + 1)),
-                    recovery_token: args
-                        .iter()
-                        .position(|a| a == "--recovery-token")
-                        .and_then(|i| args.get(i + 1)),
+                    wrong_firmware: flag("--wrong-firmware"),
+                    recovery_token: flag("--recovery-token"),
                     confirm: args.contains(&"--confirm".to_string()),
                 },
             );

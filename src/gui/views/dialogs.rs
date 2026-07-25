@@ -41,19 +41,14 @@ pub fn handle_global_shortcuts(
             crate::gui::workers::spawn_list_drives(worker_tx, state, runner, true);
         }
 
-        let close_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::W);
-        if i.consume_shortcut(&close_shortcut) {
-            ops::request_app_quit(ctx, state);
-        }
-
-        let quit_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
-        if i.consume_shortcut(&quit_shortcut) {
-            ops::request_app_quit(ctx, state);
-        }
-
-        let alt_f4_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::ALT, egui::Key::F4);
-        if i.consume_shortcut(&alt_f4_shortcut) {
-            ops::request_app_quit(ctx, state);
+        for quit_shortcut in [
+            egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::W),
+            egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q),
+            egui::KeyboardShortcut::new(egui::Modifiers::ALT, egui::Key::F4),
+        ] {
+            if i.consume_shortcut(&quit_shortcut) {
+                ops::request_app_quit(ctx, state);
+            }
         }
 
         let start_cmd_shortcut =
@@ -70,215 +65,156 @@ pub fn handle_global_shortcuts(
     });
 }
 
-pub fn show_quit_confirmation_dialog(ctx: &egui::Context, state: &mut AppState) {
-    egui::Window::new(t(L10nKey::TitleExitWarning, state.chrome.resolved_lang))
+fn centered_modal(ctx: &egui::Context, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
+    egui::Window::new(title)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .resizable(false)
         .collapsible(false)
         .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{}  {}",
-                        icon::WARNING,
-                        t(L10nKey::LabelExitWarningMsg, state.chrome.resolved_lang)
-                    ))
-                    .color(ui.visuals().error_fg_color)
-                    .strong(),
-                );
-                ui.add_space(8.0);
-                ui.label(t(L10nKey::LabelExitWarningDesc, state.chrome.resolved_lang));
-                ui.label(t(L10nKey::LabelExitWarningAsk, state.chrome.resolved_lang));
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(40.0);
-                    if ui
-                        .add(icon_button(
-                            ui,
-                            icon::X,
-                            t(L10nKey::BtnNoCancel, state.chrome.resolved_lang),
-                        ))
-                        .clicked()
-                    {
-                        state.chrome.show_quit_confirmation = false;
-                    }
-                    ui.add_space(20.0);
-                    if ui
-                        .add(icon_button(
-                            ui,
-                            icon::WARNING,
-                            t(L10nKey::BtnYesForce, state.chrome.resolved_lang),
-                        ))
-                        .clicked()
-                    {
-                        ops::confirm_force_quit_exit(ctx, state);
-                    }
-                });
-            });
+            ui.vertical_centered(add_contents);
         });
+}
+
+fn warning_header(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        egui::RichText::new(format!("{}  {}", icon::WARNING, text))
+            .color(ui.visuals().error_fg_color)
+            .strong(),
+    );
+}
+
+pub fn show_quit_confirmation_dialog(ctx: &egui::Context, state: &mut AppState) {
+    let lang = state.chrome.resolved_lang;
+    centered_modal(ctx, t(L10nKey::TitleExitWarning, lang), |ui| {
+        warning_header(ui, t(L10nKey::LabelExitWarningMsg, lang));
+        ui.add_space(8.0);
+        ui.label(t(L10nKey::LabelExitWarningDesc, lang));
+        ui.label(t(L10nKey::LabelExitWarningAsk, lang));
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            ui.add_space(40.0);
+            if ui
+                .add(icon_button(ui, icon::X, t(L10nKey::BtnNoCancel, lang)))
+                .clicked()
+            {
+                state.chrome.show_quit_confirmation = false;
+            }
+            ui.add_space(20.0);
+            if ui
+                .add(icon_button(
+                    ui,
+                    icon::WARNING,
+                    t(L10nKey::BtnYesForce, lang),
+                ))
+                .clicked()
+            {
+                ops::confirm_force_quit_exit(ctx, state);
+            }
+        });
+    });
 }
 
 pub fn show_stop_confirmation_dialog(ctx: &egui::Context, state: &mut AppState) {
-    egui::Window::new(t(L10nKey::TitleStopWarning, state.chrome.resolved_lang))
-        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-        .resizable(false)
-        .collapsible(false)
-        .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{}  {}",
-                        icon::WARNING,
-                        t(L10nKey::LabelStopWarningMsg, state.chrome.resolved_lang)
-                    ))
-                    .color(ui.visuals().error_fg_color)
-                    .strong(),
-                );
-                ui.add_space(8.0);
-                ui.label(t(L10nKey::LabelStopWarningDesc, state.chrome.resolved_lang));
-                ui.label(t(L10nKey::LabelStopWarningAsk, state.chrome.resolved_lang));
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(40.0);
-                    if ui
-                        .add(icon_button(
-                            ui,
-                            icon::X,
-                            t(L10nKey::BtnStopNo, state.chrome.resolved_lang),
-                        ))
-                        .clicked()
-                    {
-                        state.runtime.stop_dialog = StopDialog::None;
-                    }
-                    ui.add_space(20.0);
-                    if ui
-                        .add(icon_button(
-                            ui,
-                            icon::STOP,
-                            t(L10nKey::BtnStopYes, state.chrome.resolved_lang),
-                        ))
-                        .clicked()
-                    {
-                        ops::confirm_graceful_stop(state);
-                    }
-                });
-            });
+    let lang = state.chrome.resolved_lang;
+    centered_modal(ctx, t(L10nKey::TitleStopWarning, lang), |ui| {
+        warning_header(ui, t(L10nKey::LabelStopWarningMsg, lang));
+        ui.add_space(8.0);
+        ui.label(t(L10nKey::LabelStopWarningDesc, lang));
+        ui.label(t(L10nKey::LabelStopWarningAsk, lang));
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            ui.add_space(40.0);
+            if ui
+                .add(icon_button(ui, icon::X, t(L10nKey::BtnStopNo, lang)))
+                .clicked()
+            {
+                state.runtime.stop_dialog = StopDialog::None;
+            }
+            ui.add_space(20.0);
+            if ui
+                .add(icon_button(ui, icon::STOP, t(L10nKey::BtnStopYes, lang)))
+                .clicked()
+            {
+                ops::confirm_graceful_stop(state);
+            }
         });
+    });
 }
 
 pub fn show_flash_failure_dialog(ctx: &egui::Context, state: &mut AppState) {
-    egui::Window::new(t(L10nKey::TitleFlashFailure, state.chrome.resolved_lang))
-        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-        .resizable(false)
-        .collapsible(false)
-        .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{}  {}",
-                        icon::WARNING,
-                        t(L10nKey::LabelFlashFailureMsg, state.chrome.resolved_lang)
-                    ))
-                    .color(ui.visuals().error_fg_color)
-                    .strong(),
-                );
-                ui.add_space(8.0);
-                ui.label(t(
-                    L10nKey::LabelFlashFailureStep1,
-                    state.chrome.resolved_lang,
-                ));
-                ui.label(t(
-                    L10nKey::LabelFlashFailureStep2,
-                    state.chrome.resolved_lang,
-                ));
-                ui.label(t(
-                    L10nKey::LabelFlashFailureStep3,
-                    state.chrome.resolved_lang,
-                ));
-                ui.add_space(12.0);
-                if ui
-                    .add(icon_button(
-                        ui,
-                        icon::CHECK,
-                        t(L10nKey::BtnFlashFailureDismiss, state.chrome.resolved_lang),
-                    ))
-                    .clicked()
-                {
-                    state.chrome.show_flash_failure_dialog = false;
-                }
-            });
-        });
+    let lang = state.chrome.resolved_lang;
+    centered_modal(ctx, t(L10nKey::TitleFlashFailure, lang), |ui| {
+        warning_header(ui, t(L10nKey::LabelFlashFailureMsg, lang));
+        ui.add_space(8.0);
+        ui.label(t(L10nKey::LabelFlashFailureStep1, lang));
+        ui.label(t(L10nKey::LabelFlashFailureStep2, lang));
+        ui.label(t(L10nKey::LabelFlashFailureStep3, lang));
+        ui.add_space(12.0);
+        if ui
+            .add(icon_button(
+                ui,
+                icon::CHECK,
+                t(L10nKey::BtnFlashFailureDismiss, lang),
+            ))
+            .clicked()
+        {
+            state.chrome.show_flash_failure_dialog = false;
+        }
+    });
 }
 
 pub fn show_force_kill_dialog(ctx: &egui::Context, state: &mut AppState) {
-    egui::Window::new(t(
-        L10nKey::TitleForceKillWarning,
-        state.chrome.resolved_lang,
-    ))
-    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-    .resizable(false)
-    .collapsible(false)
-    .show(ctx, |ui| {
-        ui.vertical_centered(|ui| {
-            let lang = state.chrome.resolved_lang;
-            if state.runtime.waiting_for_backend_stop {
-                ui.label(
-                    egui::RichText::new(t(L10nKey::StatusCancelling, lang))
-                        .color(ui.visuals().warn_fg_color)
-                        .strong(),
-                );
-                ui.add_space(8.0);
-                ui.label(t(L10nKey::LabelForceKillDesc, lang));
-                ui.label(t(L10nKey::LabelForceKillAsk, lang));
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(80.0);
-                    if ui
-                        .add(icon_button(
-                            ui,
-                            icon::PROHIBIT,
-                            t(L10nKey::BtnForceKillYes, lang),
-                        ))
-                        .clicked()
-                    {
-                        ops::confirm_force_kill(state);
-                    }
-                });
-            } else {
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{}  {}",
-                        icon::WARNING,
-                        t(L10nKey::LabelForceKillMsg, lang)
-                    ))
-                    .color(ui.visuals().error_fg_color)
+    let lang = state.chrome.resolved_lang;
+    centered_modal(ctx, t(L10nKey::TitleForceKillWarning, lang), |ui| {
+        if state.runtime.waiting_for_backend_stop {
+            ui.label(
+                egui::RichText::new(t(L10nKey::StatusCancelling, lang))
+                    .color(ui.visuals().warn_fg_color)
                     .strong(),
-                );
-                ui.add_space(8.0);
-                ui.label(t(L10nKey::LabelForceKillDesc, lang));
-                ui.label(t(L10nKey::LabelForceKillAsk, lang));
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(40.0);
-                    if ui
-                        .add(icon_button(ui, icon::X, t(L10nKey::BtnForceKillNo, lang)))
-                        .clicked()
-                    {
-                        ops::decline_force_kill(state);
-                    }
-                    ui.add_space(20.0);
-                    if ui
-                        .add(icon_button(
-                            ui,
-                            icon::PROHIBIT,
-                            t(L10nKey::BtnForceKillYes, lang),
-                        ))
-                        .clicked()
-                    {
-                        ops::confirm_force_kill(state);
-                    }
-                });
-            }
-        });
+            );
+            ui.add_space(8.0);
+            ui.label(t(L10nKey::LabelForceKillDesc, lang));
+            ui.label(t(L10nKey::LabelForceKillAsk, lang));
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.add_space(80.0);
+                if ui
+                    .add(icon_button(
+                        ui,
+                        icon::PROHIBIT,
+                        t(L10nKey::BtnForceKillYes, lang),
+                    ))
+                    .clicked()
+                {
+                    ops::confirm_force_kill(state);
+                }
+            });
+        } else {
+            warning_header(ui, t(L10nKey::LabelForceKillMsg, lang));
+            ui.add_space(8.0);
+            ui.label(t(L10nKey::LabelForceKillDesc, lang));
+            ui.label(t(L10nKey::LabelForceKillAsk, lang));
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.add_space(40.0);
+                if ui
+                    .add(icon_button(ui, icon::X, t(L10nKey::BtnForceKillNo, lang)))
+                    .clicked()
+                {
+                    ops::decline_force_kill(state);
+                }
+                ui.add_space(20.0);
+                if ui
+                    .add(icon_button(
+                        ui,
+                        icon::PROHIBIT,
+                        t(L10nKey::BtnForceKillYes, lang),
+                    ))
+                    .clicked()
+                {
+                    ops::confirm_force_kill(state);
+                }
+            });
+        }
     });
 }

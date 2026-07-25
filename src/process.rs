@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -42,22 +42,14 @@ impl OperationControl {
     /// Ask the backend to stop gracefully (e.g. SIGINT).
     pub fn request_graceful_cancel(&self) {
         self.cancel_requested.store(true, Ordering::SeqCst);
-        let _ = self
-            .child
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.as_mut().map(|child| try_graceful_terminate(child)));
+        let _ = self.with_child(|child| try_graceful_terminate(child));
     }
 
     /// Forcibly terminate the backend process.
     pub fn request_force_kill(&self) {
         self.force_kill.store(true, Ordering::SeqCst);
         self.cancel_requested.store(true, Ordering::SeqCst);
-        let _ = self
-            .child
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.as_mut().map(|child| child.kill()));
+        let _ = self.with_child(|child| child.kill());
     }
 
     /// Block until the registered child is reaped, force-killing first if needed.
@@ -88,7 +80,7 @@ impl OperationControl {
         })
     }
 
-    fn register_child(&self, child: Child) {
+    pub(crate) fn register_child(&self, child: Child) {
         self.child_exited.store(false, Ordering::SeqCst);
         if let Ok(mut guard) = self.child.lock() {
             *guard = Some(child);
@@ -97,6 +89,13 @@ impl OperationControl {
 
     fn take_child(&self) -> Option<Child> {
         self.child.lock().ok().and_then(|mut guard| guard.take())
+    }
+
+    fn with_child<R>(&self, f: impl FnOnce(&mut Child) -> R) -> Option<R> {
+        self.child
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.as_mut().map(f))
     }
 
     fn child_exit_status(&self) -> Option<ExitStatus> {
@@ -110,14 +109,6 @@ impl OperationControl {
     #[cfg(test)]
     pub(crate) fn set_cancel_requested_for_test(&self) {
         self.cancel_requested.store(true, Ordering::SeqCst);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn register_child_for_test(&self, child: Child) {
-        self.child_exited.store(false, Ordering::SeqCst);
-        if let Ok(mut guard) = self.child.lock() {
-            *guard = Some(child);
-        }
     }
 }
 
@@ -200,11 +191,7 @@ fn finish_cancelled_child(
     }
 
     if !control.is_force_kill_requested() {
-        let _ = control
-            .child
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.as_mut().map(|child| try_graceful_terminate(child)));
+        let _ = control.with_child(|child| try_graceful_terminate(child));
     }
 
     let deadline = Instant::now() + GRACEFUL_CANCEL_TIMEOUT;
@@ -214,11 +201,7 @@ fn finish_cancelled_child(
             return Ok(CommandRunOutcome::Cancelled);
         }
         if control.is_force_kill_requested() {
-            let _ = control
-                .child
-                .lock()
-                .ok()
-                .and_then(|mut guard| guard.as_mut().map(|child| child.kill()));
+            let _ = control.with_child(|child| child.kill());
             continue;
         }
         if Instant::now() >= deadline && !control.is_force_kill_requested() {
@@ -252,12 +235,10 @@ impl CommandOutput {
     }
 }
 
-/// Run an external command and return stdout+stderr (cancellable).
-pub fn run_command_cancellable(
+fn spawn_with_pipes(
     program: &str,
     args: &[String],
-    control: Option<&OperationControl>,
-) -> Result<CommandRunOutcome, String> {
+) -> Result<(Child, ChildStdout, ChildStderr), String> {
     let mut child = Command::new(program)
         .args(args)
         .stdout(Stdio::piped())
@@ -273,6 +254,17 @@ pub fn run_command_cancellable(
         .stderr
         .take()
         .ok_or_else(|| "failed to capture stderr".to_string())?;
+
+    Ok((child, stdout, stderr))
+}
+
+/// Run an external command and return stdout+stderr (cancellable).
+pub fn run_command_cancellable(
+    program: &str,
+    args: &[String],
+    control: Option<&OperationControl>,
+) -> Result<CommandRunOutcome, String> {
+    let (child, stdout, stderr) = spawn_with_pipes(program, args)?;
 
     let stdout_handle = thread::spawn(move || {
         let reader = BufReader::new(stdout);
@@ -303,7 +295,7 @@ pub fn run_command_cancellable(
                 join_pipe_readers(stdout_handle, stderr_handle, &outcome);
                 return Ok(outcome);
             }
-            if child_has_exited(control) {
+            if !control.is_child_running() {
                 break;
             }
             thread::sleep(POLL_INTERVAL);
@@ -346,21 +338,7 @@ pub fn run_command_streaming_cancellable<F>(
 where
     F: FnMut(&str),
 {
-    let mut child = Command::new(program)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("failed to run {program}: {e}"))?;
-
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "failed to capture stdout".to_string())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "failed to capture stderr".to_string())?;
+    let (child, stdout, stderr) = spawn_with_pipes(program, args)?;
 
     enum PipeLine {
         Out(String),
@@ -468,26 +446,6 @@ where
         stdout: stdout_buf,
         stderr: stderr_buf,
     }))
-}
-
-fn child_has_exited(control: &OperationControl) -> bool {
-    if control.child_exited.load(Ordering::SeqCst) {
-        return true;
-    }
-    let exited = control
-        .child
-        .lock()
-        .ok()
-        .and_then(|mut guard| {
-            guard
-                .as_mut()
-                .and_then(|child| child.try_wait().ok().flatten())
-        })
-        .is_some();
-    if exited {
-        control.child_exited.store(true, Ordering::SeqCst);
-    }
-    exited
 }
 
 fn completed_or_cancelled_after_pipes(
@@ -1058,7 +1016,7 @@ mod tests {
 
         let child = Command::new("sleep").arg("30").spawn().unwrap();
         let control = OperationControl::new();
-        control.register_child_for_test(child);
+        control.register_child(child);
         control.request_graceful_cancel();
         assert!(control.is_cancel_requested());
     }
@@ -1071,7 +1029,7 @@ mod tests {
 
         let child = Command::new("sleep").arg("30").spawn().unwrap();
         let control = OperationControl::new();
-        control.register_child_for_test(child);
+        control.register_child(child);
         control.request_force_kill();
         thread::sleep(Duration::from_millis(50));
         assert!(!control.is_child_running());
@@ -1084,7 +1042,7 @@ mod tests {
 
         let control = OperationControl::new();
         let child = Command::new("sleep").arg("30").spawn().unwrap();
-        control.register_child_for_test(child);
+        control.register_child(child);
         control.set_cancel_requested_for_test();
         let outcome =
             finish_cancelled_child(&control, String::new(), String::new()).expect("cancel");
@@ -1101,7 +1059,7 @@ mod tests {
 
         let control = OperationControl::new();
         let child = Command::new("sleep").arg("30").spawn().unwrap();
-        control.register_child_for_test(child);
+        control.register_child(child);
         control.request_force_kill();
         let outcome =
             finish_cancelled_child(&control, String::new(), String::new()).expect("force kill");
@@ -1115,7 +1073,7 @@ mod tests {
 
         let control = OperationControl::new();
         let child = Command::new("sleep").arg("30").spawn().unwrap();
-        control.register_child_for_test(child);
+        control.register_child(child);
         let outcome =
             finish_cancelled_child(&control, String::new(), String::new()).expect("still running");
         assert!(matches!(
@@ -1186,7 +1144,7 @@ mod tests {
 
         let control = OperationControl::new();
         let child = Command::new("sleep").arg("30").spawn().unwrap();
-        control.register_child_for_test(child);
+        control.register_child(child);
         control.set_cancel_requested_for_test();
         let ctrl = control.clone();
         let trigger = thread::spawn(move || {
@@ -1223,7 +1181,7 @@ mod tests {
 
         let control = OperationControl::new();
         let child = Command::new("sleep").arg("30").spawn().unwrap();
-        control.register_child_for_test(child);
+        control.register_child(child);
         control.request_force_kill();
         control.reap_registered_child();
         assert!(!control.is_child_running());
@@ -1243,23 +1201,10 @@ mod tests {
 
         let control = OperationControl::new();
         let child = Command::new("true").spawn().unwrap();
-        control.register_child_for_test(child);
+        control.register_child(child);
         wait_until_child_exited(&control);
         assert!(!control.is_child_running());
         assert!(!control.is_child_running());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn child_has_exited_caches_exit_status() {
-        use std::process::Command;
-
-        let control = OperationControl::new();
-        let child = Command::new("true").spawn().unwrap();
-        control.register_child_for_test(child);
-        wait_until_child_exited(&control);
-        assert!(child_has_exited(&control));
-        assert!(child_has_exited(&control));
     }
 
     #[test]
@@ -1270,7 +1215,7 @@ mod tests {
 
         let child = Command::new("sleep").arg("30").spawn().unwrap();
         let control = OperationControl::new();
-        control.register_child_for_test(child);
+        control.register_child(child);
         assert!(control.is_child_running());
         control.request_force_kill();
         thread::sleep(Duration::from_millis(50));
@@ -1380,7 +1325,7 @@ mod tests {
 
         let control = OperationControl::new();
         let child = Command::new("sleep").arg("30").spawn().unwrap();
-        control.register_child_for_test(child);
+        control.register_child(child);
         control.set_cancel_requested_for_test();
         let outcome =
             completed_or_cancelled_after_pipes(&control, "out".into(), "err".into()).unwrap();
@@ -1394,7 +1339,7 @@ mod tests {
 
         let control = OperationControl::new();
         let child = Command::new("true").spawn().unwrap();
-        control.register_child_for_test(child);
+        control.register_child(child);
         wait_until_child_exited(&control);
         let outcome =
             completed_or_cancelled_after_pipes(&control, "out".into(), "err".into()).unwrap();
@@ -1453,24 +1398,6 @@ mod tests {
         let stdout = thread::spawn(|| "stdout".to_string());
         let stderr = thread::spawn(|| "stderr".to_string());
         join_pipe_readers(stdout, stderr, &CommandRunOutcome::Cancelled);
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn finish_cancelled_child_returns_completed_when_child_exited() {
-        use std::process::Command;
-
-        let control = OperationControl::new();
-        let child = Command::new("true").spawn().expect("spawn true");
-        control.register_child(child);
-        wait_until_child_exited(&control);
-        let outcome = finish_cancelled_child(&control, "out".into(), "err".into()).unwrap();
-        assert!(matches!(
-            outcome,
-            CommandRunOutcome::Completed(ref out) if out.success()
-                && out.stdout == "out"
-                && out.stderr == "err"
-        ));
     }
 
     #[test]

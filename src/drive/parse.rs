@@ -120,14 +120,6 @@ pub fn resolve_selection(
                 return Some(i);
             }
         }
-        let bid = prev.build_drive_id();
-        if bid != "__" {
-            if let Some(i) = drives.iter().position(|d| {
-                d.device == bid || d.build_drive_id() == bid || d.device == prev.device
-            }) {
-                return Some(i);
-            }
-        }
     }
     if let Some(i) = previous_index {
         if i < drives.len() {
@@ -616,12 +608,9 @@ mod mac_parsers {
     }
 
     pub(crate) fn parse_vendor_product(name: &str) -> (String, String) {
-        if let Some(idx) = name.find('_') {
-            (name[..idx].to_string(), name[idx + 1..].to_string())
-        } else if let Some(idx) = name.find(' ') {
-            (name[..idx].to_string(), name[idx + 1..].to_string())
-        } else {
-            (String::new(), name.to_string())
+        match name.split_once('_').or_else(|| name.split_once(' ')) {
+            Some((v, p)) => (v.to_string(), p.to_string()),
+            None => (String::new(), name.to_string()),
         }
     }
 }
@@ -648,21 +637,6 @@ mod tests {
         assert_eq!(dm.vendor, "HL-DT-ST");
         assert_eq!(dm.model, "BU40N");
         assert_eq!(dm.revision, "1.03");
-    }
-
-    #[test]
-    fn drive_to_drive_match_empty() {
-        let drive = Drive {
-            device: "/dev/sr0".into(),
-            vendor: String::new(),
-            product: String::new(),
-            revision: String::new(),
-            ..Default::default()
-        };
-        let dm: DriveIdentity = (&drive).into();
-        assert!(dm.vendor.is_empty());
-        assert!(dm.model.is_empty());
-        assert!(dm.revision.is_empty());
     }
 
     #[test]

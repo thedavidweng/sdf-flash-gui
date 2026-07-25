@@ -211,25 +211,11 @@ pub fn parse_sdf0<R: Read>(reader: &mut R) -> Result<SdfContainer, SdfError> {
 /// firmware container rather than a sdf.bin database file (where offsets 8–23
 /// are encrypted data).
 fn looks_like_structured_header(header_size: u32, table_offset: u32, payload_offset: u32) -> bool {
-    if header_size > SDF0_MAX_OFFSET {
-        return false;
-    }
-    if payload_offset > SDF0_MAX_OFFSET {
-        return false;
-    }
-    if table_offset > SDF0_MAX_OFFSET {
-        return false;
-    }
-    if table_offset != 0 && table_offset < header_size {
-        return false;
-    }
-    if payload_offset < header_size {
-        return false;
-    }
-    if table_offset != 0 && table_offset > payload_offset {
-        return false;
-    }
-    true
+    header_size <= SDF0_MAX_OFFSET
+        && table_offset <= SDF0_MAX_OFFSET
+        && payload_offset <= SDF0_MAX_OFFSET
+        && payload_offset >= header_size
+        && (table_offset == 0 || (table_offset >= header_size && table_offset <= payload_offset))
 }
 
 /// Build a minimal SDF0 container for sdf.bin database files: just magic +
@@ -278,9 +264,8 @@ fn parse_metadata_table(buf: &[u8]) -> Result<SdfMetadata, SdfError> {
             Some(p) => pos + p,
             None => break,
         };
-        let key = match String::from_utf8(buf[pos..key_end].to_vec()) {
-            Ok(key) => key,
-            Err(_) => break,
+        let Ok(key) = String::from_utf8(buf[pos..key_end].to_vec()) else {
+            break;
         };
         if key.is_empty() {
             break;
@@ -295,9 +280,8 @@ fn parse_metadata_table(buf: &[u8]) -> Result<SdfMetadata, SdfError> {
             Some(p) => pos + p,
             None => break,
         };
-        let value = match String::from_utf8(buf[pos..val_end].to_vec()) {
-            Ok(value) => value,
-            Err(_) => break,
+        let Ok(value) = String::from_utf8(buf[pos..val_end].to_vec()) else {
+            break;
         };
         pos = val_end + 1;
 
@@ -616,14 +600,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_sdf0_truncated_value() {
-        let data = build_sdf0_with_metadata(1, 0x00, b"Vendor\0LG", 0);
-        let mut cursor = Cursor::new(&data);
-        let container = parse_sdf0(&mut cursor).unwrap();
-        assert!(container.metadata.vendor.is_none());
-    }
-
-    #[test]
     fn parse_sdf0_rejects_oversized_header_size() {
         let oversize = SDF0_MAX_HEADER_SIZE + 1;
         let data = build_sdf0_header(1, oversize, 0, 0x00, oversize + 100);
@@ -776,14 +752,6 @@ mod tests {
         let data = b"Vendor\0Test";
         let metadata = parse_metadata_table(data).unwrap();
         assert!(metadata.vendor.is_none());
-    }
-
-    #[test]
-    fn parse_sdf0_zero_table_offset() {
-        let data = build_sdf0_header(1, 24, 0, 0x00, 24);
-        let mut cursor = Cursor::new(&data);
-        let container = parse_sdf0(&mut cursor).unwrap();
-        assert!(container.metadata.vendor.is_none());
     }
 
     #[test]

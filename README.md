@@ -79,12 +79,12 @@ cargo test
 src/
   main.rs              CLI entry (no args → GUI)
   lib.rs               library crate for tests
+  branding.rs          Product name (from Cargo.toml) and project URLs
   command.rs           Backend argv planner (no shell strings)
   orchestration.rs     Shared probe / list / flash session (CLI + GUI)
   process.rs           Run / stream / cancel / reap + ProcessRunner trait
   process_runner.rs    NativeRunner (OS process adapter; coverage-ignored)
-  flash.rs             SHA-256, SDF peek, version compare
-  firmware_db.rs       Known-hash table + binary firmware ID
+  firmware_db.rs       Known-hash table, binary firmware ID, SHA-256, version compare
   platform.rs          Slim/desktop model tables, form-factor helpers
   drive/
     parse.rs           Pure list/identity/selection parsers (covered)

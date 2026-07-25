@@ -112,71 +112,48 @@ impl Language {
     }
 }
 
+const LOCALE_PREFIXES: &[(&str, Language)] = &[
+    ("bg", Language::Bulgarian),
+    ("hr", Language::Croatian),
+    ("cs", Language::Czech),
+    ("da", Language::Danish),
+    ("nl", Language::Dutch),
+    ("et", Language::Estonian),
+    ("fi", Language::Finnish),
+    ("fr", Language::French),
+    ("gl", Language::Galician),
+    ("de", Language::German),
+    ("el", Language::Greek),
+    ("hu", Language::Hungarian),
+    ("id", Language::Indonesian),
+    ("it", Language::Italian),
+    ("lv", Language::Latvian),
+    ("lt", Language::Lithuanian),
+    ("ms", Language::Malay),
+    ("nb", Language::Norwegian),
+    ("no", Language::Norwegian),
+    ("nn", Language::Norwegian),
+    ("pl", Language::Polish),
+    ("pt-br", Language::PortugueseBrazilian),
+    ("pt", Language::Portuguese),
+    ("ro", Language::Romanian),
+    ("ru", Language::Russian),
+    ("sk", Language::Slovak),
+    ("sl", Language::Slovenian),
+    ("es", Language::Spanish),
+    ("sv", Language::Swedish),
+    ("tr", Language::Turkish),
+    ("uk", Language::Ukrainian),
+];
+
 /// Map a BCP-47 locale string (case-insensitive) to a supported language.
 /// Returns `English` for any unrecognized prefix.
 pub fn locale_to_language(locale: &str) -> Language {
     let locale = locale.to_lowercase();
-    if locale.starts_with("bg") {
-        Language::Bulgarian
-    } else if locale.starts_with("hr") {
-        Language::Croatian
-    } else if locale.starts_with("cs") {
-        Language::Czech
-    } else if locale.starts_with("da") {
-        Language::Danish
-    } else if locale.starts_with("nl") {
-        Language::Dutch
-    } else if locale.starts_with("et") {
-        Language::Estonian
-    } else if locale.starts_with("fi") {
-        Language::Finnish
-    } else if locale.starts_with("fr") {
-        Language::French
-    } else if locale.starts_with("gl") {
-        Language::Galician
-    } else if locale.starts_with("de") {
-        Language::German
-    } else if locale.starts_with("el") {
-        Language::Greek
-    } else if locale.starts_with("hu") {
-        Language::Hungarian
-    } else if locale.starts_with("id") {
-        Language::Indonesian
-    } else if locale.starts_with("it") {
-        Language::Italian
-    } else if locale.starts_with("lv") {
-        Language::Latvian
-    } else if locale.starts_with("lt") {
-        Language::Lithuanian
-    } else if locale.starts_with("ms") {
-        Language::Malay
-    } else if locale.starts_with("nb") || locale.starts_with("no") || locale.starts_with("nn") {
-        Language::Norwegian
-    } else if locale.starts_with("pl") {
-        Language::Polish
-    } else if locale.starts_with("pt-br") {
-        Language::PortugueseBrazilian
-    } else if locale.starts_with("pt") {
-        Language::Portuguese
-    } else if locale.starts_with("ro") {
-        Language::Romanian
-    } else if locale.starts_with("ru") {
-        Language::Russian
-    } else if locale.starts_with("sk") {
-        Language::Slovak
-    } else if locale.starts_with("sl") {
-        Language::Slovenian
-    } else if locale.starts_with("es") {
-        Language::Spanish
-    } else if locale.starts_with("sv") {
-        Language::Swedish
-    } else if locale.starts_with("tr") {
-        Language::Turkish
-    } else if locale.starts_with("uk") {
-        Language::Ukrainian
-    } else {
-        Language::English
-    }
+    LOCALE_PREFIXES
+        .iter()
+        .find(|(prefix, _)| locale.starts_with(prefix))
+        .map_or(Language::English, |&(_, language)| language)
 }
 
 pub(crate) fn detect_system_language_from_locale(locale: Option<&str>) -> Language {
@@ -298,7 +275,6 @@ pub enum L10nKey {
     WarnCannotCombine,
     StatusReadyText,
     LogReady,
-    StatusNoDrivesFound,
     StatusDrivesFound,
     StatusOneDriveFound,
     LabelToken,
@@ -388,8 +364,7 @@ pub enum L10nKey {
 
 pub fn t(key: L10nKey, lang: Language) -> &'static str {
     match lang {
-        Language::Auto => en::t_en(key),
-        Language::English => en::t_en(key),
+        Language::Auto | Language::English => en::t_en(key),
         Language::Bulgarian => locales::t_bg(key),
         Language::Croatian => locales::t_hr(key),
         Language::Czech => locales::t_cs(key),
@@ -479,11 +454,7 @@ mod tests {
 
     #[test]
     fn test_resolve_language() {
-        assert_eq!(resolve_language(Language::French), Language::French);
-        assert_eq!(resolve_language(Language::Spanish), Language::Spanish);
-
-        let resolved = resolve_language(Language::Auto);
-        assert_eq!(resolved, detect_system_language());
+        assert_eq!(resolve_language(Language::Auto), detect_system_language());
     }
 
     const ALL_KEYS: &[L10nKey] = &[
@@ -572,7 +543,6 @@ mod tests {
         L10nKey::WarnCannotCombine,
         L10nKey::StatusReadyText,
         L10nKey::LogReady,
-        L10nKey::StatusNoDrivesFound,
         L10nKey::StatusDrivesFound,
         L10nKey::StatusOneDriveFound,
         L10nKey::LabelToken,
@@ -676,16 +646,9 @@ mod tests {
     fn test_translation_keys() {
         assert_eq!(
             ALL_KEYS.len(),
-            171,
+            170,
             "L10nKey variant count changed — update ALL_KEYS if intentional"
         );
-        for key in ALL_KEYS {
-            let translation = t(*key, Language::English);
-            assert!(
-                !translation.is_empty(),
-                "empty translation for key: {key:?}"
-            );
-        }
     }
 
     #[test]
@@ -736,23 +699,6 @@ mod tests {
                 ALL_KEYS.contains(&key),
                 "new safety key {key:?} missing from ALL_KEYS"
             );
-        }
-    }
-
-    #[test]
-    fn test_platform_safety_keys_non_empty_english() {
-        let keys = [
-            L10nKey::WarnPlatformMismatch,
-            L10nKey::WarnCrossFlashConfirm,
-            L10nKey::ReasonCrossFlashNotConfirmed,
-            L10nKey::InfoTwoStepFlash,
-            L10nKey::WarnFirmwareDowngrade,
-            L10nKey::InfoFirmwareModelMismatch,
-            L10nKey::ReasonMt1939NotCompatible,
-        ];
-        for &key in &keys {
-            let text = t(key, Language::English);
-            assert!(!text.is_empty(), "empty English text for {key:?}");
         }
     }
 

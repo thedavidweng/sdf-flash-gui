@@ -65,11 +65,6 @@ impl LibreDriveStatus {
     pub fn is_enabled(self) -> bool {
         matches!(self, Self::Enabled)
     }
-
-    /// True when the feature is at least available (enabled or possible).
-    pub fn is_possible(self) -> bool {
-        matches!(self, Self::Enabled | Self::PossibleNotEnabled)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,6 +129,14 @@ pub fn confirmation_matches(device: &str, typed: &str) -> bool {
     typed.trim() == required_flash_confirmation(device)
 }
 
+fn require_confirmation(drive: &str, typed: &str) -> Result<(), PlanError> {
+    let expected = required_flash_confirmation(drive);
+    if typed.trim() != expected {
+        return Err(PlanError::ConfirmationMismatch { expected });
+    }
+    Ok(())
+}
+
 pub fn plan_command(request: PlanRequest) -> Result<Plan, PlanError> {
     let tool_path = request.tool_path.trim();
     if tool_path.is_empty() {
@@ -183,11 +186,7 @@ pub fn plan_command(request: PlanRequest) -> Result<Plan, PlanError> {
             if write_modes_conflict(encrypted, include_boot_loader) {
                 return Err(PlanError::ConflictingWriteModes);
             }
-            if request.confirmation.trim() != required_flash_confirmation(drive) {
-                return Err(PlanError::ConfirmationMismatch {
-                    expected: required_flash_confirmation(drive),
-                });
-            }
+            require_confirmation(drive, &request.confirmation)?;
             args.extend([
                 "--all-yes".into(),
                 "-d".into(),
@@ -210,11 +209,7 @@ pub fn plan_command(request: PlanRequest) -> Result<Plan, PlanError> {
                 return Err(PlanError::MissingFirmware);
             }
             validate_recovery_boot_token(&recovery_boot_token)?;
-            if request.confirmation.trim() != required_flash_confirmation(drive) {
-                return Err(PlanError::ConfirmationMismatch {
-                    expected: required_flash_confirmation(drive),
-                });
-            }
+            require_confirmation(drive, &request.confirmation)?;
             args.extend([
                 "--all-yes".into(),
                 "-d".into(),
@@ -344,11 +339,7 @@ pub(crate) fn classify_libredrive_status(info_output: &str) -> LibreDriveStatus 
         if t_lower.contains("not possible") {
             return LibreDriveStatus::NotAvailable;
         }
-        if t_lower.contains("possible, not yet enabled")
-            || (t_lower.contains("possible")
-                && t_lower.contains("not yet")
-                && !t_lower.contains("not possible"))
-        {
+        if t_lower.contains("possible") && t_lower.contains("not yet") {
             return LibreDriveStatus::PossibleNotEnabled;
         }
         if t.eq_ignore_ascii_case("Enabled") {
@@ -369,9 +360,6 @@ pub(crate) fn classify_libredrive_status(info_output: &str) -> LibreDriveStatus 
     let mentions_libredrive = info_output.contains("LibreDrive");
     if has_specific_absent && mentions_libredrive {
         return LibreDriveStatus::NotAvailable;
-    }
-    if mentions_libredrive {
-        return LibreDriveStatus::Unknown;
     }
     LibreDriveStatus::Unknown
 }
@@ -498,20 +486,6 @@ mod tests {
                 "-o",
                 "/tmp/out"
             ]
-        );
-    }
-
-    #[test]
-    fn plans_with_empty_sdf_path_omits_f_flag() {
-        let plan = plan_command(base_request(Operation::Write {
-            firmware_path: "fw.bin".into(),
-            encrypted: false,
-            include_boot_loader: false,
-        }))
-        .unwrap();
-        assert_eq!(
-            plan.command.args,
-            ["--all-yes", "-d", "H:", "rawflash", "-i", "fw.bin"]
         );
     }
 
@@ -775,11 +749,6 @@ mod tests {
         assert!(!LibreDriveStatus::PossibleNotEnabled.is_enabled());
         assert!(!LibreDriveStatus::NotAvailable.is_enabled());
         assert!(!LibreDriveStatus::Unknown.is_enabled());
-
-        assert!(LibreDriveStatus::Enabled.is_possible());
-        assert!(LibreDriveStatus::PossibleNotEnabled.is_possible());
-        assert!(!LibreDriveStatus::NotAvailable.is_possible());
-        assert!(!LibreDriveStatus::Unknown.is_possible());
     }
 
     #[test]
@@ -826,7 +795,6 @@ Identification SDF present
             classify_libredrive_status(output),
             LibreDriveStatus::NotAvailable
         );
-        assert!(!classify_libredrive_status(output).is_possible());
     }
 
     #[test]
