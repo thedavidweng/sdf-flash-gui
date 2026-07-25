@@ -2,6 +2,9 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-21
+- **Amended**: 2026-07-25 — "What is allowed" item 4 extended to module-level
+  section dividers (matches existing practice in `orchestration.rs`,
+  `gui/mod.rs`, `drive/os.rs`); Enforcement gained a mechanical CI gate.
 - **Supersedes**: none
 
 ## Context
@@ -73,10 +76,12 @@ when the code could communicate the same thing through:
    `// MT1959 boot string at offset 12288 (from MakeMKV reverse engineering)`.
    The comment should be a pointer, not a paragraph.
 
-4. **Section markers in large data tables**: `// === Internal Desktop Drives ===`
-  in a static array of 18 entries. These are navigation aids for structured
-  data, not code explanations. Allowed only in data declarations (static
-  arrays, match arms with many cases), not in logic.
+4. **Section markers**: `// === Internal Desktop Drives ===` in a static array
+   of 18 entries, or `// ── Probe ──…` dividing a module into regions. These
+   are navigation aids, not code explanations. Allowed in data declarations
+   (static arrays, match arms with many cases) and as top-level dividers
+   between items in a module — never attached to individual statements to
+   explain them.
 
 ### What happens when code cannot be self-explanatory
 
@@ -124,6 +129,9 @@ is overridden by this ADR for this repository. Agents working in this repo:
 
 ## Enforcement
 
+- CI: `scripts/comment-gate.py` (job `comment-policy`) rejects added `*.rs`
+  lines whose comments are not one of the allowed kinds above. Run it locally
+  before pushing: `python3 scripts/comment-gate.py --base origin/main`.
 - Code review: reject PRs that add explanatory comments to new or edited code.
 - The `docs/adr/` directory is the canonical home for constraints that cannot
   live in the code.
