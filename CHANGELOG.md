@@ -19,6 +19,8 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 ### <!-- 10 -->💼 Other
 
 - **deps:** Bump thiserror from 2.0.18 to 2.0.19
+- **deps:** Bump serde from 1.0.228 to 1.0.229
+- **deps:** Bump serde_json from 1.0.150 to 1.0.151
 
 ### <!-- 2 -->🚜 Refactor
 
@@ -45,6 +47,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - Gate explanatory comments on added lines per ADR 0002
 - Enforce coverage-threshold sync and drop dead release glob
+- **changelog:** Sync CHANGELOG.md
 ## [0.4.0] - 2026-07-10
 
 ### <!-- 0 -->🚀 Features
