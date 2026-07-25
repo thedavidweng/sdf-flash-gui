@@ -44,45 +44,6 @@ pub struct Plan {
     pub command: Command,
 }
 
-/// LibreDrive status from sdftool `--info` Identification SDF strings.
-///
-/// MakeMKV shows e.g. "Possible, not yet enabled" — not a plain bool.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LibreDriveStatus {
-    #[default]
-    Unknown,
-    /// Not supported / not reported for this drive.
-    NotAvailable,
-    /// Supported by SDF but not yet activated on the drive.
-    PossibleNotEnabled,
-    /// LibreDrive active (or Drive-Specific SDF present).
-    Enabled,
-}
-
-impl LibreDriveStatus {
-    /// True when LibreDrive is fully enabled on the drive.
-    pub fn is_enabled(self) -> bool {
-        matches!(self, Self::Enabled)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DriveSafety {
-    pub mt1959: bool,
-    #[serde(default)]
-    pub mt1939: bool,
-    pub encrypted_firmware: bool,
-    pub firmware_date_prefix: Option<u32>,
-    pub mtk_mode: Option<char>,
-    /// LibreDrive status from Identification SDF / Drive Specific SDF lines.
-    #[serde(default)]
-    pub libredrive: LibreDriveStatus,
-    /// SDF.bin version string (e.g. `"0x00A6"`) parsed from `--info` output.
-    #[serde(default)]
-    pub sdf_version: Option<String>,
-}
-
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum PlanError {
     #[error("SDFtool executable path is required")]
@@ -277,106 +238,22 @@ fn validate_recovery_boot_token(token: &str) -> Result<(), PlanError> {
     Ok(())
 }
 
-/// Classify drive safety from a drive-list label and SDFtool `--info` output.
-pub fn classify_drive_safety(drive_label: &str, info_output: &str) -> DriveSafety {
-    let mt1959 = info_output
-        .lines()
-        .any(|line| line.contains(":MT1959") || line.contains(" MT1959"));
-    let mt1939 = !mt1959
-        && info_output
-            .lines()
-            .any(|line| line.contains(":MT1939") || line.contains(" MT1939"));
-    let mtk_mode = info_output
-        .lines()
-        .find(|line| line.contains("mtk:19:59"))
-        .and_then(extract_mtk_mode);
-    let firmware_date_prefix = extract_firmware_date_prefix(drive_label)
-        .or_else(|| extract_firmware_date_prefix(info_output));
-    let encrypted_firmware =
-        matches!(firmware_date_prefix, Some(prefix) if prefix >= 2120) && mtk_mode != Some('M');
-
-    let libredrive = classify_libredrive_status(info_output);
-    let sdf_version = info_output
-        .lines()
-        .find_map(|line| line.strip_prefix("SDF.bin version: ").map(str::trim))
-        .map(|s| s.to_string());
-
-    DriveSafety {
-        mt1959,
-        mt1939,
-        encrypted_firmware,
-        firmware_date_prefix,
-        mtk_mode,
-        libredrive,
-        sdf_version,
-    }
-}
-
-/// Parse LibreDrive status from `sdftool --info` text.
-///
-/// Prefer explicit Identification SDF status (`Possible, not yet enabled` /
-/// `Enabled`). Fall back to Drive Specific SDF present/not present.
-pub(crate) fn classify_libredrive_status(info_output: &str) -> LibreDriveStatus {
-    for line in info_output.lines() {
-        let t = line.trim();
-        let t_lower = t.to_ascii_lowercase();
-
-        if let Some(rest) = t.strip_prefix("8102:") {
-            let r = rest.trim();
-            let r_lower = r.to_ascii_lowercase();
-            if r.eq_ignore_ascii_case("Enabled") {
-                return LibreDriveStatus::Enabled;
+/// Format a command for display in the log.
+pub fn format_command(cmd: &Command) -> String {
+    std::iter::once(cmd.program.as_str())
+        .chain(cmd.args.iter().map(String::as_str))
+        .map(|s| {
+            if s.bytes().all(|b| {
+                b.is_ascii_alphanumeric()
+                    || matches!(b, b'.' | b'_' | b'-' | b':' | b'/' | b'\\' | b'=')
+            }) {
+                s.to_string()
+            } else {
+                format!("\"{}\"", s.replace('"', "\\\""))
             }
-            if r_lower.contains("not possible") || r.eq_ignore_ascii_case("Disabled") {
-                return LibreDriveStatus::NotAvailable;
-            }
-            if r_lower.contains("possible") {
-                return LibreDriveStatus::PossibleNotEnabled;
-            }
-            continue;
-        }
-
-        if t_lower.contains("not possible") {
-            return LibreDriveStatus::NotAvailable;
-        }
-        if t_lower.contains("possible") && t_lower.contains("not yet") {
-            return LibreDriveStatus::PossibleNotEnabled;
-        }
-        if t.eq_ignore_ascii_case("Enabled") {
-            return LibreDriveStatus::Enabled;
-        }
-    }
-
-    let has_specific_present = info_output.lines().any(|line| {
-        let l = line.trim();
-        l.contains("Drive Specific SDF") && l.contains("present") && !l.contains("not present")
-    });
-    if has_specific_present {
-        return LibreDriveStatus::Enabled;
-    }
-    let has_specific_absent = info_output
-        .lines()
-        .any(|line| line.contains("Drive Specific SDF not present"));
-    let mentions_libredrive = info_output.contains("LibreDrive");
-    if has_specific_absent && mentions_libredrive {
-        return LibreDriveStatus::NotAvailable;
-    }
-    LibreDriveStatus::Unknown
-}
-
-fn extract_mtk_mode(line: &str) -> Option<char> {
-    line.rsplit_once(':')
-        .and_then(|(_, suffix)| suffix.trim().chars().next())
-}
-
-fn extract_firmware_date_prefix(drive_label: &str) -> Option<u32> {
-    drive_label.split(['_', '-', ' ']).find_map(|part| {
-        if part.len() >= 4 && part.as_bytes()[0..4].iter().all(u8::is_ascii_digit) {
-            part[0..4].parse::<u32>().ok()
-        } else {
-            None
-        }
-    })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
@@ -501,17 +378,6 @@ mod tests {
             plan_command(req),
             Err(PlanError::UnsupportedPlatform)
         ));
-    }
-
-    #[test]
-    fn classifies_encrypted_drive() {
-        let output = "Drive platform: MT1959\ninternal: mtk:19:59: H\n";
-        let safety = classify_drive_safety(
-            "H: HL-DT-ST_BD-RE_BU40N_1.03_212005070917_SIK04NAG90506",
-            output,
-        );
-        assert!(safety.mt1959);
-        assert!(safety.encrypted_firmware);
     }
 
     #[test]
@@ -675,240 +541,6 @@ mod tests {
     }
 
     #[test]
-    fn classify_non_mt1959() {
-        let safety = classify_drive_safety("D: Some_Old_Drive", "no platform info");
-        assert!(!safety.mt1959);
-        assert!(!safety.mt1939);
-        assert!(!safety.encrypted_firmware);
-        assert!(safety.mtk_mode.is_none());
-        assert!(safety.firmware_date_prefix.is_none());
-    }
-
-    #[test]
-    fn classify_mt1939_detected() {
-        let safety = classify_drive_safety("D: Some_Old_Drive", "Drive platform: MT1939");
-        assert!(!safety.mt1959);
-        assert!(safety.mt1939);
-    }
-
-    #[test]
-    fn classify_mt1959_takes_priority_over_mt1939() {
-        let output = "Drive platform: MT1959\nAlso mentions MT1939 here";
-        let safety = classify_drive_safety("D: drive", output);
-        assert!(safety.mt1959);
-        assert!(!safety.mt1939);
-    }
-
-    #[test]
-    fn classify_mtk_mode_m_not_encrypted() {
-        let output = "Drive platform: MT1959\ninternal: mtk:19:59: M\n";
-        let safety = classify_drive_safety("H: HL-DT-ST_BD-RE_BU40N_1.03_212005070917", output);
-        assert!(safety.mt1959);
-        assert!(!safety.encrypted_firmware);
-        assert_eq!(safety.mtk_mode, Some('M'));
-    }
-
-    #[test]
-    fn classify_encrypted_by_date_prefix() {
-        let output = "Drive platform: MT1959\ninternal: mtk:19:59: H\n";
-        let safety = classify_drive_safety("BU40N_21200507", output);
-        assert!(safety.mt1959);
-        assert!(safety.encrypted_firmware);
-        assert_eq!(safety.firmware_date_prefix, Some(2120));
-        assert_eq!(safety.mtk_mode, Some('H'));
-    }
-
-    #[test]
-    fn classify_not_encrypted_old_date() {
-        let output = "Drive platform: MT1959\ninternal: mtk:19:59: H\n";
-        let safety = classify_drive_safety("BU40N_20100101", output);
-        assert!(safety.mt1959);
-        assert!(!safety.encrypted_firmware);
-        assert_eq!(safety.firmware_date_prefix, Some(2010));
-    }
-
-    #[test]
-    fn classify_date_prefix_from_info_output() {
-        let output = "Drive platform: MT1959\nsome line 21210101\ninternal: mtk:19:59: H\n";
-        let safety = classify_drive_safety("BU40N", output);
-        assert_eq!(safety.firmware_date_prefix, Some(2121));
-        assert!(safety.encrypted_firmware);
-    }
-
-    #[test]
-    fn extract_mtk_mode_various() {
-        assert_eq!(extract_mtk_mode("mtk:19:59: H"), Some('H'));
-        assert_eq!(extract_mtk_mode("mtk:19:59: M"), Some('M'));
-        assert_eq!(extract_mtk_mode("mtk:19:59: "), None);
-        assert_eq!(extract_mtk_mode("no colon here"), None);
-    }
-
-    #[test]
-    fn libre_drive_status_helpers() {
-        assert!(LibreDriveStatus::Enabled.is_enabled());
-        assert!(!LibreDriveStatus::PossibleNotEnabled.is_enabled());
-        assert!(!LibreDriveStatus::NotAvailable.is_enabled());
-        assert!(!LibreDriveStatus::Unknown.is_enabled());
-    }
-
-    #[test]
-    fn classify_libredrive_present() {
-        let output = "SDF.bin version: 0x00A6\n\nDrive Specific SDF present\n";
-        let safety = classify_drive_safety("D: drive", output);
-        assert_eq!(safety.libredrive, LibreDriveStatus::Enabled);
-        assert_eq!(safety.sdf_version.as_deref(), Some("0x00A6"));
-    }
-
-    #[test]
-    fn classify_libredrive_not_present() {
-        let output = "SDF.bin version: 0x00A6\n\nDrive Specific SDF not present\n";
-        let safety = classify_drive_safety("D: drive", output);
-        assert_eq!(safety.libredrive, LibreDriveStatus::Unknown);
-        assert_eq!(safety.sdf_version.as_deref(), Some("0x00A6"));
-    }
-
-    #[test]
-    fn classify_libredrive_possible_not_enabled() {
-        let output = "\
-SDF.bin version: 0x00A6
-Drive Specific SDF not present
-Identification SDF present
-8000:LibreDrive Information
-8013:Status
-8102:Possible, not yet enabled
-8001:Drive platform
-:MT1959
-";
-        let safety = classify_drive_safety("D: drive", output);
-        assert_eq!(safety.libredrive, LibreDriveStatus::PossibleNotEnabled);
-        assert!(safety.mt1959);
-    }
-
-    #[test]
-    fn classify_libredrive_8102_not_possible() {
-        let output = "\
-8000:LibreDrive Information
-8013:Status
-8102:Not possible
-";
-        assert_eq!(
-            classify_libredrive_status(output),
-            LibreDriveStatus::NotAvailable
-        );
-    }
-
-    #[test]
-    fn classify_libredrive_8102_possible_short() {
-        assert_eq!(
-            classify_libredrive_status("8102:Possible\n"),
-            LibreDriveStatus::PossibleNotEnabled
-        );
-    }
-
-    #[test]
-    fn classify_libredrive_8102_unknown_status_continues() {
-        assert_eq!(
-            classify_libredrive_status("8102:???\nLibreDrive Information\n"),
-            LibreDriveStatus::Unknown
-        );
-    }
-
-    #[test]
-    fn classify_libredrive_possible_capital_enabled_word() {
-        assert_eq!(
-            classify_libredrive_status("Status: Possible, not yet Enabled\n"),
-            LibreDriveStatus::PossibleNotEnabled
-        );
-    }
-
-    #[test]
-    fn classify_libredrive_possible_all_lowercase_line() {
-        assert_eq!(
-            classify_libredrive_status("status: possible, not yet enabled\n"),
-            LibreDriveStatus::PossibleNotEnabled
-        );
-    }
-
-    #[test]
-    fn classify_libredrive_possible_not_yet_without_comma_phrase() {
-        assert_eq!(
-            classify_libredrive_status("LibreDrive is possible — not yet active\n"),
-            LibreDriveStatus::PossibleNotEnabled
-        );
-    }
-
-    #[test]
-    fn classify_libredrive_8102_enabled() {
-        let output = "8013:Status\n8102:Enabled\n";
-        assert_eq!(
-            classify_libredrive_status(output),
-            LibreDriveStatus::Enabled
-        );
-    }
-
-    #[test]
-    fn classify_libredrive_8102_disabled() {
-        let output = "8102:Disabled\n";
-        assert_eq!(
-            classify_libredrive_status(output),
-            LibreDriveStatus::NotAvailable
-        );
-    }
-
-    #[test]
-    fn classify_libredrive_bare_enabled_line() {
-        let output = "LibreDrive Information\nEnabled\n";
-        assert_eq!(
-            classify_libredrive_status(output),
-            LibreDriveStatus::Enabled
-        );
-    }
-
-    #[test]
-    fn classify_libredrive_absent_phrase_line() {
-        let output = "some status: Not possible for this model\n";
-        assert_eq!(
-            classify_libredrive_status(output),
-            LibreDriveStatus::NotAvailable
-        );
-    }
-
-    #[test]
-    fn classify_libredrive_specific_absent_with_section() {
-        let output = "\
-LibreDrive Information
-Drive Specific SDF not present
-";
-        assert_eq!(
-            classify_libredrive_status(output),
-            LibreDriveStatus::NotAvailable
-        );
-    }
-
-    #[test]
-    fn classify_libredrive_mentions_without_status() {
-        let output = "LibreDrive Information\n(no status line)\n";
-        assert_eq!(
-            classify_libredrive_status(output),
-            LibreDriveStatus::Unknown
-        );
-    }
-
-    #[test]
-    fn classify_libredrive_absent_from_output() {
-        let safety = classify_drive_safety("D: drive", "no SDF info at all");
-        assert_eq!(safety.libredrive, LibreDriveStatus::Unknown);
-        assert!(safety.sdf_version.is_none());
-    }
-
-    #[test]
-    fn classify_sdf_version_strips_whitespace() {
-        let output = "SDF.bin version: 0x00B0  \n";
-        let safety = classify_drive_safety("D: drive", output);
-        assert_eq!(safety.sdf_version.as_deref(), Some("0x00B0"));
-    }
-
-    #[test]
     fn required_flash_confirmation_trims() {
         assert_eq!(required_flash_confirmation("  H:  "), "FLASH H:");
     }
@@ -1002,39 +634,21 @@ Drive Specific SDF not present
     }
 
     #[test]
-    fn classify_mtk_mode_whitespace() {
-        let output = "Drive platform: MT1959\ninternal: mtk:19:59:   X\n";
-        let safety = classify_drive_safety("BU40N", output);
-        assert_eq!(safety.mtk_mode, Some('X'));
+    fn format_command_simple() {
+        let cmd = crate::command::Command {
+            program: "/usr/bin/sdftool".into(),
+            args: vec!["-d".into(), "/dev/sr0".into(), "--info".into()],
+        };
+        assert_eq!(format_command(&cmd), "/usr/bin/sdftool -d /dev/sr0 --info");
     }
 
     #[test]
-    fn classify_no_mtk_line() {
-        let output = "Drive platform: MT1959\nno mtk line here\n";
-        let safety = classify_drive_safety("BU40N", output);
-        assert!(safety.mt1959);
-        assert!(safety.mtk_mode.is_none());
-        assert!(!safety.encrypted_firmware);
-    }
-
-    #[test]
-    fn extract_firmware_date_prefix_no_digits() {
-        assert_eq!(extract_firmware_date_prefix("BU40N_no_date"), None);
-    }
-
-    #[test]
-    fn extract_firmware_date_prefix_short_segment() {
-        assert_eq!(extract_firmware_date_prefix("BU40N_12"), None);
-    }
-
-    #[test]
-    fn drive_safety_deserialize_without_mt1939_field() {
-        let json = r#"{"mt1959":true,"encrypted_firmware":false,"firmware_date_prefix":null,"mtk_mode":null}"#;
-        let safety: DriveSafety = serde_json::from_str(json).unwrap();
-        assert!(safety.mt1959);
-        assert!(!safety.mt1939);
-        assert!(!safety.encrypted_firmware);
-        assert_eq!(safety.libredrive, LibreDriveStatus::Unknown);
-        assert!(safety.sdf_version.is_none());
+    fn format_command_quoted_arg() {
+        let cmd = crate::command::Command {
+            program: "/usr/bin/sdftool".into(),
+            args: vec!["-d".into(), "path with spaces".into()],
+        };
+        let result = format_command(&cmd);
+        assert!(result.contains("\"path with spaces\""));
     }
 }

@@ -188,8 +188,20 @@ pub fn resolve_language(lang: Language) -> Language {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum L10nKey {
+macro_rules! l10n_keys {
+    ($($key:ident),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum L10nKey {
+            $($key,)*
+        }
+
+        impl L10nKey {
+            pub const ALL: &'static [L10nKey] = &[$(L10nKey::$key,)*];
+        }
+    };
+}
+
+l10n_keys! {
     TitleDriveProperties,
     LabelDevice,
     SectionOperation,
@@ -456,199 +468,16 @@ mod tests {
     fn test_resolve_language() {
         assert_eq!(resolve_language(Language::Auto), detect_system_language());
     }
-
-    const ALL_KEYS: &[L10nKey] = &[
-        L10nKey::TitleDriveProperties,
-        L10nKey::LabelDevice,
-        L10nKey::SectionOperation,
-        L10nKey::TabWrite,
-        L10nKey::TabRead,
-        L10nKey::TabRecover,
-        L10nKey::OptionBootloader,
-        L10nKey::OptionEncrypted,
-        L10nKey::SectionFirmwareImage,
-        L10nKey::BtnBrowse,
-        L10nKey::SectionStatus,
-        L10nKey::LabelTypeToConfirm,
-        L10nKey::LabelWrongFw,
-        L10nKey::BtnExtract,
-        L10nKey::BtnStart,
-        L10nKey::BtnStop,
-        L10nKey::MenuQuit,
-        L10nKey::TooltipStop,
-        L10nKey::TitleStopWarning,
-        L10nKey::LabelStopWarningMsg,
-        L10nKey::LabelStopWarningDesc,
-        L10nKey::LabelStopWarningAsk,
-        L10nKey::BtnStopNo,
-        L10nKey::BtnStopYes,
-        L10nKey::TitleForceKillWarning,
-        L10nKey::LabelForceKillMsg,
-        L10nKey::LabelForceKillDesc,
-        L10nKey::LabelForceKillAsk,
-        L10nKey::BtnForceKillNo,
-        L10nKey::BtnForceKillYes,
-        L10nKey::StatusCancelling,
-        L10nKey::StatusOpCancelled,
-        L10nKey::LogOpCancelled,
-        L10nKey::StatusReady,
-        L10nKey::StatusNoDrives,
-        L10nKey::StatusProbing,
-        L10nKey::StatusProbeFailed,
-        L10nKey::StatusOpSuccess,
-        L10nKey::TooltipRefresh,
-        L10nKey::TooltipSettings,
-        L10nKey::TooltipAbout,
-        L10nKey::TooltipStartEnabled,
-        L10nKey::TitleExitWarning,
-        L10nKey::LabelExitWarningMsg,
-        L10nKey::LabelExitWarningDesc,
-        L10nKey::LabelExitWarningAsk,
-        L10nKey::BtnNoCancel,
-        L10nKey::BtnYesForce,
-        L10nKey::TitleSettings,
-        L10nKey::LabelBackend,
-        L10nKey::LabelToolPath,
-        L10nKey::LabelSdfPath,
-        L10nKey::BtnListDrives,
-        L10nKey::BtnParseSdf,
-        L10nKey::LabelAutodetected,
-        L10nKey::LabelLanguage,
-        L10nKey::AboutDescription,
-        L10nKey::AboutBuiltWith,
-        L10nKey::AboutAcknowledgementsTitle,
-        L10nKey::AboutBackendAckText,
-        L10nKey::AboutCreatorAckText,
-        L10nKey::ReasonBusy,
-        L10nKey::ReasonProbing,
-        L10nKey::ReasonNoDrive,
-        L10nKey::ReasonNotMt1959,
-        L10nKey::ReasonNoBackend,
-        L10nKey::ReasonNoFirmware,
-        L10nKey::ReasonConflict,
-        L10nKey::ReasonEnterToken,
-        L10nKey::LabelManufacturer,
-        L10nKey::LabelProduct,
-        L10nKey::LabelRevision,
-        L10nKey::LabelSerial,
-        L10nKey::LabelFirmwareDate,
-        L10nKey::LabelMt1959Platform,
-        L10nKey::LabelEncryptedFirmware,
-        L10nKey::LabelLibreDrive,
-        L10nKey::LibreDriveEnabled,
-        L10nKey::LibreDrivePossible,
-        L10nKey::LibreDriveNotAvailable,
-        L10nKey::LibreDriveUnknown,
-        L10nKey::LabelSdfVersion,
-        L10nKey::WarnCannotCombine,
-        L10nKey::StatusReadyText,
-        L10nKey::LogReady,
-        L10nKey::StatusDrivesFound,
-        L10nKey::StatusOneDriveFound,
-        L10nKey::LabelToken,
-        L10nKey::WarnFirmwareLoadFailed,
-        L10nKey::LabelAppName,
-        L10nKey::LabelGithubRepo,
-        L10nKey::LabelVersion,
-        L10nKey::BackendSdftool,
-        L10nKey::BackendMakeMkv,
-        L10nKey::BtnAutoDetect,
-        L10nKey::StatusNotFound,
-        L10nKey::StatusPathValid,
-        L10nKey::StatusOptional,
-        L10nKey::StatusHintRead,
-        L10nKey::StatusHintWrite,
-        L10nKey::StatusHintRecover,
-        L10nKey::ReasonInvalidToolPath,
-        L10nKey::ReasonInvalidSdfPath,
-        L10nKey::StatusReadingFirmware,
-        L10nKey::StatusWritingFirmware,
-        L10nKey::StatusRecoveringDrive,
-        L10nKey::DialogTitleWrongFirmware,
-        L10nKey::StatusOpFinished,
-        L10nKey::StatusOpFailed,
-        L10nKey::StatusListingDrives,
-        L10nKey::StatusDriveListFailed,
-        L10nKey::ValPathEmpty,
-        L10nKey::ValFileNotExist,
-        L10nKey::ValPathNotFile,
-        L10nKey::ValMustContainSdftool,
-        L10nKey::ValMustContainMakemkv,
-        L10nKey::ValExtMustBeBin,
-        L10nKey::ThemeSystem,
-        L10nKey::ThemeDark,
-        L10nKey::ThemeLight,
-        L10nKey::LogErrGeneric,
-        L10nKey::LogFirmwareEmpty,
-        L10nKey::LogFirmwareReadFailed,
-        L10nKey::LogFirmwareLoaded,
-        L10nKey::LogRecoverSelectWrongFw,
-        L10nKey::LogRecoveryTokenExtracted,
-        L10nKey::LogProbeResult,
-        L10nKey::LogParsedDrivesFromOutput,
-        L10nKey::LogParsedOneDriveFromOutput,
-        L10nKey::LogSdfHeader,
-        L10nKey::LogSdfVendor,
-        L10nKey::LogSdfModel,
-        L10nKey::LogSdfFirmware,
-        L10nKey::LogSdfFlags,
-        L10nKey::LogSdfExtraField,
-        L10nKey::LogSdfReadFailed,
-        L10nKey::LabelFlashSummaryTitle,
-        L10nKey::LabelFlashSummaryDrive,
-        L10nKey::LabelFlashSummaryFirmware,
-        L10nKey::LabelFlashSummaryMode,
-        L10nKey::FlashModeStandard,
-        L10nKey::FlashModeEncrypted,
-        L10nKey::FlashModeBootloader,
-        L10nKey::FlashModeRecover,
-        L10nKey::TitleFlashFailure,
-        L10nKey::LabelFlashFailureMsg,
-        L10nKey::LabelFlashFailureStep1,
-        L10nKey::LabelFlashFailureStep2,
-        L10nKey::LabelFlashFailureStep3,
-        L10nKey::BtnFlashFailureDismiss,
-        L10nKey::LabelNotAvailable,
-        L10nKey::BannerNoBackend,
-        L10nKey::LinkGetMakeMkv,
-        L10nKey::OptionDryRunOnly,
-        L10nKey::LogDryRunCommand,
-        L10nKey::HintFlashNoCancel,
-        L10nKey::HelpEmptyDrives,
-        L10nKey::LabelTokenLength,
-        L10nKey::WarnPlatformMismatch,
-        L10nKey::WarnCrossFlashConfirm,
-        L10nKey::ReasonCrossFlashNotConfirmed,
-        L10nKey::InfoTwoStepFlash,
-        L10nKey::WarnFirmwareDowngrade,
-        L10nKey::InfoFirmwareModelMismatch,
-        L10nKey::ReasonMt1939NotCompatible,
-        L10nKey::LogTruncated,
-        L10nKey::StatusYes,
-        L10nKey::StatusNo,
-        L10nKey::DialogFilterFirmware,
-        L10nKey::DialogFilterExecutable,
-    ];
-
     #[test]
     fn test_all_keys_non_empty_for_each_language() {
         for &lang in Language::ALL {
             if lang == Language::Auto {
                 continue;
             }
-            for key in ALL_KEYS {
+            for key in L10nKey::ALL {
                 assert!(!t(*key, lang).is_empty(), "{lang:?} missing {key:?}");
             }
         }
-    }
-
-    #[test]
-    fn test_translation_keys() {
-        assert_eq!(
-            ALL_KEYS.len(),
-            170,
-            "L10nKey variant count changed — update ALL_KEYS if intentional"
-        );
     }
 
     #[test]
@@ -681,25 +510,6 @@ mod tests {
         let args = [("required", "WRITE")];
         let translation = t_with_args(L10nKey::LabelTypeToConfirm, Language::English, &args);
         assert_eq!(translation, "Type \"WRITE\" to confirm:");
-    }
-
-    #[test]
-    fn test_platform_safety_keys_in_all_keys() {
-        let new_keys = [
-            L10nKey::WarnPlatformMismatch,
-            L10nKey::WarnCrossFlashConfirm,
-            L10nKey::ReasonCrossFlashNotConfirmed,
-            L10nKey::InfoTwoStepFlash,
-            L10nKey::WarnFirmwareDowngrade,
-            L10nKey::InfoFirmwareModelMismatch,
-            L10nKey::ReasonMt1939NotCompatible,
-        ];
-        for &key in &new_keys {
-            assert!(
-                ALL_KEYS.contains(&key),
-                "new safety key {key:?} missing from ALL_KEYS"
-            );
-        }
     }
 
     #[test]

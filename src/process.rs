@@ -488,50 +488,6 @@ fn join_pipe_readers<T>(
     }
 }
 
-/// Extract a 0–100 progress value from a tool output line (MakeMKV PRGV, `NN%`, etc.).
-pub fn parse_progress_percent(line: &str) -> Option<f32> {
-    let line = line.trim();
-
-    if let Some(rest) = line.strip_prefix("PRGV:") {
-        let mut parts = rest.split(',');
-        let current: f32 = parts.next()?.parse().ok()?;
-        let total: f32 = parts.next()?.parse().ok()?;
-        if total > 0.0 {
-            return Some((current / total * 100.0).clamp(0.0, 100.0));
-        }
-    }
-
-    if let Some(idx) = line.rfind('%') {
-        let before = &line[..idx];
-        let start = before
-            .rfind(|c: char| !c.is_ascii_digit())
-            .map_or(0, |i| i + 1);
-        if let Ok(n) = before[start..].parse::<f32>() {
-            return Some(n.clamp(0.0, 100.0));
-        }
-    }
-
-    None
-}
-
-/// Format a command for display in the log.
-pub fn format_command(cmd: &crate::command::Command) -> String {
-    std::iter::once(cmd.program.as_str())
-        .chain(cmd.args.iter().map(String::as_str))
-        .map(|s| {
-            if s.bytes().all(|b| {
-                b.is_ascii_alphanumeric()
-                    || matches!(b, b'.' | b'_' | b'-' | b':' | b'/' | b'\\' | b'=')
-            }) {
-                s.to_string()
-            } else {
-                format!("\"{}\"", s.replace('"', "\\\""))
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 /// Seam for backend process execution.
 ///
 /// Production uses [`crate::process_runner::NativeRunner`] (coverage-ignored thin
@@ -581,57 +537,6 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         assert!(!control.is_child_running(), "child did not exit within 5s");
-    }
-
-    #[test]
-    fn parses_prgv() {
-        assert_eq!(parse_progress_percent("PRGV:50,100,0"), Some(50.0));
-        assert_eq!(parse_progress_percent("PRGV:100,100,0"), Some(100.0));
-    }
-
-    #[test]
-    fn parses_percent_suffix() {
-        assert_eq!(parse_progress_percent("Progress: 42%"), Some(42.0));
-        assert_eq!(
-            parse_progress_percent("100% Operation finished"),
-            Some(100.0)
-        );
-    }
-
-    #[test]
-    fn ignores_non_progress() {
-        assert_eq!(parse_progress_percent("MSG:1005,0,2"), None);
-    }
-
-    #[test]
-    fn prgv_format() {
-        assert_eq!(parse_progress_percent("PRGV:50,100"), Some(50.0));
-        assert_eq!(parse_progress_percent("PRGV:0,100"), Some(0.0));
-        assert_eq!(parse_progress_percent("PRGV:100,100"), Some(100.0));
-    }
-
-    #[test]
-    fn prgv_format_partial() {
-        let p = parse_progress_percent("PRGV:33,99").unwrap();
-        assert!((p - 33.33).abs() < 0.1);
-    }
-
-    #[test]
-    fn percent_format() {
-        assert_eq!(parse_progress_percent("42%"), Some(42.0));
-        assert_eq!(parse_progress_percent("Progress: 75%"), Some(75.0));
-        assert_eq!(parse_progress_percent("100%"), Some(100.0));
-    }
-
-    #[test]
-    fn no_progress() {
-        assert_eq!(parse_progress_percent("some random text"), None);
-        assert_eq!(parse_progress_percent(""), None);
-    }
-
-    #[test]
-    fn prgv_zero_total_clamps() {
-        assert_eq!(parse_progress_percent("PRGV:0,0"), None);
     }
 
     #[cfg(unix)]
@@ -695,52 +600,6 @@ mod tests {
             stderr: "err\n".into(),
         };
         assert_eq!(out.combined(), "err");
-    }
-
-    #[test]
-    fn format_command_simple() {
-        let cmd = crate::command::Command {
-            program: "/usr/bin/sdftool".into(),
-            args: vec!["-d".into(), "/dev/sr0".into(), "--info".into()],
-        };
-        assert_eq!(format_command(&cmd), "/usr/bin/sdftool -d /dev/sr0 --info");
-    }
-
-    #[test]
-    fn format_command_quoted_arg() {
-        let cmd = crate::command::Command {
-            program: "/usr/bin/sdftool".into(),
-            args: vec!["-d".into(), "path with spaces".into()],
-        };
-        let result = format_command(&cmd);
-        assert!(result.contains("\"path with spaces\""));
-    }
-
-    #[test]
-    fn parse_progress_percent_prgv_partial() {
-        assert_eq!(parse_progress_percent("PRGV:50"), None);
-    }
-
-    #[test]
-    fn parse_progress_percent_prgv_over_100() {
-        let p = parse_progress_percent("PRGV:200,100").unwrap();
-        assert!((p - 100.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn parse_progress_percent_prgv_negative() {
-        let p = parse_progress_percent("PRGV:-10,100").unwrap();
-        assert!((p - 0.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn parse_progress_percent_multiple_percent_signs() {
-        assert_eq!(parse_progress_percent("10% then 90%"), Some(90.0));
-    }
-
-    #[test]
-    fn parse_progress_percent_no_digits_before_percent() {
-        assert_eq!(parse_progress_percent("%"), None);
     }
 
     fn as_completed(outcome: CommandRunOutcome) -> Result<CommandOutput, &'static str> {

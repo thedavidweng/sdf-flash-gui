@@ -225,7 +225,6 @@ impl eframe::App for App {
         {
             if let Some(idx) = self.state.drive.selected_drive {
                 spawn_probe(&self.worker_tx, &mut self.state, idx, &self.runner);
-                self.state.runtime.probing = true;
             }
         }
 

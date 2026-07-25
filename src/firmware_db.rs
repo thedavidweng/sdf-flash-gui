@@ -314,8 +314,8 @@ pub fn extract_firmware_date_from_binary(data: &[u8]) -> Option<u32> {
     None
 }
 
-/// Validate a 10–12 digit string as a firmware date and return the 4-digit
-/// year prefix. The caller guarantees the input is 10–12 ASCII digits.
+/// Validate an 8–12 digit string as a firmware date and return the 4-digit
+/// year prefix. The caller guarantees the input is 8–12 ASCII digits.
 fn parse_date_prefix(s: &str) -> Option<u32> {
     let year: u32 = s[0..4].parse().ok()?;
     let month: u32 = s[4..6].parse().ok()?;
@@ -330,6 +330,28 @@ fn parse_date_prefix(s: &str) -> Option<u32> {
         return None;
     }
     Some(year)
+}
+
+/// Extract a firmware date stamp from free text (drive label or `--info`
+/// output) and return the 4-digit year prefix.
+///
+/// Scans alphanumeric-delimited tokens for a calendar stamp (`21200507` /
+/// `2120050709` / `212005070917`), validated like the binary scan — serial
+/// numbers and version tokens do not match.
+pub fn extract_firmware_date_from_text(text: &str) -> Option<u32> {
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|token| matches!(token.len(), 8 | 10..=12))
+        .filter(|token| token.bytes().all(|b| b.is_ascii_digit()))
+        .find_map(parse_date_prefix)
+}
+
+/// Whether a firmware write must use `rawflash enc` mode: either the drive's
+/// current firmware or the firmware file being written is encrypted.
+pub fn encrypted_write_required(
+    drive_encrypted_firmware: bool,
+    firmware_file_encrypted: Option<bool>,
+) -> bool {
+    drive_encrypted_firmware || firmware_file_encrypted.unwrap_or(false)
 }
 
 /// Determine whether a firmware binary is encrypted (date ≥ 2020).
@@ -1071,6 +1093,52 @@ mod tests {
         };
         let sdf = FirmwareSdfInfo { model: None };
         assert!(resolve_model_with_sdf(&id, Some(&sdf)).is_none());
+    }
+
+    #[test]
+    fn extract_date_from_text_twelve_digit_label_token() {
+        assert_eq!(
+            extract_firmware_date_from_text("H: HL-DT-ST_BD-RE_BU40N_1.03_212005070917_SIK04NAG"),
+            Some(2120)
+        );
+    }
+
+    #[test]
+    fn extract_date_from_text_eight_digit_token() {
+        assert_eq!(
+            extract_firmware_date_from_text("BU40N_21200507"),
+            Some(2120)
+        );
+    }
+
+    #[test]
+    fn extract_date_from_text_own_line_in_info_output() {
+        assert_eq!(
+            extract_firmware_date_from_text("Drive platform: MT1959\n21210101\nmore"),
+            Some(2121)
+        );
+    }
+
+    #[test]
+    fn extract_date_from_text_skips_serial_and_invalid_tokens() {
+        assert_eq!(
+            extract_firmware_date_from_text("BU40N_123456789_212005070917"),
+            Some(2120)
+        );
+        assert_eq!(extract_firmware_date_from_text("BU40N_99991399"), None);
+        assert_eq!(extract_firmware_date_from_text("BU40N_no_date"), None);
+        assert_eq!(extract_firmware_date_from_text("BU40N_12"), None);
+        assert_eq!(extract_firmware_date_from_text(""), None);
+    }
+
+    #[test]
+    fn encrypted_write_required_when_either_side_encrypted() {
+        assert!(!encrypted_write_required(false, None));
+        assert!(!encrypted_write_required(false, Some(false)));
+        assert!(encrypted_write_required(true, None));
+        assert!(encrypted_write_required(true, Some(false)));
+        assert!(encrypted_write_required(false, Some(true)));
+        assert!(encrypted_write_required(true, Some(true)));
     }
 
     #[test]

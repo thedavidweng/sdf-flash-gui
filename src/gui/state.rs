@@ -93,7 +93,7 @@ pub struct DriveState {
     pub drive_mt1959: bool,
     pub drive_mt1939: bool,
     pub drive_encrypted_firmware: bool,
-    pub drive_libredrive: crate::command::LibreDriveStatus,
+    pub drive_libredrive: crate::drive::LibreDriveStatus,
     pub drive_sdf_version: Option<String>,
     pub drive_probed: bool,
 }
@@ -174,7 +174,7 @@ impl AppState {
                 drive_mt1959: false,
                 drive_mt1939: false,
                 drive_encrypted_firmware: false,
-                drive_libredrive: crate::command::LibreDriveStatus::Unknown,
+                drive_libredrive: crate::drive::LibreDriveStatus::Unknown,
                 drive_sdf_version: None,
                 drive_probed: false,
             },
@@ -354,16 +354,17 @@ impl AppState {
         self.drive.drive_mt1959 = false;
         self.drive.drive_mt1939 = false;
         self.drive.drive_encrypted_firmware = false;
-        self.drive.drive_libredrive = crate::command::LibreDriveStatus::Unknown;
+        self.drive.drive_libredrive = crate::drive::LibreDriveStatus::Unknown;
         self.drive.drive_sdf_version = None;
     }
 
     /// Recompute `encrypted_write` from the drive's firmware state and the
     /// loaded firmware file's encryption status.
     pub fn recompute_encrypted_write(&mut self) {
-        let drive_enc = self.drive.drive_encrypted_firmware;
-        let fw_enc = self.flash.firmware_file_encrypted.unwrap_or(false);
-        self.flash.encrypted_write = drive_enc || fw_enc;
+        self.flash.encrypted_write = crate::firmware_db::encrypted_write_required(
+            self.drive.drive_encrypted_firmware,
+            self.flash.firmware_file_encrypted,
+        );
     }
 
     /// Replace the drive list and re-select by path / identity (stable after re-enum).

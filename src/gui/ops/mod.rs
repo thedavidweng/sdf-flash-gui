@@ -88,31 +88,10 @@ mod tests {
         MockDialog::returning_nothing()
     }
 
-    struct MockRunner;
-
-    impl crate::process::ProcessRunner for MockRunner {
-        fn run_command(
-            &self,
-            _program: &str,
-            _args: &[String],
-            _control: Option<&crate::process::OperationControl>,
-        ) -> Result<crate::process::CommandRunOutcome, String> {
-            Err("mock: not implemented".into())
-        }
-
-        fn run_command_streaming(
-            &self,
-            _program: &str,
-            _args: &[String],
-            _on_line: &dyn Fn(&str),
-            _control: Option<&crate::process::OperationControl>,
-        ) -> Result<crate::process::CommandRunOutcome, String> {
-            Err("mock: not implemented".into())
-        }
-    }
-
     fn mock_runner() -> std::sync::Arc<dyn crate::process::ProcessRunner> {
-        std::sync::Arc::new(MockRunner)
+        std::sync::Arc::new(crate::test_support::FakeRunner::spawn_error(
+            "mock: not implemented",
+        ))
     }
 
     fn test_drive() -> Drive {
