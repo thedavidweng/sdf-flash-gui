@@ -158,54 +158,6 @@ impl From<&Drive> for DriveIdentity {
     }
 }
 
-/// Parse drive identity from sdftool `--info` output.
-pub fn parse_identity_from_info(device: &str, info_output: &str) -> DriveIdentity {
-    let mut vendor = String::new();
-    let mut model = String::new();
-    let mut revision = String::new();
-
-    for line in info_output.lines() {
-        let line = line.trim();
-        if let Some(val) = line
-            .strip_prefix("Vendor:")
-            .or_else(|| line.strip_prefix("vendor:"))
-        {
-            vendor = val.trim().to_string();
-        } else if let Some(val) = line
-            .strip_prefix("Product:")
-            .or_else(|| line.strip_prefix("product:"))
-            .or_else(|| line.strip_prefix("Model:"))
-            .or_else(|| line.strip_prefix("model:"))
-        {
-            model = val.trim().to_string();
-        } else if let Some(val) = line
-            .strip_prefix("Revision:")
-            .or_else(|| line.strip_prefix("revision:"))
-            .or_else(|| line.strip_prefix("Firmware:"))
-            .or_else(|| line.strip_prefix("firmware:"))
-        {
-            revision = val.trim().to_string();
-        }
-    }
-
-    if vendor.is_empty() && model.is_empty() {
-        if let Some((v, m)) = device.split_once('_') {
-            if !v.is_empty() {
-                vendor = v.to_string();
-            }
-            if !m.is_empty() {
-                model = m.to_string();
-            }
-        }
-    }
-
-    DriveIdentity {
-        vendor,
-        model,
-        revision,
-    }
-}
-
 /// True when `token` is a Windows drive letter (`D:` / `e:`).
 fn is_windows_drive_letter(token: &str) -> bool {
     let b = token.as_bytes();

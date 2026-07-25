@@ -1,7 +1,8 @@
 use crate::command::{self, Command};
 use crate::drive::Drive;
 use crate::i18n::{log_error, t, t_with_args, L10nKey, Language};
-use crate::process::{self, CommandRunOutcome, OperationControl, ProcessRunner};
+use crate::orchestration::BackendOpError;
+use crate::process::{OperationControl, ProcessRunner};
 
 use super::state::AppState;
 
@@ -35,7 +36,7 @@ pub enum WorkerResult {
         mt1959: bool,
         mt1939: bool,
         encrypted_firmware: bool,
-        libredrive: crate::command::LibreDriveStatus,
+        libredrive: crate::drive::LibreDriveStatus,
         sdf_version: Option<String>,
         error: Option<String>,
     },
@@ -251,7 +252,7 @@ fn probe_failed(drive_idx: usize, error: String) -> WorkerMsg {
         mt1959: false,
         mt1939: false,
         encrypted_firmware: false,
-        libredrive: crate::command::LibreDriveStatus::Unknown,
+        libredrive: crate::drive::LibreDriveStatus::Unknown,
         sdf_version: None,
         error: Some(error),
     })
@@ -270,6 +271,26 @@ fn send_cancelled(tx: &Sender<WorkerMsg>, lang: Language) {
         t(L10nKey::LogOpCancelled, lang).into(),
     )));
     let _ = tx.send(op_failed(t(L10nKey::StatusOpCancelled, lang).into()));
+}
+
+/// Map a [`BackendOpError`] to worker messages: force-kill prompt, cancel
+/// notice, or an error log plus a failed terminal result.
+fn send_backend_error(
+    tx: &Sender<WorkerMsg>,
+    lang: Language,
+    err: BackendOpError,
+    failed_status: L10nKey,
+) {
+    match err {
+        BackendOpError::NeedsForceKill => {
+            let _ = tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill));
+        }
+        BackendOpError::Cancelled => send_cancelled(tx, lang),
+        BackendOpError::Failed(e) => {
+            let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(log_error(lang, &e))));
+            let _ = tx.send(op_failed(t(failed_status, lang).into()));
+        }
+    }
 }
 
 pub fn spawn_probe(
@@ -304,12 +325,13 @@ pub fn spawn_probe(
     let control = Arc::new(OperationControl::new());
     state.runtime.probe_control = Some(control.clone());
     state.runtime.probing_drive = Some(drive_idx);
+    state.runtime.probing = true;
 
     thread::spawn(move || {
         let cmd = command::plan_drive_info(backend, &tool_path, &device);
         let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(format!(
             "> {}",
-            process::format_command(&cmd)
+            command::format_command(&cmd)
         ))));
         match crate::orchestration::probe_drive_with(
             backend,
@@ -332,16 +354,16 @@ pub fn spawn_probe(
                     error: None,
                 }));
             }
-            Err(crate::orchestration::ProbeError::Cancelled) => {
+            Err(BackendOpError::Cancelled) => {
                 let _ = tx.send(probe_failed(
                     drive_idx,
                     t(L10nKey::StatusProbeFailed, lang).into(),
                 ));
             }
-            Err(crate::orchestration::ProbeError::NeedsForceKill) => {
+            Err(BackendOpError::NeedsForceKill) => {
                 let _ = tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill));
             }
-            Err(crate::orchestration::ProbeError::Failed(e)) => {
+            Err(BackendOpError::Failed(e)) => {
                 let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(e.clone())));
                 let _ = tx.send(probe_failed(drive_idx, e));
             }
@@ -358,7 +380,7 @@ pub fn spawn_streaming_command(
     control: Arc<OperationControl>,
 ) {
     let tx = tx.clone();
-    let cmd_display = process::format_command(&cmd);
+    let cmd_display = command::format_command(&cmd);
     let program = cmd.program;
     let args = cmd.args;
     let initial_status = initial_status.to_string();
@@ -373,12 +395,13 @@ pub fn spawn_streaming_command(
     ))));
 
     thread::spawn(move || {
-        let result = runner.run_command_streaming(
-            &program,
-            &args,
+        let cmd = Command { program, args };
+        let result = crate::orchestration::run_streaming_with(
+            &cmd,
+            runner.as_ref(),
             &|line| {
                 let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(line.to_string())));
-                if let Some(p) = process::parse_progress_percent(line) {
+                if let Some(p) = crate::orchestration::parse_progress_percent(line) {
                     let _ = tx.send(WorkerMsg::Stream(StreamEvent::Progress(p)));
                 }
             },
@@ -386,7 +409,7 @@ pub fn spawn_streaming_command(
         );
 
         match result {
-            Ok(CommandRunOutcome::Completed(out)) => {
+            Ok(out) => {
                 let success = out.success();
                 let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
                     success,
@@ -398,16 +421,7 @@ pub fn spawn_streaming_command(
                     progress: if success { 100.0 } else { 0.0 },
                 }));
             }
-            Ok(CommandRunOutcome::Cancelled) => {
-                send_cancelled(&tx, lang);
-            }
-            Ok(CommandRunOutcome::NeedsForceKill) => {
-                let _ = tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill));
-            }
-            Err(e) => {
-                let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(log_error(lang, &e))));
-                let _ = tx.send(op_failed(t(L10nKey::StatusOpFailed, lang).into()));
-            }
+            Err(err) => send_backend_error(&tx, lang, err, L10nKey::StatusOpFailed),
         }
     });
 }
@@ -421,7 +435,7 @@ pub fn spawn_list_drives(
     let cmd = command::plan_drive_list(state.config.backend, &state.config.tool_path);
     let lang = state.chrome.resolved_lang;
     let control = state.begin_operation(t(L10nKey::StatusListingDrives, lang));
-    let cmd_display = process::format_command(&cmd);
+    let cmd_display = command::format_command(&cmd);
     if verbose {
         state.log(&format!("> {cmd_display}"));
     }
@@ -460,20 +474,13 @@ pub fn spawn_list_drives(
                     verbose,
                 }));
             }
-            Err(crate::orchestration::BackendOpError::Cancelled) => {
-                send_cancelled(&tx, lang);
-            }
-            Err(crate::orchestration::BackendOpError::NeedsForceKill) => {
-                let _ = tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill));
-            }
-            Err(crate::orchestration::BackendOpError::Failed(e)) => {
-                if !verbose {
+            Err(err) => {
+                if !verbose && matches!(err, BackendOpError::Failed(_)) {
                     let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(format!(
                         "> {cmd_display}"
                     ))));
                 }
-                let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(log_error(lang, &e))));
-                let _ = tx.send(op_failed(t(L10nKey::StatusDriveListFailed, lang).into()));
+                send_backend_error(&tx, lang, err, L10nKey::StatusDriveListFailed);
             }
         }
     });
@@ -484,6 +491,7 @@ mod tests {
     use super::*;
 
     use super::super::state::AppState;
+    use crate::test_support::FakeRunner;
 
     fn test_drive() -> crate::drive::Drive {
         crate::drive::Drive {
@@ -568,7 +576,7 @@ mod tests {
             mt1959: true,
             mt1939: false,
             encrypted_firmware: true,
-            libredrive: crate::command::LibreDriveStatus::Unknown,
+            libredrive: crate::drive::LibreDriveStatus::Unknown,
             sdf_version: None,
             error: None,
         }));
@@ -596,7 +604,7 @@ mod tests {
             mt1959: true,
             mt1939: false,
             encrypted_firmware: false,
-            libredrive: crate::command::LibreDriveStatus::Enabled,
+            libredrive: crate::drive::LibreDriveStatus::Enabled,
             sdf_version: Some("0x00A6".into()),
             error: None,
         }));
@@ -605,7 +613,7 @@ mod tests {
         assert_eq!(state.drive.drive_sdf_version.as_deref(), Some("0x00A6"));
         assert_eq!(
             state.drive.drive_libredrive,
-            crate::command::LibreDriveStatus::Enabled
+            crate::drive::LibreDriveStatus::Enabled
         );
     }
 
@@ -621,7 +629,7 @@ mod tests {
             mt1959: false,
             mt1939: false,
             encrypted_firmware: false,
-            libredrive: crate::command::LibreDriveStatus::Unknown,
+            libredrive: crate::drive::LibreDriveStatus::Unknown,
             sdf_version: None,
             error: Some("probe failed".into()),
         }));
@@ -645,7 +653,7 @@ mod tests {
             mt1959: true,
             mt1939: false,
             encrypted_firmware: true,
-            libredrive: crate::command::LibreDriveStatus::Unknown,
+            libredrive: crate::drive::LibreDriveStatus::Unknown,
             sdf_version: None,
             error: None,
         }));
@@ -1037,123 +1045,14 @@ mod tests {
         )
     }
 
-    enum MockOutcome {
-        Success,
-        Fail,
-        Cancelled,
-        NeedsForceKill,
-        ProbeFailed,
-    }
-
-    struct MockRunner {
-        output: String,
-        outcome: MockOutcome,
-    }
-
-    impl MockRunner {
-        fn success(output: &str) -> Self {
-            Self {
-                output: output.to_string(),
-                outcome: MockOutcome::Success,
-            }
-        }
-
-        fn failing() -> Self {
-            Self {
-                output: String::new(),
-                outcome: MockOutcome::Fail,
-            }
-        }
-
-        fn cancelled() -> Self {
-            Self {
-                output: String::new(),
-                outcome: MockOutcome::Cancelled,
-            }
-        }
-
-        fn needs_force_kill() -> Self {
-            Self {
-                output: String::new(),
-                outcome: MockOutcome::NeedsForceKill,
-            }
-        }
-
-        fn probe_failed() -> Self {
-            Self {
-                output: "probe failed".into(),
-                outcome: MockOutcome::ProbeFailed,
-            }
-        }
-    }
-
-    impl ProcessRunner for MockRunner {
-        fn run_command(
-            &self,
-            _program: &str,
-            _args: &[String],
-            _control: Option<&OperationControl>,
-        ) -> Result<CommandRunOutcome, String> {
-            match self.outcome {
-                MockOutcome::Success => Ok(CommandRunOutcome::Completed(make_output(&self.output))),
-                MockOutcome::Cancelled => Ok(CommandRunOutcome::Cancelled),
-                MockOutcome::NeedsForceKill => Ok(CommandRunOutcome::NeedsForceKill),
-                MockOutcome::Fail => Err("mock command failed".into()),
-                MockOutcome::ProbeFailed => Ok(CommandRunOutcome::Completed(make_failing_output(
-                    &self.output,
-                ))),
-            }
-        }
-
-        fn run_command_streaming(
-            &self,
-            _program: &str,
-            _args: &[String],
-            on_line: &dyn Fn(&str),
-            _control: Option<&OperationControl>,
-        ) -> Result<CommandRunOutcome, String> {
-            match self.outcome {
-                MockOutcome::Success => {
-                    for line in self.output.lines() {
-                        on_line(line);
-                    }
-                    Ok(CommandRunOutcome::Completed(make_output(&self.output)))
-                }
-                MockOutcome::Cancelled => Ok(CommandRunOutcome::Cancelled),
-                MockOutcome::NeedsForceKill => Ok(CommandRunOutcome::NeedsForceKill),
-                MockOutcome::Fail => Err("mock streaming failed".into()),
-                MockOutcome::ProbeFailed => Ok(CommandRunOutcome::Completed(make_failing_output(
-                    &self.output,
-                ))),
-            }
-        }
-    }
-
-    fn make_output(stdout: &str) -> crate::process::CommandOutput {
-        let status = std::process::Command::new("true").status().unwrap();
-        crate::process::CommandOutput {
-            status,
-            stdout: stdout.to_string(),
-            stderr: String::new(),
-        }
-    }
-
-    fn make_failing_output(stdout: &str) -> crate::process::CommandOutput {
-        let status = std::process::Command::new("false").status().unwrap();
-        crate::process::CommandOutput {
-            status,
-            stdout: stdout.to_string(),
-            stderr: String::new(),
-        }
-    }
-
     #[test]
     fn spawn_probe_no_drive() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::stdout(""));
         spawn_probe(&tx, &mut state, 0, &runner);
         drop(tx);
+        assert!(!state.runtime.probing);
         assert!(rx.try_recv().is_err());
     }
 
@@ -1162,7 +1061,7 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.drive.drives.push(test_drive());
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::stdout(""));
         spawn_probe(&tx, &mut state, 0, &runner);
         drop(tx);
         let msg = rx.try_recv().unwrap();
@@ -1181,7 +1080,7 @@ mod tests {
         state.drive.drives.push(test_drive());
         state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::stdout(""));
         spawn_probe(&tx, &mut state, 0, &runner);
         let messages = wait_for_probe_complete(&rx);
         drop(tx);
@@ -1199,7 +1098,7 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::stdout(""));
         spawn_list_drives(&tx, &mut state, &runner, false);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
@@ -1224,7 +1123,7 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(""));
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::stdout(""));
         spawn_list_drives(&tx, &mut state, &runner, true);
         assert!(state.runtime.log_text.contains('>'));
         let messages = wait_for_drives_listed(&rx);
@@ -1258,8 +1157,11 @@ mod tests {
         state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> =
-            Arc::new(MockRunner::success("Vendor: HL-DT-ST\nProduct: BU40N\n"));
+            Arc::new(FakeRunner::stdout("Vendor: HL-DT-ST\nProduct: BU40N\n"));
         spawn_probe(&tx, &mut state, 0, &runner);
+        assert!(state.runtime.probing);
+        assert!(state.runtime.probe_control.is_some());
+        assert_eq!(state.runtime.probing_drive, Some(0));
         let messages = wait_for_probe_complete(&rx);
         drop(tx);
         assert!(messages.len() >= 3);
@@ -1276,7 +1178,8 @@ mod tests {
         state.drive.drives.push(test_drive());
         state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::failing());
+        let runner: Arc<dyn ProcessRunner> =
+            Arc::new(FakeRunner::spawn_error("mock command failed"));
         spawn_probe(&tx, &mut state, 0, &runner);
         let messages = wait_for_probe_complete(&rx);
         drop(tx);
@@ -1291,7 +1194,7 @@ mod tests {
     #[test]
     fn spawn_streaming_command_success() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success("line1\nline2\n"));
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::stdout("line1\nline2\n"));
         let cmd = crate::command::Command {
             program: "/bin/echo".into(),
             args: vec![],
@@ -1315,7 +1218,8 @@ mod tests {
     #[test]
     fn spawn_streaming_command_fails() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::failing());
+        let runner: Arc<dyn ProcessRunner> =
+            Arc::new(FakeRunner::spawn_error("mock command failed"));
         let cmd = crate::command::Command {
             program: "/bin/false".into(),
             args: vec![],
@@ -1340,7 +1244,7 @@ mod tests {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
         let runner: Arc<dyn ProcessRunner> =
-            Arc::new(MockRunner::success("0:/dev/sr0 HL-DT-ST BU40N 1.03\n"));
+            Arc::new(FakeRunner::stdout("0:/dev/sr0 HL-DT-ST BU40N 1.03\n"));
         spawn_list_drives(&tx, &mut state, &runner, true);
         assert!(state.runtime.busy);
         assert!(state.runtime.log_text.contains('>'));
@@ -1408,7 +1312,7 @@ mod tests {
     #[test]
     fn spawn_streaming_command_cancelled() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::cancelled());
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::cancelled());
         let cmd = crate::command::Command {
             program: "/bin/echo".into(),
             args: vec![],
@@ -1433,7 +1337,7 @@ mod tests {
     #[test]
     fn spawn_streaming_command_non_success_output() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::probe_failed());
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::exit(1, "probe failed", ""));
         let cmd = crate::command::Command {
             program: "/bin/echo".into(),
             args: vec![],
@@ -1460,7 +1364,7 @@ mod tests {
     #[test]
     fn spawn_streaming_command_needs_force_kill() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::needs_force_kill());
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::needs_force_kill());
         let cmd = crate::command::Command {
             program: "/bin/echo".into(),
             args: vec![],
@@ -1683,7 +1587,7 @@ mod tests {
         state.drive.drives.push(test_drive());
         state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::cancelled());
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::cancelled());
         spawn_probe(&tx, &mut state, 0, &runner);
         let messages = wait_for_probe_complete(&rx);
         drop(tx);
@@ -1702,7 +1606,7 @@ mod tests {
         state.drive.drives.push(test_drive());
         state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::needs_force_kill());
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::needs_force_kill());
         spawn_probe(&tx, &mut state, 0, &runner);
         assert!(state.runtime.probe_control.is_some());
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -1721,7 +1625,7 @@ mod tests {
         state.drive.drives.push(test_drive());
         state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::probe_failed());
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::exit(1, "probe failed", ""));
         spawn_probe(&tx, &mut state, 0, &runner);
         let messages = wait_for_probe_complete(&rx);
         drop(tx);
@@ -1738,7 +1642,7 @@ mod tests {
     fn spawn_list_drives_cancelled() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::cancelled());
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::cancelled());
         spawn_list_drives(&tx, &mut state, &runner, true);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
@@ -1755,7 +1659,7 @@ mod tests {
     fn spawn_list_drives_needs_force_kill() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::needs_force_kill());
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::needs_force_kill());
         spawn_list_drives(&tx, &mut state, &runner, true);
         std::thread::sleep(std::time::Duration::from_millis(100));
         drop(tx);
@@ -1769,7 +1673,7 @@ mod tests {
     #[test]
     fn spawn_streaming_command_with_progress_line() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success("PRGV:50,100,0\n"));
+        let runner: Arc<dyn ProcessRunner> = Arc::new(FakeRunner::stdout("PRGV:50,100,0\n"));
         let cmd = crate::command::Command {
             program: "/bin/echo".into(),
             args: vec![],
@@ -1798,7 +1702,8 @@ mod tests {
     fn spawn_list_drives_fails() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::failing());
+        let runner: Arc<dyn ProcessRunner> =
+            Arc::new(FakeRunner::spawn_error("mock command failed"));
         spawn_list_drives(&tx, &mut state, &runner, true);
         let messages = wait_for_drives_listed(&rx);
         drop(tx);
@@ -1819,7 +1724,8 @@ mod tests {
         let mut state = AppState::new_no_backend();
         state.config.tool_path = "/usr/bin/sdftool".into();
         let (tx, rx) = std::sync::mpsc::channel();
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::failing());
+        let runner: Arc<dyn ProcessRunner> =
+            Arc::new(FakeRunner::spawn_error("mock command failed"));
         spawn_list_drives(&tx, &mut state, &runner, false);
         assert!(!state.runtime.log_text.contains('>'));
         let messages = wait_for_drives_listed(&rx);

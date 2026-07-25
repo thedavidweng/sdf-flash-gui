@@ -80,14 +80,17 @@ src/
   main.rs              CLI entry (no args → GUI)
   lib.rs               library crate for tests
   branding.rs          Product name (from Cargo.toml) and project URLs
-  command.rs           Backend argv planner (no shell strings)
-  orchestration.rs     Shared probe / list / flash session (CLI + GUI)
+  command.rs           Backend argv planner (no shell strings) + command display
+  orchestration.rs     Shared probe / list / flash session, BackendOpError (CLI + GUI)
   process.rs           Run / stream / cancel / reap + ProcessRunner trait
   process_runner.rs    NativeRunner (OS process adapter; coverage-ignored)
-  firmware_db.rs       Known-hash table, binary firmware ID, SHA-256, version compare
+  firmware_db.rs       Known-hash table, binary firmware ID, encryption policy, version compare
   platform.rs          Slim/desktop model tables, form-factor helpers
+  warnings.rs          Flash-safety warnings (cross-flash, two-step, downgrade, mismatch)
+  test_support.rs      Shared ProcessRunner fake (cfg(test) only)
   drive/
     parse.rs           Pure list/identity/selection parsers (covered)
+    probe.rs           --info interpretation: DriveSafety + identity (covered)
     os.rs              OS enumerate + find_backend / find_sdf_bin (ignored)
   sdf.rs               SDF0 container parser + presentation helpers
   i18n/                Language keys, English + locale tables

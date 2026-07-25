@@ -1,13 +1,12 @@
 use crate::branding::MAKEMKV_DOWNLOAD_URL;
 use crate::command;
-use crate::firmware_db::FlashDirection;
 use crate::gui::file_dialog::{FileDialog, NativeDialog};
 use crate::gui::ops;
 use crate::gui::state::{AppState, ThemeChoice};
 use crate::gui::workers::{spawn_list_drives, WorkerMsg};
 use crate::i18n::{t, t_with_args, L10nKey, Language};
-use crate::platform::{self, DriveFormFactor};
 use crate::process;
+use crate::warnings::FlashWarning;
 
 use eframe::egui;
 use egui_phosphor::regular as icon;
@@ -292,16 +291,16 @@ pub fn show_main_ui(
                     cols[1].weak("…");
                 } else {
                     let (text_key, color_ok) = match state.drive.drive_libredrive {
-                        crate::command::LibreDriveStatus::Enabled => {
+                        crate::drive::LibreDriveStatus::Enabled => {
                             (L10nKey::LibreDriveEnabled, true)
                         }
-                        crate::command::LibreDriveStatus::PossibleNotEnabled => {
+                        crate::drive::LibreDriveStatus::PossibleNotEnabled => {
                             (L10nKey::LibreDrivePossible, true)
                         }
-                        crate::command::LibreDriveStatus::NotAvailable => {
+                        crate::drive::LibreDriveStatus::NotAvailable => {
                             (L10nKey::LibreDriveNotAvailable, false)
                         }
-                        crate::command::LibreDriveStatus::Unknown => {
+                        crate::drive::LibreDriveStatus::Unknown => {
                             (L10nKey::LibreDriveUnknown, false)
                         }
                     };
@@ -376,7 +375,10 @@ pub fn show_main_ui(
                 &mut state.flash.encrypted_write,
                 t(L10nKey::OptionEncrypted, state.chrome.resolved_lang),
             );
-            if state.flash.encrypted_write && state.flash.include_boot_loader {
+            if crate::command::write_modes_conflict(
+                state.flash.encrypted_write,
+                state.flash.include_boot_loader,
+            ) {
                 ui.colored_label(
                     ui.visuals().error_fg_color,
                     t(L10nKey::WarnCannotCombine, state.chrome.resolved_lang),
@@ -792,62 +794,56 @@ fn show_confirmation_input(ui: &mut egui::Ui, state: &mut AppState, required: &s
 fn show_safety_warnings(ui: &mut egui::Ui, state: &mut AppState, drive: &crate::drive::Drive) {
     let lang = state.chrome.resolved_lang;
 
-    let drive_ff = platform::classify_drive(&drive.product);
-    let fw_ff = state.flash.firmware_form_factor;
-    if drive_ff != DriveFormFactor::Unknown
-        && fw_ff != DriveFormFactor::Unknown
-        && drive_ff != fw_ff
-    {
+    for warning in crate::warnings::flash_warnings(
+        drive,
+        state.flash.firmware_form_factor,
+        state.flash.firmware_resolved.as_ref(),
+    ) {
         ui.add_space(GAP_TINY);
-        ui.colored_label(
-            ui.visuals().error_fg_color,
-            t_with_args(
-                L10nKey::WarnPlatformMismatch,
-                lang,
-                &[("firmware", fw_ff.label()), ("drive", drive_ff.label())],
-            ),
-        );
-        ui.checkbox(
-            &mut state.flash.cross_flash_confirmed,
-            t(L10nKey::WarnCrossFlashConfirm, lang),
-        );
-    }
-
-    if platform::needs_two_step_flash(&drive.product) {
-        ui.add_space(GAP_TINY);
-        ui.colored_label(
-            ui.visuals().warn_fg_color,
-            t(L10nKey::InfoTwoStepFlash, lang),
-        );
-    }
-
-    if let Some(resolved) = &state.flash.firmware_resolved {
-        if let Some(known) = resolved.identification.known {
-            let direction = crate::firmware_db::compare_versions(&drive.revision, known.version);
-            if direction == FlashDirection::Downgrade {
-                ui.add_space(GAP_TINY);
+        match warning {
+            FlashWarning::CrossFlash {
+                firmware,
+                drive: drive_ff,
+            } => {
+                ui.colored_label(
+                    ui.visuals().error_fg_color,
+                    t_with_args(
+                        L10nKey::WarnPlatformMismatch,
+                        lang,
+                        &[("firmware", firmware.label()), ("drive", drive_ff.label())],
+                    ),
+                );
+                ui.checkbox(
+                    &mut state.flash.cross_flash_confirmed,
+                    t(L10nKey::WarnCrossFlashConfirm, lang),
+                );
+            }
+            FlashWarning::TwoStepFlash => {
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    t(L10nKey::InfoTwoStepFlash, lang),
+                );
+            }
+            FlashWarning::Downgrade { current, target } => {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
                     t_with_args(
                         L10nKey::WarnFirmwareDowngrade,
                         lang,
-                        &[("current", &drive.revision), ("target", known.version)],
+                        &[("current", &current), ("target", &target)],
                     ),
                 );
             }
-        }
-    }
-
-    if let Some(resolved) = &state.flash.firmware_resolved {
-        if let Some(fw_model) = &resolved.model {
-            if !drive.product.contains(fw_model.as_str()) && !fw_model.contains(&drive.product) {
-                ui.add_space(GAP_TINY);
+            FlashWarning::ModelMismatch {
+                firmware,
+                drive: drive_model,
+            } => {
                 ui.colored_label(
                     ui.visuals().weak_text_color(),
                     t_with_args(
                         L10nKey::InfoFirmwareModelMismatch,
                         lang,
-                        &[("firmware", fw_model), ("drive", &drive.product)],
+                        &[("firmware", &firmware), ("drive", &drive_model)],
                     ),
                 );
             }

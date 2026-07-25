@@ -1,7 +1,6 @@
 //! Start enablement and execute_start planning/spawn.
 use crate::i18n::{log_error, t, t_with_args, L10nKey, Language};
 use crate::orchestration;
-use crate::process;
 use crate::process::ProcessRunner;
 
 use crate::gui::file_dialog::FileDialog;
@@ -16,11 +15,10 @@ pub(crate) fn cross_flash_confirmation_required(state: &AppState) -> bool {
     let Some(drive) = state.selected_drive() else {
         return false;
     };
-    let drive_ff = crate::platform::classify_drive(&drive.product);
-    let fw_ff = state.flash.firmware_form_factor;
-    drive_ff != crate::platform::DriveFormFactor::Unknown
-        && fw_ff != crate::platform::DriveFormFactor::Unknown
-        && drive_ff != fw_ff
+    crate::warnings::cross_flash_mismatch(
+        crate::platform::classify_drive(&drive.product),
+        state.flash.firmware_form_factor,
+    )
 }
 
 /// Whether Start is enabled. Single source of rules: [`start_gate::evaluate`].
@@ -190,7 +188,7 @@ pub fn execute_start(
                 state.log(&t_with_args(
                     L10nKey::LogDryRunCommand,
                     lang,
-                    &[("command", &process::format_command(&plan.command))],
+                    &[("command", &crate::command::format_command(&plan.command))],
                 ));
                 state.set_status_key(L10nKey::StatusReady, 100.0);
                 return;
