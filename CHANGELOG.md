@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
-## [Unreleased]
+## [1.0.0] - 2026-07-25
 
 ### 🚀 Features
 
