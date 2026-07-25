@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REGEX_FILE = ROOT / "scripts" / "coverage-ignore.regex"
 CODECOV_YML = ROOT / "codecov.yml"
+GATE_PY = ROOT / "scripts" / "coverage-gate.py"
 
 # codecov.yml path (or glob) → coverage-ignore.regex pattern
 # Keep this table complete; CI runs this script.
@@ -75,6 +76,21 @@ def codecov_yml_nests_comment_under_coverage(text: str) -> bool:
     return False
 
 
+def thresholds_out_of_sync(yml: str) -> list[str]:
+    problems: list[str] = []
+    gate = GATE_PY.read_text()
+    project_min = float(re.search(r"^PROJECT_MIN = ([\d.]+)", gate, re.M).group(1))
+    project = re.search(r"project:\s*\n\s*default:\s*\n(?:\s*#.*\n)*\s*target: (\d+)%", yml)
+    patch = re.search(r"patch:\s*\n\s*default:\s*\n(?:\s*#.*\n)*\s*target: (\d+)%", yml)
+    if not project or float(project.group(1)) != project_min:
+        problems.append(
+            f"codecov.yml project target must equal coverage-gate.py PROJECT_MIN ({project_min:g}%)"
+        )
+    if not patch or patch.group(1) != "100":
+        problems.append("codecov.yml patch target must be 100% (matches coverage-gate.py)")
+    return problems
+
+
 def main() -> int:
     regexes = load_regex_patterns()
     codecov = load_codecov_ignore()
@@ -96,6 +112,9 @@ def main() -> int:
         print(f"  expected: {expected_regex}", file=sys.stderr)
         print("  Update EXPECTED in this script when changing the ignore set.", file=sys.stderr)
         ok = False
+    for problem in thresholds_out_of_sync(yml):
+        print(f"FAIL: {problem}", file=sys.stderr)
+        ok = False
     if codecov != expected_codecov:
         print("FAIL: codecov.yml ignore: does not match expected set:", file=sys.stderr)
         print(f"  file:     {codecov}", file=sys.stderr)
@@ -104,7 +123,7 @@ def main() -> int:
         ok = False
 
     if ok:
-        print("OK: codecov.yml ignore and coverage-ignore.regex stay in sync")
+        print("OK: codecov.yml ignore set and thresholds stay in sync with the scripts")
         return 0
     return 1
 

@@ -6,14 +6,13 @@ coverage:
   status:
     project:
       default:
-        # Absolute floor — same as scripts/coverage-gate.py PROJECT_MIN (99%).
+        # Absolute floor (synced with coverage-gate.py by coverage-ignore-sync-check.py).
         target: 99%
         # Codecov threshold = allowed drop vs base commit. 100% disables the
         # "must not decrease from main" check so only `target` applies (matches gate).
         threshold: 100%
     patch:
       default:
-        # Same as coverage-gate.py patch: every changed executable line covered.
         target: 100%
         threshold: 0%
 
@@ -23,8 +22,8 @@ comment:
   require_changes: true
   hide_project_coverage: false
 
-# Keep in sync with scripts/coverage-ignore.regex (CI: coverage-ignore-sync-check.py).
-# Do NOT ignore domain logic: command, flash, orchestration, process, sdf,
+# Synced with scripts/coverage-ignore.regex by coverage-ignore-sync-check.py.
+# Do NOT ignore domain logic: command, firmware_db, orchestration, process, sdf,
 # drive/parse, gui/ops, gui/workers, gui/state, gui/validation, i18n.
 ignore:
   - "src/main.rs"

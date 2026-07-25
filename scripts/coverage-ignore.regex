@@ -12,8 +12,8 @@
 # src/gui/file_dialog.rs   — rfd native dialog adapter (one impl, mocked in tests)
 # src/process_runner.rs    — NativeRunner thin OS process adapter (trait mocked)
 #
-# Do not ignore domain modules (command, flash, orchestration, process, sdf,
-# drive/parse, …).
+# Do not ignore domain modules (command, firmware_db, orchestration, process,
+# sdf, drive/parse, …).
 src/main\.rs
 src/gui/mod\.rs
 src/gui/views/
