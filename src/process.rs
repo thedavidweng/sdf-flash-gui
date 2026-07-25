@@ -259,6 +259,34 @@ fn spawn_with_pipes(
 }
 
 /// Run an external command and return stdout+stderr (cancellable).
+/// Stream a pipe line by line, lossy-decoding invalid UTF-8 instead of
+/// stopping at it — a single binary line must not truncate backend output.
+fn for_each_lossy_line(reader: impl std::io::Read, mut on_line: impl FnMut(String)) {
+    let mut reader = BufReader::new(reader);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match reader.read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                if buf.last() == Some(&b'\n') {
+                    buf.pop();
+                    if buf.last() == Some(&b'\r') {
+                        buf.pop();
+                    }
+                }
+                on_line(String::from_utf8_lossy(&buf).into_owned());
+            }
+        }
+    }
+}
+
+fn collect_lossy_lines(reader: impl std::io::Read) -> String {
+    let mut lines = Vec::new();
+    for_each_lossy_line(reader, |line| lines.push(line));
+    lines.join("\n")
+}
+
 pub fn run_command_cancellable(
     program: &str,
     args: &[String],
@@ -266,22 +294,8 @@ pub fn run_command_cancellable(
 ) -> Result<CommandRunOutcome, String> {
     let (child, stdout, stderr) = spawn_with_pipes(program, args)?;
 
-    let stdout_handle = thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        reader
-            .lines()
-            .map_while(Result::ok)
-            .collect::<Vec<_>>()
-            .join("\n")
-    });
-    let stderr_handle = thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        reader
-            .lines()
-            .map_while(Result::ok)
-            .collect::<Vec<_>>()
-            .join("\n")
-    });
+    let stdout_handle = thread::spawn(move || collect_lossy_lines(stdout));
+    let stderr_handle = thread::spawn(move || collect_lossy_lines(stderr));
 
     let mut owned_child = Some(child);
     if let Some(control) = control {
@@ -349,18 +363,16 @@ where
     let tx_out = tx.clone();
 
     let stdout_handle = thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines().map_while(Result::ok) {
+        for_each_lossy_line(stdout, |line| {
             let _ = tx_out.send(PipeLine::Out(line));
-        }
+        });
     });
 
     let tx_err = tx.clone();
     let stderr_handle = thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
+        for_each_lossy_line(stderr, |line| {
             let _ = tx_err.send(PipeLine::Err(line));
-        }
+        });
     });
 
     drop(tx);
@@ -600,6 +612,53 @@ mod tests {
             stderr: "err\n".into(),
         };
         assert_eq!(out.combined(), "err");
+    }
+
+    #[test]
+    fn lossy_lines_survive_invalid_utf8_and_crlf() {
+        let mut lines = Vec::new();
+        let bytes: &[u8] = b"ok\n\xff\xfe\nafter\r\nlast";
+        for_each_lossy_line(std::io::Cursor::new(bytes), |l| lines.push(l));
+        assert_eq!(lines, ["ok", "\u{FFFD}\u{FFFD}", "after", "last"]);
+    }
+
+    #[test]
+    fn lossy_lines_empty_reader() {
+        let mut lines = Vec::new();
+        for_each_lossy_line(std::io::Cursor::new(b"" as &[u8]), |l| lines.push(l));
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn collected_output_continues_after_invalid_utf8_line() {
+        let out = as_completed(
+            run_command_cancellable(
+                "sh",
+                &["-c".into(), r"printf 'ok\n\377\376\nafter\n'".into()],
+                None,
+            )
+            .expect("spawn"),
+        )
+        .expect("completed");
+        assert!(out.stdout.contains("ok"));
+        assert!(out.stdout.contains("after"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn streaming_continues_after_invalid_utf8_line() {
+        let lines = std::sync::Mutex::new(Vec::new());
+        let outcome = run_command_streaming_cancellable(
+            "sh",
+            &["-c".into(), r"printf 'ok\n\377\376\nafter\n'".into()],
+            |line| lines.lock().unwrap().push(line.to_string()),
+            None,
+        )
+        .expect("spawn");
+        assert!(matches!(outcome, CommandRunOutcome::Completed(_)));
+        let lines = lines.into_inner().unwrap();
+        assert!(lines.iter().any(|l| l == "after"), "lines={lines:?}");
     }
 
     fn as_completed(outcome: CommandRunOutcome) -> Result<CommandOutput, &'static str> {

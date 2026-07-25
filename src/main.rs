@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use sdf_flash_gui::command;
 use sdf_flash_gui::drive;
 use sdf_flash_gui::orchestration;

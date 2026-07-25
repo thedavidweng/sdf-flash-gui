@@ -365,13 +365,16 @@ fn plan_error_string(e: PlanError) -> String {
 
 /// Best-effort encrypted-write detection for the probe-then-plan path: the
 /// drive's probed firmware state OR the firmware file's own encryption
-/// resolved by [`firmware_db::identify`]. An unreadable file detects nothing.
+/// resolved by [`firmware_db::identify`]. An unreadable or oversized file
+/// detects nothing.
 fn detect_encrypted_write(safety: &DriveSafety, firmware_path: &str, recover: bool) -> bool {
     if recover {
         return false;
     }
-    let firmware_file_encrypted = std::fs::read(firmware_path)
+    let firmware_file_encrypted = std::fs::metadata(firmware_path)
         .ok()
+        .filter(|meta| meta.len() <= crate::firmware_db::MAX_FIRMWARE_BYTES)
+        .and_then(|_| std::fs::read(firmware_path).ok())
         .and_then(|data| crate::firmware_db::identify(&data).encrypted);
     crate::firmware_db::encrypted_write_required(safety.encrypted_firmware, firmware_file_encrypted)
 }
@@ -791,7 +794,10 @@ mod tests {
             "/dev/sr0",
             "SDF.bin version: 0x00A6\n\nDrive Specific SDF not present\n",
         );
-        assert!(!probe.safety.libredrive.is_enabled());
+        assert_ne!(
+            probe.safety.libredrive,
+            crate::drive::LibreDriveStatus::Enabled
+        );
     }
 
     #[test]
@@ -1030,6 +1036,40 @@ mod tests {
             None,
         )
         .expect("prepare");
+        let plan = session.plan.expect("plan");
+        assert!(!plan.command.args.contains(&"enc".to_string()));
+    }
+
+    #[test]
+    fn flash_session_skips_detection_for_oversized_firmware() {
+        let path = std::env::temp_dir().join(format!(
+            "sdf_flash_oversized_cli_{}.bin",
+            std::process::id()
+        ));
+        let f = std::fs::File::create(&path).unwrap();
+        f.set_len(crate::firmware_db::MAX_FIRMWARE_BYTES + 1)
+            .unwrap();
+        drop(f);
+        let runner = stdout_runner(mt1959_probe_stdout());
+        let session = FlashSession::prepare_with(
+            FlashSessionRequest {
+                backend: crate::command::Backend::SdfTool,
+                tool_path: "/mock/sdftool",
+                sdf_path: "",
+                device: "/dev/sr0",
+                firmware_path: &path.to_string_lossy(),
+                encrypted: false,
+                include_boot_loader: false,
+                recover: false,
+                wrong_firmware: None,
+                recovery_token: None,
+                confirm: FlashConfirm::Flag,
+            },
+            &runner,
+            None,
+        )
+        .expect("prepare");
+        let _ = std::fs::remove_file(&path);
         let plan = session.plan.expect("plan");
         assert!(!plan.command.args.contains(&"enc".to_string()));
     }

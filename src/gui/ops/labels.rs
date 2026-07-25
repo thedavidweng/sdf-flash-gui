@@ -2,7 +2,6 @@ use super::super::state::AppState;
 use super::super::OperationMode;
 use super::firmware::firmware_picker_label;
 use crate::drive::Drive;
-use crate::firmware_db;
 use crate::i18n::{t, L10nKey};
 
 pub fn drive_label(drive: &Drive) -> String {
@@ -41,13 +40,14 @@ pub fn flash_mode_label(state: &AppState) -> String {
     }
 }
 
-/// First 8 hex chars of the loaded firmware SHA-256, or localized N/A.
+/// First 8 hex chars of the loaded firmware SHA-256 (from the stored
+/// identification — never recomputed per frame), or localized N/A.
 pub fn firmware_sha_prefix(state: &AppState) -> String {
     state
         .flash
-        .firmware_data
+        .firmware_resolved
         .as_ref()
-        .map(|data| firmware_db::sha256_hex(data)[..8].to_string())
+        .map(|resolved| resolved.identification.sha256[..8].to_string())
         .unwrap_or_else(|| t(L10nKey::LabelNotAvailable, state.chrome.resolved_lang).to_string())
 }
 

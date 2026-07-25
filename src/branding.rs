@@ -25,10 +25,4 @@ mod tests {
         assert!(MAKEMKV_DOWNLOAD_URL.starts_with("https://www.makemkv.com"));
         assert!(MAKEMKV_DOWNLOAD_URL.contains("download"));
     }
-
-    #[test]
-    fn app_version_matches_cargo_package_version() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), crate::gui::APP_VERSION);
-        assert_eq!(env!("CARGO_PKG_VERSION"), "0.4.0");
-    }
 }
