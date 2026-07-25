@@ -15,12 +15,14 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **ui:** Harden accessibility, theming, and empty-state density
 - **ui:** Refine density, log panel, and settings window sizing
 - **ui:** Show Start shortcut tooltip when the button is enabled
+- Release-hardening audit fixes across process, GUI, and firmware paths
 
 ### 💼 Other
 
 - **deps:** Bump thiserror from 2.0.18 to 2.0.19
 - **deps:** Bump serde from 1.0.228 to 1.0.229
 - **deps:** Bump serde_json from 1.0.150 to 1.0.151
+- **deps:** Refresh lockfile to clear quick-xml RUSTSEC-2026-0194/0195
 
 ### 🚜 Refactor
 
@@ -34,6 +36,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 
 - Adopt uppercase AGENTS.md as the canonical agent rulebook
 - Fix stale architecture tree, security version table, and triage labels
+- Correct AGENTS module list and amend ADR 0003 for private helpers
 
 ### 🧪 Testing
 
@@ -50,6 +53,9 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Enforce coverage-threshold sync and drop dead release glob
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md
+- **release:** Per-target checksum assets and clean changelog group headers
+- **release:** 1.0.0 — version bump, supported-versions table, safe-use reality
 ## [0.4.0] - 2026-07-10
 
 ### 🚀 Features
