@@ -171,6 +171,15 @@ fn enumerate_macos_diskutil_fallback() -> Vec<Drive> {
 // Linux
 // ---------------------------------------------------------------------------
 
+#[cfg(target_os = "linux")]
+fn sort_by_index(names: &mut [String], prefix: &str) {
+    names.sort_by_key(|n| {
+        n.strip_prefix(prefix)
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0)
+    });
+}
+
 /// Collect `srN` block names from sysfs (handles USB-attached sr10+, etc.).
 #[cfg(target_os = "linux")]
 fn linux_sr_block_names() -> Vec<String> {
@@ -185,17 +194,7 @@ fn linux_sr_block_names() -> Vec<String> {
             }
         }
     }
-    names.sort_by(|a, b| {
-        let na = a
-            .strip_prefix("sr")
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(0);
-        let nb = b
-            .strip_prefix("sr")
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(0);
-        na.cmp(&nb)
-    });
+    sort_by_index(&mut names, "sr");
     if names.is_empty() {
         for i in 0..16 {
             let name = format!("sr{i}");
@@ -224,17 +223,7 @@ fn enumerate_linux_sg() -> Vec<Drive> {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| n.starts_with("sg"))
         .collect();
-    names.sort_by(|a, b| {
-        let na = a
-            .strip_prefix("sg")
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(0);
-        let nb = b
-            .strip_prefix("sg")
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(0);
-        na.cmp(&nb)
-    });
+    sort_by_index(&mut names, "sg");
     for name in names {
         let type_path = format!("/sys/class/scsi_generic/{name}/device/type");
         let Ok(ty) = std::fs::read_to_string(&type_path) else {
@@ -524,32 +513,21 @@ mod tests {
 
     #[test]
     fn find_backend_prefers_selected() {
-        if let Some((backend, path)) = find_backend(crate::command::Backend::SdfTool) {
-            assert!(!path.is_empty());
-            let name = std::path::Path::new(&path)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            if backend == crate::command::Backend::SdfTool {
-                assert!(name.contains("sdftool"));
-            } else {
-                assert!(name.contains("makemkv"));
-            }
-        }
-    }
-
-    #[test]
-    fn find_backend_makemkvcon_preferred() {
-        if let Some((backend, path)) = find_backend(crate::command::Backend::MakeMkvCon) {
-            assert!(!path.is_empty());
-            let name = std::path::Path::new(&path)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            if backend == crate::command::Backend::MakeMkvCon {
-                assert!(name.contains("makemkv"));
-            } else {
-                assert!(name.contains("sdftool"));
+        for pref in [
+            crate::command::Backend::SdfTool,
+            crate::command::Backend::MakeMkvCon,
+        ] {
+            if let Some((backend, path)) = find_backend(pref) {
+                assert!(!path.is_empty());
+                let name = std::path::Path::new(&path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let expect = match backend {
+                    crate::command::Backend::SdfTool => "sdftool",
+                    crate::command::Backend::MakeMkvCon => "makemkv",
+                };
+                assert!(name.contains(expect));
             }
         }
     }

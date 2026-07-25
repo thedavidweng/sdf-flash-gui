@@ -131,7 +131,6 @@ Found 1 drives(s)
 
 #[test]
 fn regression_no_false_device_zero_colon() {
-    // Pre-fix bug: stripping only one index digit turned `00: /IOBD…` into `0:`.
     let drives = parse_drive_list(FIXTURE_MACOS_USB_BD);
     assert_eq!(drives.len(), 1);
     assert_ne!(drives[0].device, "0:");
@@ -167,7 +166,7 @@ fn golden_resolve_selection_after_reenumeration() {
         ..Default::default()
     };
     let after_flash = vec![Drive {
-        device: "/dev/sg3".into(), // new path
+        device: "/dev/sg3".into(),
         vendor: "HL-DT-ST".into(),
         product: "BU40N".into(),
         revision: "1.03".into(),

@@ -37,12 +37,7 @@ pub fn show_settings_window(
             .with_min_inner_size([SETTINGS_MIN_WIDTH, SETTINGS_MIN_HEIGHT])
             .with_resizable(true),
         |ctx, _class| {
-            let close_shortcut =
-                egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::W);
-            let should_close = ctx
-                .input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape))
-                || ctx.input_mut(|i| i.consume_shortcut(&close_shortcut));
-            if should_close {
+            if super::viewport_close_requested(ctx) {
                 state.chrome.show_settings = false;
             }
             egui::CentralPanel::default().show(ctx, |ui| {

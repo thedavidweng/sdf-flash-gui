@@ -56,17 +56,13 @@ pub fn known_models() -> impl Iterator<Item = &'static str> {
 
 /// Classify a drive from its product/model name.
 pub fn classify_drive(model: &str) -> DriveFormFactor {
-    for s in SLIM_MODELS {
-        if model.contains(s) {
-            return DriveFormFactor::Slim;
-        }
+    if SLIM_MODELS.iter().any(|s| model.contains(s)) {
+        DriveFormFactor::Slim
+    } else if DESKTOP_MODELS.iter().any(|d| model.contains(d)) {
+        DriveFormFactor::Desktop
+    } else {
+        DriveFormFactor::Unknown
     }
-    for d in DESKTOP_MODELS {
-        if model.contains(d) {
-            return DriveFormFactor::Desktop;
-        }
-    }
-    DriveFormFactor::Unknown
 }
 
 /// Check if a drive model needs two-step flashing.

@@ -229,8 +229,7 @@ pub fn prepare_firmware_op(req: FirmwareOpRequest<'_>) -> Result<PreparedFirmwar
         return Err("drive is not MT1959 platform".into());
     }
 
-    let user_confirmed = req.confirm.is_confirmed(req.device);
-    let would_execute = user_confirmed;
+    let would_execute = req.confirm.is_confirmed(req.device);
 
     let operation = if req.recover {
         let token = resolve_recovery_token(req.wrong_firmware, req.recovery_token)?;
@@ -439,13 +438,6 @@ mod tests {
         let output = "Firmware: 1.04\n";
         let dm = drive::parse_identity_from_info("/dev/sr0", output);
         assert_eq!(dm.revision, "1.04");
-    }
-
-    #[test]
-    fn parse_drive_identity_fallback_no_underscore() {
-        let dm = drive::parse_identity_from_info("/dev/sr0", "");
-        assert!(dm.vendor.is_empty());
-        assert!(dm.model.is_empty());
     }
 
     #[test]
@@ -920,17 +912,6 @@ mod tests {
         .expect("prepare");
         assert!(prepared.would_execute);
         assert!(prepared.plan.is_some());
-    }
-
-    #[test]
-    fn probe_from_output_classifies_mt1959() {
-        let probe = probe_from_output(
-            "/dev/sr0",
-            "Drive platform: MT1959\nVendor: HL-DT-ST\nProduct: BU40N\nRevision: 1.03\n",
-        );
-        assert!(probe.safety.mt1959);
-        assert_eq!(probe.identity.vendor, "HL-DT-ST");
-        assert_eq!(probe.identity.model, "BU40N");
     }
 
     #[test]

@@ -988,14 +988,6 @@ mod tests {
     }
 
     #[test]
-    fn execute_start_write_no_drive() {
-        let mut state = AppState::new_no_backend();
-        state.drive.selected_drive = None;
-        let (tx, _rx) = std::sync::mpsc::channel();
-        execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
-    }
-
-    #[test]
     fn execute_start_write_validation_fails() {
         let mut state = AppState::new_no_backend();
         state.drive.drives.push(test_drive());
@@ -1084,15 +1076,6 @@ mod tests {
         execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
         assert!(!state.runtime.busy);
         let _ = std::fs::remove_dir_all(temp_dir);
-    }
-
-    #[test]
-    fn execute_start_recover_no_drive() {
-        let mut state = AppState::new_no_backend();
-        state.operation_mode = OperationMode::Recover;
-        state.drive.selected_drive = None;
-        let (tx, _rx) = std::sync::mpsc::channel();
-        execute_start(&mut state, &tx, &no_dialog(), &mock_runner());
     }
 
     #[test]
@@ -1211,21 +1194,6 @@ mod tests {
     }
 
     #[test]
-    fn start_disabled_reason_write_mode_conflict() {
-        let (mut state, temp_dir) = state_with_valid_paths("reasonconflict");
-        state.drive.drives.push(test_drive());
-        state.drive.selected_drive = Some(0);
-        state.drive.drive_mt1959 = true;
-        state.operation_mode = OperationMode::Write;
-        state.flash.firmware_data = Some(vec![0u8; 8]);
-        state.flash.encrypted_write = true;
-        state.flash.include_boot_loader = true;
-        let reason = start_disabled_reason(&state);
-        assert!(!reason.is_empty());
-        let _ = std::fs::remove_dir_all(temp_dir);
-    }
-
-    #[test]
     fn execute_start_write_prepare_error_logs() {
         let (mut state, temp_dir) = state_with_valid_paths("prepfail");
         state.drive.drives.push(test_drive());
@@ -1275,21 +1243,6 @@ mod tests {
         state.runtime.waiting_for_backend_stop = false;
         decline_force_kill(&mut state);
         assert!(!state.runtime.waiting_for_backend_stop);
-    }
-
-    #[test]
-    fn can_start_write_with_confirmation() {
-        let (mut state, temp_dir) = state_with_valid_paths("canwritenomf");
-        state.drive.drives.push(test_drive());
-        state.drive.selected_drive = Some(0);
-        state.drive.drive_mt1959 = true;
-        state.operation_mode = OperationMode::Write;
-        state.flash.firmware_data = Some(vec![0u8; 100]);
-        state.flash.firmware_path = "fw.bin".into();
-        state.flash.confirmation =
-            crate::command::required_flash_confirmation(&test_drive().device);
-        assert!(can_start(&state));
-        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[test]

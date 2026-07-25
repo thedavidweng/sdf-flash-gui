@@ -172,11 +172,7 @@ pub fn execute_start(
                     include_boot_loader: state.flash.include_boot_loader,
                     recover,
                     wrong_firmware: None,
-                    recovery_token: if recover {
-                        Some(state.flash.recovery_token.as_str())
-                    } else {
-                        None
-                    },
+                    recovery_token: recover.then_some(state.flash.recovery_token.as_str()),
                     confirm,
                 }) {
                     Ok(p) => p,

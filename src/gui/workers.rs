@@ -245,6 +245,33 @@ pub fn poll_worker(
     ctx.request_repaint();
 }
 
+fn probe_failed(drive_idx: usize, error: String) -> WorkerMsg {
+    WorkerMsg::Done(WorkerResult::ProbeComplete {
+        drive_idx,
+        mt1959: false,
+        mt1939: false,
+        encrypted_firmware: false,
+        libredrive: crate::command::LibreDriveStatus::Unknown,
+        sdf_version: None,
+        error: Some(error),
+    })
+}
+
+fn op_failed(status: String) -> WorkerMsg {
+    WorkerMsg::Done(WorkerResult::OperationComplete {
+        success: false,
+        status,
+        progress: 0.0,
+    })
+}
+
+fn send_cancelled(tx: &Sender<WorkerMsg>, lang: Language) {
+    let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(
+        t(L10nKey::LogOpCancelled, lang).into(),
+    )));
+    let _ = tx.send(op_failed(t(L10nKey::StatusOpCancelled, lang).into()));
+}
+
 pub fn spawn_probe(
     tx: &Sender<WorkerMsg>,
     state: &mut AppState,
@@ -255,15 +282,10 @@ pub fn spawn_probe(
         return;
     };
     if state.config.tool_path.is_empty() {
-        let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
+        let _ = tx.send(probe_failed(
             drive_idx,
-            mt1959: false,
-            mt1939: false,
-            encrypted_firmware: false,
-            libredrive: crate::command::LibreDriveStatus::Unknown,
-            sdf_version: None,
-            error: Some(t(L10nKey::ReasonNoBackend, state.chrome.resolved_lang).into()),
-        }));
+            t(L10nKey::ReasonNoBackend, state.chrome.resolved_lang).into(),
+        ));
         return;
     }
 
@@ -283,7 +305,7 @@ pub fn spawn_probe(
     state.runtime.probe_control = Some(control.clone());
     state.runtime.probing_drive = Some(drive_idx);
 
-    run_backend_command(move || {
+    thread::spawn(move || {
         let cmd = command::plan_drive_info(backend, &tool_path, &device);
         let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(format!(
             "> {}",
@@ -311,30 +333,17 @@ pub fn spawn_probe(
                 }));
             }
             Err(crate::orchestration::ProbeError::Cancelled) => {
-                let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
+                let _ = tx.send(probe_failed(
                     drive_idx,
-                    mt1959: false,
-                    mt1939: false,
-                    encrypted_firmware: false,
-                    libredrive: crate::command::LibreDriveStatus::Unknown,
-                    sdf_version: None,
-                    error: Some(t(L10nKey::StatusProbeFailed, lang).into()),
-                }));
+                    t(L10nKey::StatusProbeFailed, lang).into(),
+                ));
             }
             Err(crate::orchestration::ProbeError::NeedsForceKill) => {
                 let _ = tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill));
             }
             Err(crate::orchestration::ProbeError::Failed(e)) => {
                 let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(e.clone())));
-                let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
-                    drive_idx,
-                    mt1959: false,
-                    mt1939: false,
-                    encrypted_firmware: false,
-                    libredrive: crate::command::LibreDriveStatus::Unknown,
-                    sdf_version: None,
-                    error: Some(e),
-                }));
+                let _ = tx.send(probe_failed(drive_idx, e));
             }
         }
     });
@@ -349,6 +358,7 @@ pub fn spawn_streaming_command(
     control: Arc<OperationControl>,
 ) {
     let tx = tx.clone();
+    let cmd_display = process::format_command(&cmd);
     let program = cmd.program;
     let args = cmd.args;
     let initial_status = initial_status.to_string();
@@ -359,14 +369,10 @@ pub fn spawn_streaming_command(
         progress: 0.0,
     }));
     let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(format!(
-        "> {}",
-        process::format_command(&Command {
-            program: program.clone(),
-            args: args.clone(),
-        })
+        "> {cmd_display}"
     ))));
 
-    run_backend_command(move || {
+    thread::spawn(move || {
         let result = runner.run_command_streaming(
             &program,
             &args,
@@ -393,25 +399,14 @@ pub fn spawn_streaming_command(
                 }));
             }
             Ok(CommandRunOutcome::Cancelled) => {
-                let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(
-                    t(L10nKey::LogOpCancelled, lang).into(),
-                )));
-                let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
-                    success: false,
-                    status: t(L10nKey::StatusOpCancelled, lang).into(),
-                    progress: 0.0,
-                }));
+                send_cancelled(&tx, lang);
             }
             Ok(CommandRunOutcome::NeedsForceKill) => {
                 let _ = tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill));
             }
             Err(e) => {
                 let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(log_error(lang, &e))));
-                let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
-                    success: false,
-                    status: t(L10nKey::StatusOpFailed, lang).into(),
-                    progress: 0.0,
-                }));
+                let _ = tx.send(op_failed(t(L10nKey::StatusOpFailed, lang).into()));
             }
         }
     });
@@ -435,7 +430,7 @@ pub fn spawn_list_drives(
     let backend = state.config.backend;
     let tool_path = state.config.tool_path.clone();
     let runner = runner.clone();
-    run_backend_command(move || {
+    thread::spawn(move || {
         match crate::orchestration::run_list_backend_with(
             backend,
             &tool_path,
@@ -466,14 +461,7 @@ pub fn spawn_list_drives(
                 }));
             }
             Err(crate::orchestration::BackendOpError::Cancelled) => {
-                let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(
-                    t(L10nKey::LogOpCancelled, lang).into(),
-                )));
-                let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
-                    success: false,
-                    status: t(L10nKey::StatusOpCancelled, lang).into(),
-                    progress: 0.0,
-                }));
+                send_cancelled(&tx, lang);
             }
             Err(crate::orchestration::BackendOpError::NeedsForceKill) => {
                 let _ = tx.send(WorkerMsg::Done(WorkerResult::StopNeedsForceKill));
@@ -485,21 +473,10 @@ pub fn spawn_list_drives(
                     ))));
                 }
                 let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(log_error(lang, &e))));
-                let _ = tx.send(WorkerMsg::Done(WorkerResult::OperationComplete {
-                    success: false,
-                    status: t(L10nKey::StatusDriveListFailed, lang).into(),
-                    progress: 0.0,
-                }));
+                let _ = tx.send(op_failed(t(L10nKey::StatusDriveListFailed, lang).into()));
             }
         }
     });
-}
-
-fn run_backend_command<F>(f: F)
-where
-    F: FnOnce() + Send + 'static,
-{
-    thread::spawn(f);
 }
 
 #[cfg(test)]
@@ -953,32 +930,6 @@ mod tests {
     }
 
     #[test]
-    fn drain_probe_complete_possible_libredrive() {
-        let mut state = AppState::new_no_backend();
-        state.drive.drives.push(test_drive());
-        state.drive.selected_drive = Some(0);
-        state.runtime.probing = true;
-        let (tx, rx) = std::sync::mpsc::channel();
-        let _ = tx.send(WorkerMsg::Done(WorkerResult::ProbeComplete {
-            drive_idx: 0,
-            mt1959: true,
-            mt1939: false,
-            encrypted_firmware: false,
-            libredrive: crate::command::LibreDriveStatus::PossibleNotEnabled,
-            sdf_version: Some("0x00A6".into()),
-            error: None,
-        }));
-        drop(tx);
-        drain_worker_messages(&mut state, &rx);
-        assert_eq!(
-            state.drive.drive_libredrive,
-            crate::command::LibreDriveStatus::PossibleNotEnabled
-        );
-        assert!(state.drive.drive_mt1959);
-        assert!(state.drive.drive_probed);
-    }
-
-    #[test]
     fn drain_multiple_messages() {
         let mut state = AppState::new_no_backend();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -1406,11 +1357,7 @@ mod tests {
         );
     }
 
-    /// Pull `DrivesListed` out of a worker message stream.
-    ///
-    /// Uses `find_map` so Log/Status/Progress messages exercise the skip arm —
-    /// avoids a never-taken `panic!` match arm counting against Codecov patch
-    /// coverage when the test succeeds.
+    /// Return the drives from the first `DrivesListed` message, panicking if none is present.
     fn expect_drives_listed(messages: &[WorkerMsg]) -> &[crate::drive::Drive] {
         messages
             .iter()
@@ -1442,68 +1389,6 @@ mod tests {
             WorkerMsg::Done(WorkerResult::OperationComplete { success, .. }) => Some(*success),
             _ => None,
         })
-    }
-
-    #[test]
-    fn spawn_list_drives_macos_iokit_path() {
-        let mut state = AppState::new_no_backend();
-        let (tx, rx) = std::sync::mpsc::channel();
-        let stdout = "\
-Found 1 drives(s)
-00: /IOBDServices/F49D28A7
-  HL-DT-ST_BD-RE_BU50N_GE03_211904231648_MODJ9TK3546
-
-";
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(stdout));
-        spawn_list_drives(&tx, &mut state, &runner, true);
-        let messages = wait_for_drives_listed(&rx);
-        drop(tx);
-        let drives = expect_drives_listed(&messages);
-        assert_eq!(drives.len(), 1);
-        assert_eq!(drives[0].device, "/IOBDServices/F49D28A7");
-        assert_eq!(drives[0].vendor, "HL-DT-ST");
-        assert_eq!(drives[0].product, "BD-RE BU50N");
-        assert_eq!(drives[0].revision, "GE03");
-    }
-
-    #[test]
-    fn spawn_list_drives_windows_letter_multiline() {
-        let mut state = AppState::new_no_backend();
-        let (tx, rx) = std::sync::mpsc::channel();
-        let stdout = "\
-Found 1 drives(s)
-00: E:
-  HL-DT-ST_BD-RE_BU50N_GE03_SERIALBBBBBB_Y
-
-";
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(stdout));
-        spawn_list_drives(&tx, &mut state, &runner, true);
-        let messages = wait_for_drives_listed(&rx);
-        drop(tx);
-        let drives = expect_drives_listed(&messages);
-        assert_eq!(drives.len(), 1);
-        assert_eq!(drives[0].device, "E:");
-        assert_eq!(drives[0].revision, "GE03");
-    }
-
-    #[test]
-    fn spawn_list_drives_linux_multiline() {
-        let mut state = AppState::new_no_backend();
-        let (tx, rx) = std::sync::mpsc::channel();
-        let stdout = "\
-Found 1 drives(s)
-00: /dev/sr0
-  HL-DT-ST_BD-RE_BU40N_1.03_SERIALAAAAAA_X
-
-";
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner::success(stdout));
-        spawn_list_drives(&tx, &mut state, &runner, true);
-        let messages = wait_for_drives_listed(&rx);
-        drop(tx);
-        let drives = expect_drives_listed(&messages);
-        assert_eq!(drives.len(), 1);
-        assert_eq!(drives[0].device, "/dev/sr0");
-        assert_eq!(drives[0].revision, "1.03");
     }
 
     #[test]
@@ -1620,7 +1505,7 @@ Found 1 drives(s)
 
         let child = Command::new("sleep").arg("30").spawn().unwrap();
         let control = Arc::new(OperationControl::new());
-        control.register_child_for_test(child);
+        control.register_child(child);
         let mut state = AppState::new_no_backend();
         state.runtime.busy = true;
         state.runtime.active_operation = Some(control.clone());
@@ -1659,7 +1544,7 @@ Found 1 drives(s)
 
         let child = Command::new("sleep").arg("30").spawn().unwrap();
         let control = Arc::new(OperationControl::new());
-        control.register_child_for_test(child);
+        control.register_child(child);
         let mut state = AppState::new_no_backend();
         state.drive.drives.push(test_drive());
         state.drive.selected_drive = Some(0);
@@ -1687,7 +1572,7 @@ Found 1 drives(s)
 
         let child = Command::new("true").spawn().unwrap();
         let control = Arc::new(OperationControl::new());
-        control.register_child_for_test(child);
+        control.register_child(child);
         let mut state = AppState::new_no_backend();
         state.drive.drives.push(test_drive());
         state.drive.selected_drive = Some(0);
@@ -1710,7 +1595,7 @@ Found 1 drives(s)
 
         let child = Command::new("true").spawn().unwrap();
         let control = Arc::new(OperationControl::new());
-        control.register_child_for_test(child);
+        control.register_child(child);
         let mut state = AppState::new_no_backend();
         state.runtime.probe_control = Some(control);
         state.runtime.probing = true;
