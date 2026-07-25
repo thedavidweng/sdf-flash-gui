@@ -16,9 +16,21 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **ui:** Refine density, log panel, and settings window sizing
 - **ui:** Show Start shortcut tooltip when the button is enabled
 
+### <!-- 10 -->💼 Other
+
+- **deps:** Bump thiserror from 2.0.18 to 2.0.19
+
 ### <!-- 2 -->🚜 Refactor
 
 - Deepen firmware_db, start_gate, and WorkerMsg interfaces
+- Derive product name from Cargo.toml packager metadata
+- **i18n:** Drop dead key, English-identical arms, and if/else prefix chain
+- Apply verified simplification audit across domain modules
+
+### <!-- 3 -->📚 Documentation
+
+- Adopt uppercase AGENTS.md as the canonical agent rulebook
+- Fix stale architecture tree, security version table, and triage labels
 
 ### <!-- 6 -->🧪 Testing
 
@@ -30,6 +42,9 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md for v0.4.0
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md
+- Gate explanatory comments on added lines per ADR 0002
+- Enforce coverage-threshold sync and drop dead release glob
 ## [0.4.0] - 2026-07-10
 
 ### <!-- 0 -->🚀 Features
