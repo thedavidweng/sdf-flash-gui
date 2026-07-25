@@ -4,11 +4,11 @@ All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 ## [Unreleased]
 
-### <!-- 0 -->🚀 Features
+### 🚀 Features
 
 - Persist settings and quiet empty-drive idle UI
 
-### <!-- 1 -->🐛 Bug Fixes
+### 🐛 Bug Fixes
 
 - Detect firmware encryption from binary content + ADRs 0001/0002 (#23)
 - Cover plan_block defensive branches and test assertion patterns
@@ -16,30 +16,31 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **ui:** Refine density, log panel, and settings window sizing
 - **ui:** Show Start shortcut tooltip when the button is enabled
 
-### <!-- 10 -->💼 Other
+### 💼 Other
 
 - **deps:** Bump thiserror from 2.0.18 to 2.0.19
 - **deps:** Bump serde from 1.0.228 to 1.0.229
 - **deps:** Bump serde_json from 1.0.150 to 1.0.151
 
-### <!-- 2 -->🚜 Refactor
+### 🚜 Refactor
 
 - Deepen firmware_db, start_gate, and WorkerMsg interfaces
 - Derive product name from Cargo.toml packager metadata
 - **i18n:** Drop dead key, English-identical arms, and if/else prefix chain
 - Apply verified simplification audit across domain modules
+- Consolidate deep modules per architecture review
 
-### <!-- 3 -->📚 Documentation
+### 📚 Documentation
 
 - Adopt uppercase AGENTS.md as the canonical agent rulebook
 - Fix stale architecture tree, security version table, and triage labels
 
-### <!-- 6 -->🧪 Testing
+### 🧪 Testing
 
 - Hit remaining patch lines for 100% codecov
 - Cover quiet list-drives match skip arm for patch gate
 
-### <!-- 7 -->⚙️ Miscellaneous Tasks
+### ⚙️ Miscellaneous Tasks
 
 - **changelog:** Sync CHANGELOG.md for v0.4.0
 - **changelog:** Sync CHANGELOG.md
@@ -48,15 +49,16 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Gate explanatory comments on added lines per ADR 0002
 - Enforce coverage-threshold sync and drop dead release glob
 - **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md
 ## [0.4.0] - 2026-07-10
 
-### <!-- 0 -->🚀 Features
+### 🚀 Features
 
 - Detect LibreDrive support from sdftool --info output
 - Show SDF.bin version in Drive Properties panel
 - Robust optical drive detection and MakeMKV-style properties
 
-### <!-- 1 -->🐛 Bug Fixes
+### 🐛 Bug Fixes
 
 - Auto-detect respects user-selected backend
 - Forward sdf_version through ProbeComplete to GUI state
@@ -76,23 +78,23 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Run parse_drive_list_four_fields on all platforms
 - Un-nest codecov comment so yaml validates
 
-### <!-- 2 -->🚜 Refactor
+### 🚜 Refactor
 
 - Drop dead i18n keys and duplicate helpers
 - Deepen modules per architecture review
 
-### <!-- 3 -->📚 Documentation
+### 📚 Documentation
 
 - Fix sdftool is not standalone, both backends bundled with MakeMKV
 - Note absolute coverage floor matches Codecov + gate
 - Refresh README for post-refactor architecture
 - Drop binary size note from README
 
-### <!-- 6 -->🧪 Testing
+### 🧪 Testing
 
 - Close workers.rs Codecov patch gaps from dead match arms
 
-### <!-- 7 -->⚙️ Miscellaneous Tasks
+### ⚙️ Miscellaneous Tasks
 
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md for v0.3.0
@@ -106,14 +108,14 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **release:** V0.4.0
 ## [0.3.0] - 2026-07-09
 
-### <!-- 0 -->🚀 Features
+### 🚀 Features
 
 - Add user-facing safety warnings for firmware flashing
 - Identify firmware by binary content + SHA-256 hash database
 - Replace first-run modal with settings-button nudge
 - Link MakeMKV in About and no-backend banner
 
-### <!-- 1 -->🐛 Bug Fixes
+### 🐛 Bug Fixes
 
 - Address PR review on shared flash pipeline
 - Suppress no-manifest warnings on recover flash
@@ -125,18 +127,18 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Firmware_db binary search bugs from review
 - Serde default for mt1939 + remove dead classify_firmware
 
-### <!-- 2 -->🚜 Refactor
+### 🚜 Refactor
 
 - Share flash/probe pipeline between CLI and GUI
 - Drop dead SDF0 offset errors after structured-header gate
 - Remove unused manifest system
 - Fix PR review cleanup items
 
-### <!-- 3 -->📚 Documentation
+### 📚 Documentation
 
 - Align agents.md Codecov patch target with 100% gate
 
-### <!-- 6 -->🧪 Testing
+### 🧪 Testing
 
 - Raise coverage and harden worker spawn waits
 - Fix duplicate test attribute and dead-code warning
@@ -147,7 +149,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Cover firmware_db resolve_model/resolve_form_factor_with_sdf branches
 - Cover settings_nudge edge branches for 100% patch
 
-### <!-- 7 -->⚙️ Miscellaneous Tasks
+### ⚙️ Miscellaneous Tasks
 
 - **changelog:** Sync CHANGELOG.md for v0.2.0
 - Ignore legacy SDFFlashGUI DMGs when updating homebrew tap
@@ -161,12 +163,12 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Bump version to 0.3.0 and fix flaky process tests
 ## [0.2.0] - 2026-06-26
 
-### <!-- 0 -->🚀 Features
+### 🚀 Features
 
 - **i18n:** Complete GUI internationalization with 30 languages
 - **gui:** Firmware safety, cancellable flash, egui 0.34, and v0.2.0
 
-### <!-- 1 -->🐛 Bug Fixes
+### 🐛 Bug Fixes
 
 - Cargo fmt and clippy lint
 - Address greptile review comments
@@ -182,37 +184,37 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Set product display name to SDF Flash GUI
 - Unify SDF Flash GUI display name across all platforms
 
-### <!-- 10 -->💼 Other
+### 💼 Other
 
 - **deps:** Bump env_logger from 0.11.10 to 0.11.11
 - **deps:** Bump sha2 from 0.10.9 to 0.11.0
 - **deps:** Bump codecov/codecov-action from 5 to 7
 - **deps:** Bump actions/download-artifact from 7 to 8
 
-### <!-- 2 -->🚜 Refactor
+### 🚜 Refactor
 
 - Resolve all architecture review candidates
 - Remove dead code, deduplicate AppState, simplify combined()
 - **gui:** Extract views module and responsive layout
 
-### <!-- 3 -->📚 Documentation
+### 📚 Documentation
 
 - Add Homebrew install command to README
 - Restructure README — icon, title, badges, then divider
 - Center title and badges, remove divider
 - Keep agent guide lifecycle testing guidance generic
 
-### <!-- 5 -->🎨 Styling
+### 🎨 Styling
 
 - Apply cargo fmt to gui modules
 
-### <!-- 6 -->🧪 Testing
+### 🧪 Testing
 
 - Maximize coverage — 265 tests, 93.9% line coverage
 - Maximize coverage — 324 tests, 99.04% line coverage
 - Add firmware pack e2e suite and restore codecov patch coverage
 
-### <!-- 7 -->⚙️ Miscellaneous Tasks
+### ⚙️ Miscellaneous Tasks
 
 - Simplify homebrew tap, add codecov config and badges
 - Replace deprecated macos-13 with macos-15-intel
@@ -230,20 +232,20 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 ## [0.1.0] - 2026-06-24
 
-### <!-- 0 -->🚀 Features
+### 🚀 Features
 
 - Create GitHub Release + auto-update Homebrew tap on tag push
 
-### <!-- 1 -->🐛 Bug Fixes
+### 🐛 Bug Fixes
 
 - Cargo-packager format (msi→wix), cargo fmt, linguist-vendored for Credits.html
 
-### <!-- 2 -->🚜 Refactor
+### 🚜 Refactor
 
 - Split UI into toolbar, status bar, and central content panels
 - Align gui with egui native patterns
 
-### <!-- 7 -->⚙️ Miscellaneous Tasks
+### ⚙️ Miscellaneous Tasks
 
 - Add Codecov coverage reporting via cargo-llvm-cov
 - Each build uploads to Release directly, codecov token, homebrew downloads from release

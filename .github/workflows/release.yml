@@ -127,11 +127,11 @@ jobs:
         run: |
           cd dist
           if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum * > SHA256SUMS.txt
+            sha256sum * > "SHA256SUMS-${{ matrix.target }}.txt"
           elif command -v shasum >/dev/null 2>&1; then
-            shasum -a 256 * > SHA256SUMS.txt
+            shasum -a 256 * > "SHA256SUMS-${{ matrix.target }}.txt"
           else
-            powershell -Command "Get-ChildItem | ForEach-Object { (Get-FileHash $_.FullName -Algorithm SHA256).Hash + '  ' + $_.Name } | Set-Content SHA256SUMS.txt"
+            powershell -Command "Get-ChildItem | ForEach-Object { (Get-FileHash $_.FullName -Algorithm SHA256).Hash + '  ' + $_.Name } | Set-Content 'SHA256SUMS-${{ matrix.target }}.txt'"
           fi
 
       - uses: softprops/action-gh-release@v3
@@ -143,7 +143,7 @@ jobs:
             dist/*.appimage
             dist/*.deb
             dist/*.msi
-            dist/SHA256SUMS.txt
+            dist/SHA256SUMS-${{ matrix.target }}.txt
 
   build-macos:
     needs: verify-version
@@ -180,7 +180,7 @@ jobs:
       - name: Generate SHA-256 checksums
         run: |
           cd dist
-          shasum -a 256 * > SHA256SUMS.txt
+          shasum -a 256 * > "SHA256SUMS-${{ matrix.target }}.txt"
 
       - uses: softprops/action-gh-release@v3
         if: github.ref_type == 'tag'
@@ -189,7 +189,7 @@ jobs:
           generate_release_notes: false
           files: |
             dist/*.dmg
-            dist/SHA256SUMS.txt
+            dist/SHA256SUMS-${{ matrix.target }}.txt
 
   sync-changelog:
     needs: create-release
