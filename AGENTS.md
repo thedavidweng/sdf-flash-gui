@@ -58,7 +58,7 @@ cargo install cargo-llvm-cov   # once, if not installed
 
 Open `target/llvm-cov/html/index.html` and confirm changed **non-ignored** files have no meaningful uncovered branches in the diff.
 
-**What is ignored (and why):** native entry/shell, egui views, OS drive discovery (`src/drive/os.rs`), rfd dialogs, and `NativeRunner` (thin process adapter). Domain modules (`command`, `flash`, `orchestration`, `process` lifecycle, `sdf`, `drive/parse`, `gui/ops`, `gui/workers`, …) are **not** ignored — cover new behaviour there with tests.
+**What is ignored (and why):** native entry/shell, egui views, OS drive discovery (`src/drive/os.rs`), rfd dialogs, and `NativeRunner` (thin process adapter). Domain modules (`command`, `firmware_db`, `orchestration`, `process` lifecycle, `sdf`, `drive/parse`, `drive/probe`, `warnings`, `gui/ops`, `gui/workers`, …) are **not** ignored — cover new behaviour there with tests.
 
 ### SDF parser policy (CI enforces)
 
