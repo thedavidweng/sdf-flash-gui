@@ -22,13 +22,6 @@ pub enum LibreDriveStatus {
     Enabled,
 }
 
-impl LibreDriveStatus {
-    /// True when LibreDrive is fully enabled on the drive.
-    pub fn is_enabled(self) -> bool {
-        matches!(self, Self::Enabled)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DriveSafety {
     pub mt1959: bool,
@@ -323,14 +316,6 @@ mod tests {
         assert!(safety.mt1959);
         assert!(safety.mtk_mode.is_none());
         assert!(!safety.encrypted_firmware);
-    }
-
-    #[test]
-    fn libre_drive_status_helpers() {
-        assert!(LibreDriveStatus::Enabled.is_enabled());
-        assert!(!LibreDriveStatus::PossibleNotEnabled.is_enabled());
-        assert!(!LibreDriveStatus::NotAvailable.is_enabled());
-        assert!(!LibreDriveStatus::Unknown.is_enabled());
     }
 
     #[test]

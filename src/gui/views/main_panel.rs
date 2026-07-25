@@ -244,7 +244,7 @@ pub fn show_main_ui(
                 .response
                 .on_hover_text(t(L10nKey::HelpEmptyDrives, state.chrome.resolved_lang));
         }
-        if let Some(d) = state.selected_drive().cloned() {
+        if let Some(d) = state.selected_drive() {
             ui.add_space(GAP_TINY);
             let lang = state.chrome.resolved_lang;
             let na = t(L10nKey::LabelNotAvailable, lang);
@@ -740,10 +740,11 @@ fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState, dialog: &
                 ops::extract_recovery_token_from_wrong_firmware(state);
             }
 
-            if let Some(drive) = state.selected_drive() {
+            if let Some(drive) = state.selected_drive().cloned() {
                 let required = command::required_flash_confirmation(&drive.device);
                 ui.add_space(GAP_SMALL);
-                show_confirmation_summary(ui, state, drive);
+                show_confirmation_summary(ui, state, &drive);
+                show_safety_warnings(ui, state, &drive);
                 show_confirmation_input(ui, state, &required);
             }
         }

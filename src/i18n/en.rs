@@ -125,6 +125,9 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::LogErrGeneric => "ERROR: {message}",
         L10nKey::LogFirmwareEmpty => "ERROR: firmware file is empty: {path}",
         L10nKey::LogFirmwareReadFailed => "ERROR: cannot read firmware file {path}: {error}",
+        L10nKey::LogFirmwareTooLarge => {
+            "ERROR: firmware file is too large to load: {path} (limit {limit} bytes)"
+        }
         L10nKey::LogFirmwareLoaded => {
             "Loaded firmware: {path} ({size} bytes, sha256 {hash})"
         }

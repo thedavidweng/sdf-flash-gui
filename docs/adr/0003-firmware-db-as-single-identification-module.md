@@ -2,6 +2,9 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-21
+- **Amended**: 2026-07-25 — the individual `resolve_*` / analysis helpers are
+  now private: `identify` is the only identification entry point, enforced by
+  the compiler. In-module unit tests still exercise the helpers directly.
 - **Supersedes**: none
 
 ## Context
@@ -55,5 +58,6 @@ let resolved = firmware_db::identify(&data);
 - `AppState` stores `firmware_resolved: Option<ResolvedFirmware>` instead of
   `firmware_identification`, `firmware_sdf_info`, `firmware_form_factor`, and
   `firmware_file_encrypted` as separate fields.
-- The individual `resolve_*` functions remain `pub` for testing and for
-  `identify`'s internal composition, but callers should prefer `identify`.
+- The individual `resolve_*` functions are private (2026-07-25 amendment):
+  `identify` is the single entry point, and the compiler rejects new callers
+  that try to re-orchestrate the cascade.

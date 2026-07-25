@@ -10,6 +10,10 @@ use crate::sdf;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Upper bound for loading a firmware file into memory. Real MT1959 firmware
+/// images are ~2 MiB; anything near this limit is not a firmware file.
+pub const MAX_FIRMWARE_BYTES: u64 = 64 * 1024 * 1024;
+
 pub fn sha256_hex(data: &[u8]) -> String {
     Sha256::digest(data)
         .iter()
@@ -55,7 +59,7 @@ pub struct FirmwareSdfInfo {
     pub model: Option<String>,
 }
 
-pub fn check_firmware_sdf(firmware_data: &[u8]) -> Option<FirmwareSdfInfo> {
+fn check_firmware_sdf(firmware_data: &[u8]) -> Option<FirmwareSdfInfo> {
     let mut cursor = std::io::Cursor::new(firmware_data);
     let container = sdf::parse_sdf0(&mut cursor).ok()?;
     Some(FirmwareSdfInfo {
@@ -262,7 +266,7 @@ fn extract_model(data: &[u8]) -> Option<String> {
 }
 
 /// Analyze a firmware binary to extract metadata without relying on filename.
-pub fn analyze_firmware_binary(data: &[u8]) -> FirmwareBinaryInfo {
+fn analyze_firmware_binary(data: &[u8]) -> FirmwareBinaryInfo {
     let pcb_type = extract_pcb_type(data);
     let form_factor = pcb_type
         .as_deref()
@@ -291,7 +295,7 @@ pub const ENCRYPTED_FIRMWARE_YEAR_THRESHOLD: u32 = 2120;
 /// scans the entire binary rather than reading a fixed offset. The scan is
 /// cheap (single pass, no allocation) and only matches 10–12 digit ASCII
 /// sequences that parse as valid dates.
-pub fn extract_firmware_date_from_binary(data: &[u8]) -> Option<u32> {
+fn extract_firmware_date_from_binary(data: &[u8]) -> Option<u32> {
     let mut i = 0;
     while i < data.len() {
         if !data[i].is_ascii_digit() {
@@ -362,7 +366,7 @@ pub fn encrypted_write_required(
 ///    date stamp and checks if the year ≥ 2120.
 /// 3. Returns `None` if neither source yields a result (caller should fall
 ///    back to the drive's current firmware state).
-pub fn resolve_firmware_encrypted(id: &FirmwareIdentification, data: &[u8]) -> Option<bool> {
+fn resolve_firmware_encrypted(id: &FirmwareIdentification, data: &[u8]) -> Option<bool> {
     if let Some(known) = id.known {
         return Some(known.is_encrypted);
     }
@@ -371,7 +375,7 @@ pub fn resolve_firmware_encrypted(id: &FirmwareIdentification, data: &[u8]) -> O
 }
 
 /// Look up a firmware by its SHA-256 hash in the known database.
-pub fn lookup_known_firmware(sha256: &str) -> Option<&'static KnownFirmware> {
+fn lookup_known_firmware(sha256: &str) -> Option<&'static KnownFirmware> {
     KNOWN_FIRMWARES.iter().find(|fw| fw.sha256 == sha256)
 }
 
@@ -387,7 +391,7 @@ pub struct FirmwareIdentification {
 }
 
 /// Identify a firmware binary by hash lookup + binary content analysis.
-pub fn identify_firmware(data: &[u8]) -> FirmwareIdentification {
+fn identify_firmware(data: &[u8]) -> FirmwareIdentification {
     let sha256 = sha256_hex(data);
     let known = lookup_known_firmware(&sha256);
     let binary_info = analyze_firmware_binary(data);
@@ -400,7 +404,7 @@ pub fn identify_firmware(data: &[u8]) -> FirmwareIdentification {
 
 /// Best-effort form factor determination.
 /// Known firmware hash takes priority, then binary PCB type, then SDF0 metadata.
-pub fn resolve_form_factor(id: &FirmwareIdentification) -> DriveFormFactor {
+fn resolve_form_factor(id: &FirmwareIdentification) -> DriveFormFactor {
     if let Some(known) = id.known {
         return known.form_factor;
     }
@@ -409,7 +413,7 @@ pub fn resolve_form_factor(id: &FirmwareIdentification) -> DriveFormFactor {
 
 /// Best-effort form factor determination with SDF0 metadata fallback.
 /// Priority: known hash > binary PCB type > SDF0 model > Unknown.
-pub fn resolve_form_factor_with_sdf(
+fn resolve_form_factor_with_sdf(
     id: &FirmwareIdentification,
     sdf_info: Option<&FirmwareSdfInfo>,
 ) -> DriveFormFactor {
@@ -425,14 +429,14 @@ pub fn resolve_form_factor_with_sdf(
 
 /// Best-effort model determination.
 /// Known firmware hash takes priority, then binary content, then SDF0 metadata.
-pub fn resolve_model(id: &FirmwareIdentification) -> Option<String> {
+fn resolve_model(id: &FirmwareIdentification) -> Option<String> {
     id.known
         .map(|k| k.model.to_string())
         .or_else(|| id.binary_info.model.clone())
 }
 
 /// Best-effort model determination with SDF0 metadata fallback.
-pub fn resolve_model_with_sdf(
+fn resolve_model_with_sdf(
     id: &FirmwareIdentification,
     sdf_info: Option<&FirmwareSdfInfo>,
 ) -> Option<String> {

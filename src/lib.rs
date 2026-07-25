@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 pub mod branding;
 pub mod command;
 pub mod drive;

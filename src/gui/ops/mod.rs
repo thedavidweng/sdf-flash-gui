@@ -232,10 +232,11 @@ mod tests {
     #[test]
     fn firmware_sha_prefix_with_data() {
         let mut state = AppState::new_no_backend();
-        state.flash.firmware_data = Some(vec![1, 2, 3, 4]);
+        let data = vec![1, 2, 3, 4];
+        state.flash.firmware_resolved = Some(crate::firmware_db::identify(&data));
+        state.flash.firmware_data = Some(data.clone());
         let prefix = firmware_sha_prefix(&state);
-        assert_eq!(prefix.len(), 8);
-        assert_ne!(prefix, "N/A");
+        assert_eq!(prefix, crate::firmware_db::sha256_hex(&data)[..8]);
     }
 
     #[test]
@@ -746,6 +747,23 @@ mod tests {
         assert!(state.flash.firmware_data.is_none());
         assert!(state.flash.firmware_path == "/nonexistent/path/fw.bin");
         assert!(state.runtime.log_text.contains("ERROR"));
+    }
+
+    #[test]
+    fn load_firmware_rejects_oversized_file() {
+        let dir = std::env::temp_dir().join("sdf_flash_test_oversized_fw");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("huge.bin");
+        let f = std::fs::File::create(&file).unwrap();
+        f.set_len(crate::firmware_db::MAX_FIRMWARE_BYTES + 1)
+            .unwrap();
+        drop(f);
+        let mut state = AppState::new_no_backend();
+        load_firmware(&mut state, &file.to_string_lossy());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(state.flash.firmware_data.is_none());
+        assert!(state.flash.firmware_resolved.is_none());
+        assert!(state.runtime.log_text.contains("too large"));
     }
 
     #[test]

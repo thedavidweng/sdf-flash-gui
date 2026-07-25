@@ -6,8 +6,8 @@ SDF Flash GUI writes firmware to optical drives. A failed or misdirected flash c
 
 | Version | Supported |
 | ------- | --------- |
-| 0.4.x   | Yes       |
-| < 0.4   | No        |
+| 1.0.x   | Yes       |
+| < 1.0   | No        |
 
 ## Reporting a Vulnerability
 
@@ -43,7 +43,9 @@ Out of scope:
 
 ## Safe Use
 
-- Always validate firmware against a trusted manifest before flashing.
-- The app checks **signature presence only** — not cryptographic authenticity.
+- Prefer firmware whose SHA-256 matches the app's known-firmware database
+  (shown as "identified" after loading); treat unrecognized firmware with care.
+- Firmware identification uses **SHA-256 known-hash lookup and binary content
+  analysis** — it is not a cryptographic signature verification.
 - On Linux, optical drive access may require membership in the `cdrom` group or elevated permissions.
 - On Windows, some operations may require running as Administrator.

@@ -5,8 +5,20 @@
 mod en;
 mod locales;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Language {
+macro_rules! languages {
+    ($($lang:ident),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        pub enum Language {
+            $($lang,)*
+        }
+
+        impl Language {
+            pub const ALL: &'static [Language] = &[$(Language::$lang,)*];
+        }
+    };
+}
+
+languages! {
     Auto,
     English,
     Bulgarian,
@@ -41,40 +53,6 @@ pub enum Language {
 }
 
 impl Language {
-    pub const ALL: &[Language] = &[
-        Language::Auto,
-        Language::English,
-        Language::Bulgarian,
-        Language::Croatian,
-        Language::Czech,
-        Language::Danish,
-        Language::Dutch,
-        Language::Estonian,
-        Language::Finnish,
-        Language::French,
-        Language::Galician,
-        Language::German,
-        Language::Greek,
-        Language::Hungarian,
-        Language::Indonesian,
-        Language::Italian,
-        Language::Latvian,
-        Language::Lithuanian,
-        Language::Malay,
-        Language::Norwegian,
-        Language::Polish,
-        Language::Portuguese,
-        Language::PortugueseBrazilian,
-        Language::Romanian,
-        Language::Russian,
-        Language::Slovak,
-        Language::Slovenian,
-        Language::Spanish,
-        Language::Swedish,
-        Language::Turkish,
-        Language::Ukrainian,
-    ];
-
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::Auto => "Auto-detect",
@@ -325,6 +303,7 @@ l10n_keys! {
     LogErrGeneric,
     LogFirmwareEmpty,
     LogFirmwareReadFailed,
+    LogFirmwareTooLarge,
     LogFirmwareLoaded,
     LogRecoverSelectWrongFw,
     LogRecoveryTokenExtracted,

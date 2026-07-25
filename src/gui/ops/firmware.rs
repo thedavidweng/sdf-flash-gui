@@ -21,30 +21,44 @@ pub fn load_firmware(state: &mut AppState, path: &str) {
     state.flash.firmware_resolved = None;
     state.flash.firmware_form_factor = crate::platform::DriveFormFactor::Unknown;
     state.flash.firmware_file_encrypted = None;
-    match std::fs::read(path) {
-        Ok(data) => {
-            if data.is_empty() {
+    let oversized =
+        std::fs::metadata(path).is_ok_and(|m| m.len() > firmware_db::MAX_FIRMWARE_BYTES);
+    if oversized {
+        state.log(&t_with_args(
+            L10nKey::LogFirmwareTooLarge,
+            lang,
+            &[
+                ("path", path),
+                ("limit", &firmware_db::MAX_FIRMWARE_BYTES.to_string()),
+            ],
+        ));
+        state.flash.firmware_data = None;
+    } else {
+        match std::fs::read(path) {
+            Ok(data) => {
+                if data.is_empty() {
+                    state.log(&t_with_args(
+                        L10nKey::LogFirmwareEmpty,
+                        lang,
+                        &[("path", path)],
+                    ));
+                    state.flash.firmware_data = None;
+                } else {
+                    let resolved = firmware_db::identify(&data);
+                    state.flash.firmware_form_factor = resolved.form_factor;
+                    state.flash.firmware_file_encrypted = resolved.encrypted;
+                    state.flash.firmware_resolved = Some(resolved);
+                    state.flash.firmware_data = Some(data);
+                }
+            }
+            Err(e) => {
                 state.log(&t_with_args(
-                    L10nKey::LogFirmwareEmpty,
+                    L10nKey::LogFirmwareReadFailed,
                     lang,
-                    &[("path", path)],
+                    &[("path", path), ("error", &e.to_string())],
                 ));
                 state.flash.firmware_data = None;
-            } else {
-                let resolved = firmware_db::identify(&data);
-                state.flash.firmware_form_factor = resolved.form_factor;
-                state.flash.firmware_file_encrypted = resolved.encrypted;
-                state.flash.firmware_resolved = Some(resolved);
-                state.flash.firmware_data = Some(data);
             }
-        }
-        Err(e) => {
-            state.log(&t_with_args(
-                L10nKey::LogFirmwareReadFailed,
-                lang,
-                &[("path", path), ("error", &e.to_string())],
-            ));
-            state.flash.firmware_data = None;
         }
     }
 

@@ -321,6 +321,7 @@ fn read_sysfs_attr(base: &str, attr: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "windows")]
+#[allow(unsafe_code)]
 mod winapi {
     extern "system" {
         pub fn GetDriveTypeA(lpRootPathName: *const u8) -> u32;
@@ -332,6 +333,7 @@ mod winapi {
 const DRIVE_CDROM: u32 = 5;
 
 #[cfg(target_os = "windows")]
+#[allow(unsafe_code)]
 fn enumerate_windows() -> Vec<Drive> {
     let mut drives = Vec::new();
     for letter in b'A'..=b'Z' {
