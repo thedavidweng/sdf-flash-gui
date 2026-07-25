@@ -10,14 +10,4 @@ cargo build --release
 
 ## Before submitting
 
-Install the git hooks once (runs `cargo fmt --check` before each commit):
-
-```bash
-./scripts/install-hooks.sh
-```
-
-Then manually before pushing:
-
-- `cargo fmt`
-- `cargo clippy -- -D warnings`
-- Test on at least one platform (macOS, Linux, or Windows)
+All contribution rules live in [AGENTS.md](AGENTS.md): required local checks, the coverage gate, tests-in-the-same-commit, the comment policy (ADR 0002), and architecture decision records.

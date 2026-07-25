@@ -1,7 +1,7 @@
 //! Production process runner adapter.
 //!
 //! This module is **excluded from coverage metrics** (see `codecov.yml`, CI
-//! `cargo llvm-cov --ignore-filename-regex`, and `Agents.md`).
+//! `cargo llvm-cov --ignore-filename-regex`, and `AGENTS.md`).
 //!
 //! Rationale (same class as `gui/file_dialog.rs`):
 //! - Thin delegation to real OS process I/O (`run_command_*`).

@@ -85,6 +85,12 @@ ADRs live in [`docs/adr/`](docs/adr/) and record decisions that constrain future
 
 Per [ADR 0002](docs/adr/0002-self-explanatory-code-no-explanatory-comments.md): do not add explanatory comments. Code should communicate its intent through naming, structure, and tests. If a non-obvious constraint or external reason prevents the code from being self-explanatory, record it in an ADR and add at most a one-line reference comment pointing to that ADR.
 
+CI enforces this (job `comment-policy`): added `*.rs` lines with comments outside the allowed kinds (doc comments, `SAFETY`, section markers, reference citations) fail the build. Run locally before pushing:
+
+```bash
+python3 scripts/comment-gate.py --base origin/main
+```
+
 This overrides the general "do not add or remove comments unless asked" rule for this repository:
 
 - **Do not** add explanatory comments to new or edited code.
