@@ -28,6 +28,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Derive product name from Cargo.toml packager metadata
 - **i18n:** Drop dead key, English-identical arms, and if/else prefix chain
 - Apply verified simplification audit across domain modules
+- Consolidate deep modules per architecture review
 
 ### <!-- 3 -->📚 Documentation
 
@@ -47,6 +48,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - Gate explanatory comments on added lines per ADR 0002
 - Enforce coverage-threshold sync and drop dead release glob
+- **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 ## [0.4.0] - 2026-07-10
 
