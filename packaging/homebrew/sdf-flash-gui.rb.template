@@ -3,11 +3,11 @@ cask "sdf-flash-gui" do
 
   on_arm do
     sha256 "${ARM_SHA256}"
-    url "${RELEASE_URL}/${ARM_FILENAME}"
+    url "https://github.com/thedavidweng/sdf-flash-gui/releases/download/v#{version}/SDF.Flash.GUI_#{version}_aarch64.dmg"
   end
   on_intel do
     sha256 "${INTEL_SHA256}"
-    url "${RELEASE_URL}/${INTEL_FILENAME}"
+    url "https://github.com/thedavidweng/sdf-flash-gui/releases/download/v#{version}/SDF.Flash.GUI_#{version}_x64.dmg"
   end
 
   name "SDF Flash GUI"
