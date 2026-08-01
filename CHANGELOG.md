@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
+## [Unreleased]
+
+### 🐛 Bug Fixes
+
+- **release:** Keep #{version} in Homebrew cask URLs
+
+### ⚙️ Miscellaneous Tasks
+
+- **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md for v1.0.0
 ## [1.0.0] - 2026-07-25
 
 ### 🚀 Features
