@@ -248,7 +248,6 @@ jobs:
       - name: Update cask
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          RELEASE_URL="https://github.com/thedavidweng/sdf-flash-gui/releases/download/${GITHUB_REF_NAME}"
 
           # Exclude legacy SDFFlashGUI DMGs if a release is re-tagged with duplicate assets.
           INTEL_DMG=$(find release-assets -name '*.dmg' ! -name 'SDFFlashGUI*' \( -name '*x86_64*' -o -name '*x64*' -o -name '*intel*' -o -name '*x86*' \) | sort | tail -1)
@@ -262,11 +261,19 @@ jobs:
 
           INTEL_SHA256=$(shasum -a 256 "$INTEL_DMG" | awk '{print $1}')
           ARM_SHA256=$(shasum -a 256 "$ARM_DMG" | awk '{print $1}')
-          INTEL_FILENAME=$(basename "$INTEL_DMG")
-          ARM_FILENAME=$(basename "$ARM_DMG")
 
-          export VERSION RELEASE_URL ARM_SHA256 INTEL_SHA256 ARM_FILENAME INTEL_FILENAME
-          envsubst < packaging/homebrew/sdf-flash-gui.rb.template > homebrew-tap/Casks/sdf-flash-gui.rb
+          # Only substitute release metadata. URLs keep Ruby #{version} so brew audit
+          # does not treat them as unversioned (requires sha256 :no_check).
+          export VERSION ARM_SHA256 INTEL_SHA256
+          envsubst '${VERSION} ${ARM_SHA256} ${INTEL_SHA256}' \
+            < packaging/homebrew/sdf-flash-gui.rb.template \
+            > homebrew-tap/Casks/sdf-flash-gui.rb
+
+          if ! grep -q '#{version}' homebrew-tap/Casks/sdf-flash-gui.rb; then
+            echo "::error::Generated cask URLs must interpolate #{version}"
+            cat homebrew-tap/Casks/sdf-flash-gui.rb
+            exit 1
+          fi
 
           cd homebrew-tap
           git config user.name "github-actions[bot]"
