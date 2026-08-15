@@ -21,6 +21,8 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md for v1.0.0
 - **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md
+- Move Node to 24 LTS and bump GitHub Actions (#34)
 ## [1.0.0] - 2026-07-25
 
 ### 🚀 Features
