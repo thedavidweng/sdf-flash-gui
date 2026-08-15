@@ -4,14 +4,23 @@ All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 ## [Unreleased]
 
+### 🚀 Features
+
+- Upgrade eframe to 0.35
+
 ### 🐛 Bug Fixes
 
 - **release:** Keep #{version} in Homebrew cask URLs
+
+### 💼 Other
+
+- **deps:** Bump thiserror from 2.0.19 to 2.0.20
 
 ### ⚙️ Miscellaneous Tasks
 
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md for v1.0.0
+- **changelog:** Sync CHANGELOG.md
 ## [1.0.0] - 2026-07-25
 
 ### 🚀 Features
