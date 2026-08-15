@@ -236,7 +236,7 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if self.state.chrome.exiting {
-            egui::CentralPanel::default().show_inside(ui, |_ui| {});
+            egui::CentralPanel::default().show(ui, |_ui| {});
             return;
         }
 
@@ -249,7 +249,7 @@ impl eframe::App for App {
             egui::Frame::central_panel(ui.style()).inner_margin(egui::Margin::same(PANEL_MARGIN));
         egui::CentralPanel::default()
             .frame(panel_frame)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.add_enabled_ui(!modal_open, |ui| {
                     show_main_ui(ui, &ctx, &mut self.state, &self.worker_tx, &self.runner);
                 });
