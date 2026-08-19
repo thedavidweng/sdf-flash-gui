@@ -37,7 +37,8 @@ jobs:
       - run: cargo clippy -- -D warnings
 
   sdf-parser-policy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -48,7 +49,8 @@ jobs:
           test "$count" -eq 0
 
   comment-policy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
         with:
