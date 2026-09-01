@@ -65,7 +65,7 @@ jobs:
         with:
           name: release-changelog
 
-      - uses: softprops/action-gh-release@v3.0.2
+      - uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: false
@@ -134,7 +134,7 @@ jobs:
             powershell -Command "Get-ChildItem | ForEach-Object { (Get-FileHash $_.FullName -Algorithm SHA256).Hash + '  ' + $_.Name } | Set-Content 'SHA256SUMS-${{ matrix.target }}.txt'"
           fi
 
-      - uses: softprops/action-gh-release@v3.0.2
+      - uses: softprops/action-gh-release@v3.0.3
         if: github.ref_type == 'tag'
         with:
           tag_name: ${{ github.ref_name }}
@@ -182,7 +182,7 @@ jobs:
           cd dist
           shasum -a 256 * > "SHA256SUMS-${{ matrix.target }}.txt"
 
-      - uses: softprops/action-gh-release@v3.0.2
+      - uses: softprops/action-gh-release@v3.0.3
         if: github.ref_type == 'tag'
         with:
           tag_name: ${{ github.ref_name }}
