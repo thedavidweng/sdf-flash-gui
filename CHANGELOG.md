@@ -26,6 +26,8 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - Run lightweight jobs on ubuntu-slim (#35)
 - **changelog:** Sync CHANGELOG.md
+- **changelog:** Sync CHANGELOG.md
+- Pin GitHub Actions to immutable SHAs (#39)
 ## [1.0.0] - 2026-07-25
 
 ### 🚀 Features
