@@ -1,7 +1,7 @@
 version: 2
 updates:
-  - package-ecosystem: cargo
-    directory: /
+  - package-ecosystem: "cargo"
+    directory: "/"
     schedule:
       interval: weekly
     labels:
@@ -10,6 +10,12 @@ updates:
     commit-message:
       prefix: build
       include: scope
+    ignore:
+      # egui-phosphor is pinned to egui 0.34; bump manually with eframe upgrades
+      - dependency-name: eframe
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "egui*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       egui:
         patterns:
@@ -17,26 +23,13 @@ updates:
           - egui*
       dev-deps:
         dependency-type: development
-    ignore:
-      # egui-phosphor is pinned to egui 0.34; bump manually with eframe upgrades
-      - dependency-name: eframe
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      - dependency-name: "egui*"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     cooldown:
       default-days: 5
       semver-major-days: 7
       semver-minor-days: 5
       semver-patch-days: 3
-  - package-ecosystem: github-actions
-    groups:
-      github-actions:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
-    directory: /
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
       interval: weekly
     labels:
@@ -45,6 +38,13 @@ updates:
     commit-message:
       prefix: build
       include: scope
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     cooldown:
       default-days: 5
       semver-major-days: 7
