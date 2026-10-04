@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
+## [Unreleased]
+
+### ⚙️ Miscellaneous Tasks
+
+- **changelog:** Sync CHANGELOG.md for v1.1.0
+- Land changelog updates through a pull request (#49)
+- Drop checks permission from changelog workflows (#50)
+- Quote the changelog workflow command (#51)
 ## [1.1.0] - 2026-10-04
 
 ### 🚀 Features
