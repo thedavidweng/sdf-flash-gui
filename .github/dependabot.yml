@@ -11,7 +11,7 @@ updates:
       prefix: build
       include: scope
     ignore:
-      # egui-phosphor is pinned to egui 0.34; bump manually with eframe upgrades
+      # egui minor versions are breaking; bump eframe and egui-phosphor together
       - dependency-name: eframe
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "egui*"
