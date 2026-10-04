@@ -7,7 +7,7 @@ description = "Cross-platform SDFtool GUI — drive firmware dump/flash for MT19
 
 
 [dependencies]
-eframe = { version = "0.36", default-features = false, features = ["accesskit", "default_fonts", "glow", "persistence", "wayland", "x11"] }
+eframe = { version = "0.36", default-features = false, features = ["accesskit", "default_fonts", "glow", "links", "persistence", "wayland", "x11"] }
 egui-phosphor = "0.14"
 rfd = "0.17"
 serde = { version = "1", features = ["derive"] }
