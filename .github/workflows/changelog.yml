@@ -28,4 +28,5 @@ jobs:
       - name: Open a pull request when CHANGELOG.md changes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash scripts/changelog-pr.sh "changelog/${{ github.sha }}" "chore(changelog): sync CHANGELOG.md"
+        run: |
+          bash scripts/changelog-pr.sh "changelog/${{ github.sha }}" "chore(changelog): sync CHANGELOG.md"
