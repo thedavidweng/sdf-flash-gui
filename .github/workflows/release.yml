@@ -202,6 +202,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
+      checks: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -213,18 +215,12 @@ jobs:
           name: release-changelog
           path: release-changelog
 
-      - name: Commit CHANGELOG.md to main
+      - name: Open a pull request when CHANGELOG.md changes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           cp release-changelog/CHANGELOG.md CHANGELOG.md
-          git add CHANGELOG.md
-          if git diff --staged --quiet; then
-            echo "CHANGELOG.md already up to date on main"
-            exit 0
-          fi
-          git commit -m "chore(changelog): sync CHANGELOG.md for ${{ github.ref_name }}"
-          git push
+          bash scripts/changelog-pr.sh "changelog/${{ github.ref_name }}" "chore(changelog): sync CHANGELOG.md for ${{ github.ref_name }}"
 
   update-homebrew-tap:
     needs: build-macos
