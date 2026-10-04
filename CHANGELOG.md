@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
-## [Unreleased]
+## [1.1.0] - 2026-10-04
 
 ### 🚀 Features
 
@@ -15,6 +15,12 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 ### 💼 Other
 
 - **deps:** Bump thiserror from 2.0.19 to 2.0.20
+- **deps:** Bump softprops/action-gh-release (#43)
+- **deps:** Bump Swatinem/rust-cache (#41)
+- **deps:** Bump codecov/codecov-action (#42)
+- **deps:** Bump the github-actions group with 2 updates (#44)
+- **deps:** Bump thiserror from 2.0.20 to 2.0.21 (#45)
+- **deps:** Bump eframe and egui to 0.36.2 (#47)
 
 ### ⚙️ Miscellaneous Tasks
 
@@ -28,6 +34,13 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md
 - **changelog:** Sync CHANGELOG.md
 - Pin GitHub Actions to immutable SHAs (#39)
+- **changelog:** Sync CHANGELOG.md
+- Add Dependabot auto-merge (pull_request_target + secure policy)
+- **deps:** Dependabot cooldown + grouped actions for safer auto-merge
+- **deps:** Normalize Dependabot config (dedupe, cooldown, groups)
+- **deps:** Fix Dependabot cooldown (github-actions only supports default-days)
+- Restrict checkout credentials and token permissions (#46)
+- **release:** 1.1.0 (#48)
 ## [1.0.0] - 2026-07-25
 
 ### 🚀 Features
