@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use eframe::egui;
 use std::sync::mpsc::Sender;
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread;
 
 #[derive(Debug)]
@@ -293,6 +294,14 @@ fn send_backend_error(
     }
 }
 
+/// Runs a worker job off the UI thread; wasm32 has no threads, so jobs run inline (ADR 0011).
+fn run_job(job: impl FnOnce() + Send + 'static) {
+    #[cfg(not(target_arch = "wasm32"))]
+    thread::spawn(job);
+    #[cfg(target_arch = "wasm32")]
+    job();
+}
+
 pub fn spawn_probe(
     tx: &Sender<WorkerMsg>,
     state: &mut AppState,
@@ -327,7 +336,7 @@ pub fn spawn_probe(
     state.runtime.probing_drive = Some(drive_idx);
     state.runtime.probing = true;
 
-    thread::spawn(move || {
+    run_job(move || {
         let cmd = command::plan_drive_info(backend, &tool_path, &device);
         let _ = tx.send(WorkerMsg::Stream(StreamEvent::Log(format!(
             "> {}",
@@ -394,7 +403,7 @@ pub fn spawn_streaming_command(
         "> {cmd_display}"
     ))));
 
-    thread::spawn(move || {
+    run_job(move || {
         let cmd = Command { program, args };
         let result = crate::orchestration::run_streaming_with(
             &cmd,
@@ -444,7 +453,7 @@ pub fn spawn_list_drives(
     let backend = state.config.backend;
     let tool_path = state.config.tool_path.clone();
     let runner = runner.clone();
-    thread::spawn(move || {
+    run_job(move || {
         match crate::orchestration::run_list_backend_with(
             backend,
             &tool_path,

@@ -71,6 +71,8 @@ pub(super) fn t_en(key: L10nKey) -> &'static str {
         L10nKey::ReasonNoFirmware => "Select a firmware file",
         L10nKey::ReasonConflict => "Encrypted and boot-loader modes conflict",
         L10nKey::ReasonEnterToken => "Enter recovery token and confirmation",
+        L10nKey::ReasonWebDemo => "Web demo: download the desktop app to read or flash a real drive",
+        L10nKey::BtnClose => "Close",
         L10nKey::LabelManufacturer => "Manufacturer:",
         L10nKey::LabelProduct => "Product:",
         L10nKey::LabelRevision => "Revision:",

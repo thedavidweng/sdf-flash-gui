@@ -15,6 +15,25 @@ pub trait FileDialog {
 /// Production implementation using rfd (native dialogs).
 pub struct NativeDialog;
 
+/// Browsers expose no synchronous file picker, so the web build never returns a path.
+#[cfg(target_arch = "wasm32")]
+impl FileDialog for NativeDialog {
+    fn pick_folder(&self) -> Option<PathBuf> {
+        None
+    }
+
+    fn pick_file_with_title(
+        &self,
+        _title: &str,
+        _filter_name: &str,
+        _extensions: &[&str],
+        _initial_dir: Option<&Path>,
+    ) -> Option<PathBuf> {
+        None
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl FileDialog for NativeDialog {
     fn pick_folder(&self) -> Option<PathBuf> {
         rfd::FileDialog::new().pick_folder()

@@ -1,7 +1,9 @@
 //! OS drive enumeration and backend/sdf.bin discovery.
 //! Coverage-ignored (see scripts/coverage-ignore.regex).
 
-use super::parse::{cap_drive_list, Drive, MAX_OPTICAL_DRIVES};
+use super::parse::Drive;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+use super::parse::{cap_drive_list, MAX_OPTICAL_DRIVES};
 #[cfg(target_os = "macos")]
 use super::parse::{parse_drutil_list, parse_ioreg_optical_services, parse_vendor_product};
 use crate::command::Backend;

@@ -14,6 +14,13 @@ pub enum StopDialog {
     ConfirmForceKill,
 }
 
+/// Where the GUI runs: the desktop app, or the browser demo backed by a simulated drive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Host {
+    Desktop,
+    WebDemo,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ThemeChoice {
     System,
@@ -73,6 +80,7 @@ pub struct Chrome {
     pub language: Language,
     pub resolved_lang: Language,
     pub theme: ThemeChoice,
+    pub host: Host,
 }
 
 #[derive(Debug)]
@@ -158,6 +166,7 @@ impl AppState {
                 language: Language::Auto,
                 resolved_lang: Language::English,
                 theme: ThemeChoice::System,
+                host: Host::Desktop,
             },
             config: ToolConfig {
                 backend: Backend::SdfTool,

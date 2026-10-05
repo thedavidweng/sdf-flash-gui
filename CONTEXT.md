@@ -161,3 +161,20 @@ The GUI's "may Start be enabled?" check in [`start_gate`](src/gui/start_gate.rs)
 Combines GUI-only pre-checks (busy, probing, cross-flash confirmation, path
 validation, firmware loaded) with plan-level rules delegated to
 `plan_command`. Returns `Option<StartBlock>` — `None` means start is allowed.
+
+In the [Web demo](#web-demo), path validation is skipped and every input
+that passes the other rules ends at `StartBlock::WebDemo`.
+
+## Host
+
+Where the GUI runs ([`Host`](src/gui/state.rs)): `Desktop`, or `WebDemo`.
+`ops::system_access` is the single question views ask before enabling
+anything that needs local files, processes, or quitting the app.
+
+### Web demo
+
+The desktop GUI compiled to `wasm32-unknown-unknown` and embedded on the
+project site (ADR 0011). [`DemoRunner`](src/gui/demo.rs) replaces the
+backend behind the `ProcessRunner` seam with canned `-l` / `--info` output
+for three simulated drives, so the real parsers, workers, and start gate run
+unchanged. Worker jobs run inline because wasm32 has no threads.

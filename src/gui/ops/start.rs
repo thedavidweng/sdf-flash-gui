@@ -4,7 +4,7 @@ use crate::orchestration;
 use crate::process::ProcessRunner;
 
 use crate::gui::file_dialog::FileDialog;
-use crate::gui::state::AppState;
+use crate::gui::state::{AppState, Host};
 use crate::gui::validation::validate_tool_path;
 use crate::gui::workers::{spawn_streaming_command, WorkerMsg};
 use crate::gui::OperationMode;
@@ -57,6 +57,7 @@ fn start_gate_input(state: &AppState) -> crate::gui::start_gate::StartGateInput<
         confirmation: &state.flash.confirmation,
         device,
         recovery_token: &state.flash.recovery_token,
+        system_access: system_access(state),
     }
 }
 
@@ -87,17 +88,26 @@ pub fn start_disabled_reason(state: &AppState) -> String {
             t(L10nKey::ReasonCrossFlashNotConfirmed, lang).to_string()
         }
         Some(StartBlock::NeedConfirmation) => t(L10nKey::ReasonEnterToken, lang).to_string(),
+        Some(StartBlock::WebDemo) => t(L10nKey::ReasonWebDemo, lang).to_string(),
     }
 }
 
-/// Returns true when a valid backend executable is configured.
+/// Whether the host can reach files, processes, and drives (false in the web demo).
+pub fn system_access(state: &AppState) -> bool {
+    state.chrome.host == Host::Desktop
+}
+
+/// Returns true when a valid backend executable is configured (the web demo simulates one).
 pub fn backend_configured(state: &AppState) -> bool {
-    validate_tool_path(
-        &state.config.tool_path,
-        state.config.backend,
-        Language::English,
-    )
-    .is_ok()
+    tool_path_status(state, Language::English).is_ok()
+}
+
+/// Tool path validation as shown in Settings; the web demo's simulated backend is always valid.
+pub fn tool_path_status(state: &AppState, lang: Language) -> Result<(), String> {
+    if !system_access(state) {
+        return Ok(());
+    }
+    validate_tool_path(&state.config.tool_path, state.config.backend, lang)
 }
 pub fn on_operation_mode_changed(state: &mut AppState, mode: OperationMode) {
     state.flash.confirmation.clear();

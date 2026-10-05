@@ -20,6 +20,7 @@ pub use nudge::{
 };
 pub use start::{
     backend_configured, can_start, execute_start, on_operation_mode_changed, start_disabled_reason,
+    system_access, tool_path_status,
 };
 
 #[cfg(test)]

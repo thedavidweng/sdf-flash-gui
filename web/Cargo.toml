@@ -1,0 +1,17 @@
+[package]
+name = "sdf-flash-gui-web"
+version = "0.0.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Browser demo of the SDF Flash GUI (wasm32 entry point)"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+sdf-flash-gui = { path = ".." }
+eframe = { version = "0.36", default-features = false, features = ["accesskit", "default_fonts", "glow", "persistence"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Document", "HtmlCanvasElement", "Window"] }

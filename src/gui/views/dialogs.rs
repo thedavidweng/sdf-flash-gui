@@ -46,7 +46,7 @@ pub fn handle_global_shortcuts(
             egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q),
             egui::KeyboardShortcut::new(egui::Modifiers::ALT, egui::Key::F4),
         ] {
-            if i.consume_shortcut(&quit_shortcut) {
+            if i.consume_shortcut(&quit_shortcut) && ops::system_access(state) {
                 ops::request_app_quit(ctx, state);
             }
         }

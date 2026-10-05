@@ -249,6 +249,8 @@ l10n_keys! {
     ReasonNoFirmware,
     ReasonConflict,
     ReasonEnterToken,
+    ReasonWebDemo,
+    BtnClose,
     LabelManufacturer,
     LabelProduct,
     LabelRevision,

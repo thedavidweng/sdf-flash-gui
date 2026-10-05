@@ -126,7 +126,10 @@ pub fn show_main_ui(
         }
         let quit_text = t(L10nKey::MenuQuit, state.chrome.resolved_lang);
         let quit_hint = shortcut_hint(quit_text, "⌘Q", "Alt+F4");
-        let quit_resp = ui.add(super::super::toolbar_icon_button(ui, icon::X));
+        let quit_resp = ui.add_enabled(
+            ops::system_access(state),
+            super::super::toolbar_icon_button(ui, icon::X),
+        );
         quit_resp.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, quit_resp.enabled(), quit_text)
         });
@@ -616,6 +619,7 @@ fn show_firmware_selector(ui: &mut egui::Ui, state: &mut AppState, dialog: &impl
     ));
     let path_before = state.flash.firmware_path.clone();
     let filter = t(L10nKey::DialogFilterFirmware, state.chrome.resolved_lang);
+    let files_enabled = ops::system_access(state);
     let _ = file_picker(
         ui,
         &mut state.flash.firmware_path,
@@ -623,6 +627,7 @@ fn show_firmware_selector(ui: &mut egui::Ui, state: &mut AppState, dialog: &impl
         &["bin"],
         state.chrome.resolved_lang,
         dialog,
+        files_enabled,
     );
     if state.flash.firmware_path != path_before {
         if state.flash.firmware_path.is_empty() {
@@ -717,6 +722,7 @@ fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState, dialog: &
             ui.add_space(GAP_TINY);
             ui.label(t(L10nKey::LabelWrongFw, state.chrome.resolved_lang));
             let filter = t(L10nKey::DialogFilterFirmware, state.chrome.resolved_lang);
+            let files_enabled = ops::system_access(state);
             if file_picker(
                 ui,
                 &mut state.flash.wrong_firmware_path,
@@ -724,17 +730,21 @@ fn show_mode_specific_options(ui: &mut egui::Ui, state: &mut AppState, dialog: &
                 &["bin"],
                 state.chrome.resolved_lang,
                 dialog,
+                files_enabled,
             ) && !state.flash.wrong_firmware_path.is_empty()
             {
                 ops::extract_recovery_token_from_wrong_firmware(state);
             }
             ui.add_space(GAP_SMALL);
             if ui
-                .add(icon_button(
-                    ui,
-                    icon::EXPORT,
-                    t(L10nKey::BtnExtract, state.chrome.resolved_lang),
-                ))
+                .add_enabled(
+                    files_enabled,
+                    icon_button(
+                        ui,
+                        icon::EXPORT,
+                        t(L10nKey::BtnExtract, state.chrome.resolved_lang),
+                    ),
+                )
                 .clicked()
             {
                 ops::extract_recovery_token_from_wrong_firmware(state);
@@ -860,42 +870,45 @@ pub(crate) fn file_picker(
     extensions: &[&str],
     lang: Language,
     dialog: &impl FileDialog,
+    enabled: bool,
 ) -> bool {
     let initial_dir = std::path::Path::new(path)
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map(|p| p.to_path_buf());
     let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .add(icon_button(
-                    ui,
-                    icon::FOLDER_OPEN,
-                    t(L10nKey::BtnBrowse, lang),
-                ))
-                .clicked()
-            {
-                if let Some(file) = dialog.pick_file_with_title(
-                    filter_name,
-                    filter_name,
-                    extensions,
-                    initial_dir.as_deref(),
-                ) {
-                    *path = file.to_string_lossy().to_string();
-                    changed = true;
+    ui.add_enabled_ui(enabled, |ui| {
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(icon_button(
+                        ui,
+                        icon::FOLDER_OPEN,
+                        t(L10nKey::BtnBrowse, lang),
+                    ))
+                    .clicked()
+                {
+                    if let Some(file) = dialog.pick_file_with_title(
+                        filter_name,
+                        filter_name,
+                        extensions,
+                        initial_dir.as_deref(),
+                    ) {
+                        *path = file.to_string_lossy().to_string();
+                        changed = true;
+                    }
                 }
-            }
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                let hint = path.clone();
-                let edit = egui::TextEdit::singleline(path).desired_width(ui.available_width());
-                let resp = ui.add(edit);
-                changed |= resp.changed();
-                if !hint.is_empty() {
-                    resp.on_hover_text(hint);
-                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let hint = path.clone();
+                    let edit = egui::TextEdit::singleline(path).desired_width(ui.available_width());
+                    let resp = ui.add(edit);
+                    changed |= resp.changed();
+                    if !hint.is_empty() {
+                        resp.on_hover_text(hint);
+                    }
+                });
             });
-        });
+        })
     });
     changed
 }
