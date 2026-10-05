@@ -11,6 +11,7 @@ on:
       - "assets/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "build.rs"
       - "scripts/build-site.sh"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -48,6 +49,8 @@ jobs:
       - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
         with:
           tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Build site
         run: ./scripts/build-site.sh _site

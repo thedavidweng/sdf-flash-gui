@@ -12,7 +12,18 @@ function detectOs() {
 }
 
 const OS_LABEL = { mac: "Download for macOS", win: "Download for Windows", linux: "Download for Linux" };
-const OS_PRIMARY_ASSET = { mac: "_aarch64.dmg", win: ".msi", linux: ".appimage" };
+const MAC_ASSET = { arm: "_aarch64.dmg", x86: "_x64.dmg" };
+
+async function primaryAssets(os) {
+  if (os === "win") return [".msi"];
+  if (os === "linux") return [".appimage", ".deb"];
+  try {
+    const { architecture } = await navigator.userAgentData.getHighEntropyValues(["architecture"]);
+    return MAC_ASSET[architecture] ? [MAC_ASSET[architecture]] : [];
+  } catch {
+    return [];
+  }
+}
 
 async function latestRelease() {
   const key = "sdf-flash-gui:latest-release";
@@ -62,8 +73,9 @@ async function wireDownloads() {
     if (asset) a.href = asset.url;
   });
   if (os) {
-    const asset = findAsset(release, OS_PRIMARY_ASSET[os]);
-    primary.href = asset ? asset.url : RELEASES;
+    const suffixes = await primaryAssets(os);
+    const asset = suffixes.map((s) => findAsset(release, s)).find(Boolean);
+    primary.href = asset ? asset.url : suffixes.length ? RELEASES : "#install";
   }
 }
 
@@ -146,6 +158,7 @@ async function bootDemo() {
     return;
   }
 
+  let started = false;
   try {
     const fetching = log("  fetching sdf_flash_gui_bg.wasm");
     const bytes = await fetchWithProgress("demo/sdf_flash_gui_bg.wasm", (got, total) => {
@@ -156,11 +169,18 @@ async function bootDemo() {
     const wasm = await import("./demo/sdf_flash_gui.js");
     await wasm.default({ module_or_path: bytes });
     log("  probing /dev/sr0 via simulated sdftool", "ok");
+    started = true;
     await wasm.start("app");
     requestAnimationFrame(() => boot.classList.add("gone"));
   } catch (err) {
     console.error(err);
     log(`error: ${err?.message || err}`, "err");
+    if (!started) {
+      log("  press Boot demo to retry");
+      bootMeter.style.width = "0%";
+      boot.classList.remove("running");
+      booted = false;
+    }
   }
 }
 

@@ -10,10 +10,19 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 out_dir="${1:-target/site}"
+case "$out_dir" in
+  *..*) echo "output dir must not contain '..' (got: $out_dir)" >&2; exit 1 ;;
+  target/?*|_site|_site/*) ;;
+  *)
+    echo "output dir must be under target/ or _site (got: $out_dir)" >&2
+    exit 1
+    ;;
+esac
+
 locked=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/version = |"/, ""); print; exit}' Cargo.lock)
-installed=$(wasm-bindgen --version | awk '{print $2}')
+installed=$(wasm-bindgen --version 2>/dev/null | awk '{print $2}' || true)
 if [ "$locked" != "$installed" ]; then
-  echo "wasm-bindgen-cli $installed does not match Cargo.lock $locked" >&2
+  echo "wasm-bindgen-cli ${installed:-not installed} does not match Cargo.lock $locked" >&2
   echo "install with: cargo install wasm-bindgen-cli --version $locked --locked" >&2
   exit 1
 fi
