@@ -1,6 +1,7 @@
 use crate::command::Backend;
 use crate::drive;
 use crate::gui::file_dialog::FileDialog;
+use crate::gui::ops;
 use crate::gui::state::AppState;
 use crate::gui::validation;
 use crate::gui::workers::{spawn_list_drives, WorkerMsg};
@@ -36,11 +37,12 @@ pub fn show_settings_window(
             .with_inner_size([SETTINGS_WIDTH, SETTINGS_HEIGHT])
             .with_min_inner_size([SETTINGS_MIN_WIDTH, SETTINGS_MIN_HEIGHT])
             .with_resizable(true),
-        |ctx, _class| {
+        |ctx, class| {
             if super::viewport_close_requested(ctx) {
                 state.chrome.show_settings = false;
             }
             egui::CentralPanel::default().show(ctx, |ui| {
+                let system_access = ops::system_access(state);
                 ui.group(|ui| {
                     ui.label(t(L10nKey::LabelBackend, state.chrome.resolved_lang));
                     ui.horizontal(|ui| {
@@ -75,6 +77,7 @@ pub fn show_settings_window(
                                     &[],
                                     state.chrome.resolved_lang,
                                     dialog,
+                                    system_access,
                                 ) {
                                     state.config.auto_detected = false;
                                     state.drive.last_probed_drive = None;
@@ -82,11 +85,14 @@ pub fn show_settings_window(
                                 }
                                 ui.add_space(GAP_SMALL);
                                 if ui
-                                    .add(icon_button(
-                                        ui,
-                                        icon::MAGNIFYING_GLASS,
-                                        t(L10nKey::BtnAutoDetect, state.chrome.resolved_lang),
-                                    ))
+                                    .add_enabled(
+                                        system_access,
+                                        icon_button(
+                                            ui,
+                                            icon::MAGNIFYING_GLASS,
+                                            t(L10nKey::BtnAutoDetect, state.chrome.resolved_lang),
+                                        ),
+                                    )
                                     .clicked()
                                 {
                                     if let Some((b, p)) = drive::find_backend(state.config.backend)
@@ -122,11 +128,9 @@ pub fn show_settings_window(
                                     error_color,
                                     t(L10nKey::StatusNotFound, state.chrome.resolved_lang),
                                 );
-                            } else if let Err(e) = validation::validate_tool_path(
-                                &state.config.tool_path,
-                                state.config.backend,
-                                state.chrome.resolved_lang,
-                            ) {
+                            } else if let Err(e) =
+                                ops::tool_path_status(state, state.chrome.resolved_lang)
+                            {
                                 ui.colored_label(error_color, &e);
                             } else {
                                 ui.colored_label(
@@ -145,14 +149,18 @@ pub fn show_settings_window(
                                     &["bin"],
                                     state.chrome.resolved_lang,
                                     dialog,
+                                    system_access,
                                 );
                                 ui.add_space(GAP_SMALL);
                                 if ui
-                                    .add(icon_button(
-                                        ui,
-                                        icon::MAGNIFYING_GLASS,
-                                        t(L10nKey::BtnAutoDetect, state.chrome.resolved_lang),
-                                    ))
+                                    .add_enabled(
+                                        system_access,
+                                        icon_button(
+                                            ui,
+                                            icon::MAGNIFYING_GLASS,
+                                            t(L10nKey::BtnAutoDetect, state.chrome.resolved_lang),
+                                        ),
+                                    )
                                     .clicked()
                                 {
                                     let found = crate::drive::find_sdf_bin();
@@ -216,11 +224,14 @@ pub fn show_settings_window(
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .add(icon_button(
-                                ui,
-                                icon::BINARY,
-                                t(L10nKey::BtnParseSdf, state.chrome.resolved_lang),
-                            ))
+                            .add_enabled(
+                                system_access,
+                                icon_button(
+                                    ui,
+                                    icon::BINARY,
+                                    t(L10nKey::BtnParseSdf, state.chrome.resolved_lang),
+                                ),
+                            )
                             .clicked()
                         {
                             match std::fs::read(&state.config.sdf_path) {
@@ -262,6 +273,9 @@ pub fn show_settings_window(
                         }
                     });
                 });
+                if super::embedded_close_clicked(ui, class, state.chrome.resolved_lang) {
+                    state.chrome.show_settings = false;
+                }
             });
         },
     );

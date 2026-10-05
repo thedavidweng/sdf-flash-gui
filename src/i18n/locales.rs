@@ -16,6 +16,8 @@ macro_rules! translations {
 }
 
 translations! { fn t_bg {
+    L10nKey::BtnClose => r#"Затвори"#,
+    L10nKey::ReasonWebDemo => r#"Уеб демо: изтеглете настолното приложение, за да четете или записвате истинско устройство"#,
     L10nKey::TitleDriveProperties => r#"Свойства на устройството"#,
     L10nKey::LabelDevice => r#"Устройство"#,
     L10nKey::SectionOperation => r#"Операция"#,
@@ -118,6 +120,8 @@ translations! { fn t_bg {
 } }
 
 translations! { fn t_hr {
+    L10nKey::BtnClose => r#"Zatvori"#,
+    L10nKey::ReasonWebDemo => r#"Web demo: preuzmite desktop aplikaciju za čitanje ili flashanje stvarnog pogona"#,
     L10nKey::TitleDriveProperties => r#"Svojstva pogona"#,
     L10nKey::LabelDevice => r#"Uređaj"#,
     L10nKey::SectionOperation => r#"Operacija"#,
@@ -217,6 +221,8 @@ translations! { fn t_hr {
 } }
 
 translations! { fn t_cs {
+    L10nKey::BtnClose => r#"Zavřít"#,
+    L10nKey::ReasonWebDemo => r#"Webová ukázka: pro čtení nebo zápis skutečné jednotky si stáhněte desktopovou aplikaci"#,
     L10nKey::TitleDriveProperties => r#"Vlastnosti jednotky"#,
     L10nKey::LabelDevice => r#"Zařízení"#,
     L10nKey::SectionOperation => r#"Operace"#,
@@ -317,6 +323,8 @@ translations! { fn t_cs {
 } }
 
 translations! { fn t_da {
+    L10nKey::BtnClose => r#"Luk"#,
+    L10nKey::ReasonWebDemo => r#"Webdemo: download desktop-appen for at læse eller flashe et rigtigt drev"#,
     L10nKey::TitleDriveProperties => r#"Drevets egenskaber"#,
     L10nKey::LabelDevice => r#"Enhed"#,
     L10nKey::SectionOperation => r#"Handling"#,
@@ -413,6 +421,8 @@ translations! { fn t_da {
 } }
 
 translations! { fn t_nl {
+    L10nKey::BtnClose => r#"Sluiten"#,
+    L10nKey::ReasonWebDemo => r#"Webdemo: download de desktop-app om een echt station te lezen of te flashen"#,
     L10nKey::TitleDriveProperties => r#"Drive-eigenschappen"#,
     L10nKey::LabelDevice => r#"Apparaat"#,
     L10nKey::SectionOperation => r#"Bewerking"#,
@@ -509,6 +519,8 @@ translations! { fn t_nl {
 } }
 
 translations! { fn t_et {
+    L10nKey::BtnClose => r#"Sulge"#,
+    L10nKey::ReasonWebDemo => r#"Veebidemo: päris seadme lugemiseks või välgutamiseks laadige alla töölauarakendus"#,
     L10nKey::TitleDriveProperties => r#"Seadme omadused"#,
     L10nKey::LabelDevice => r#"Seade"#,
     L10nKey::SectionOperation => r#"Toiming"#,
@@ -608,6 +620,8 @@ translations! { fn t_et {
 } }
 
 translations! { fn t_fi {
+    L10nKey::BtnClose => r#"Sulje"#,
+    L10nKey::ReasonWebDemo => r#"Verkkodemo: lataa työpöytäsovellus lukeaksesi tai flashataksesi oikean aseman"#,
     L10nKey::TitleDriveProperties => r#"Aseman ominaisuudet"#,
     L10nKey::LabelDevice => r#"Laite"#,
     L10nKey::SectionOperation => r#"Toiminto"#,
@@ -709,6 +723,8 @@ translations! { fn t_fi {
 } }
 
 translations! { fn t_fr {
+    L10nKey::BtnClose => r#"Fermer"#,
+    L10nKey::ReasonWebDemo => r#"Démo web : téléchargez l'application de bureau pour lire ou flasher un vrai lecteur"#,
     L10nKey::TitleDriveProperties => r#"Propriétés du lecteur"#,
     L10nKey::LabelDevice => r#"Périphérique"#,
     L10nKey::SectionOperation => r#"Opération"#,
@@ -812,6 +828,8 @@ translations! { fn t_fr {
 } }
 
 translations! { fn t_gl {
+    L10nKey::BtnClose => r#"Pechar"#,
+    L10nKey::ReasonWebDemo => r#"Demo web: descarga a aplicación de escritorio para ler ou flashear unha unidade real"#,
     L10nKey::TitleDriveProperties => r#"Propiedades da unidade"#,
     L10nKey::LabelDevice => r#"Dispositivo"#,
     L10nKey::SectionOperation => r#"Operación"#,
@@ -912,6 +930,8 @@ translations! { fn t_gl {
 } }
 
 translations! { fn t_de {
+    L10nKey::BtnClose => r#"Schließen"#,
+    L10nKey::ReasonWebDemo => r#"Web-Demo: Laden Sie die Desktop-App herunter, um ein echtes Laufwerk zu lesen oder zu flashen"#,
     L10nKey::TitleDriveProperties => r#"Laufwerkeigenschaften"#,
     L10nKey::LabelDevice => r#"Gerät"#,
     L10nKey::SectionOperation => r#"Vorgang"#,
@@ -1007,6 +1027,8 @@ translations! { fn t_de {
 } }
 
 translations! { fn t_el {
+    L10nKey::BtnClose => r#"Κλείσιμο"#,
+    L10nKey::ReasonWebDemo => r#"Επίδειξη web: κατεβάστε την εφαρμογή επιφάνειας εργασίας για ανάγνωση ή εγγραφή πραγματικής μονάδας"#,
     L10nKey::TitleDriveProperties => r#"Ιδιότητες οδηγού"#,
     L10nKey::LabelDevice => r#"Συσκευή"#,
     L10nKey::SectionOperation => r#"Λειτουργία"#,
@@ -1108,6 +1130,8 @@ translations! { fn t_el {
 } }
 
 translations! { fn t_hu {
+    L10nKey::BtnClose => r#"Bezárás"#,
+    L10nKey::ReasonWebDemo => r#"Webes demó: valódi meghajtó olvasásához vagy flasheléséhez töltse le az asztali alkalmazást"#,
     L10nKey::TitleDriveProperties => r#"Meghajtó tulajdonságai"#,
     L10nKey::LabelDevice => r#"Eszköz"#,
     L10nKey::SectionOperation => r#"Művelet"#,
@@ -1208,6 +1232,8 @@ translations! { fn t_hu {
 } }
 
 translations! { fn t_id {
+    L10nKey::BtnClose => r#"Tutup"#,
+    L10nKey::ReasonWebDemo => r#"Demo web: unduh aplikasi desktop untuk membaca atau mem-flash drive sungguhan"#,
     L10nKey::TitleDriveProperties => r#"Properti Drive"#,
     L10nKey::LabelDevice => r#"Perangkat"#,
     L10nKey::SectionOperation => r#"Operasi"#,
@@ -1306,6 +1332,8 @@ translations! { fn t_id {
 } }
 
 translations! { fn t_it {
+    L10nKey::BtnClose => r#"Chiudi"#,
+    L10nKey::ReasonWebDemo => r#"Demo web: scarica l'app desktop per leggere o flashare un'unità reale"#,
     L10nKey::TitleDriveProperties => r#"Proprietà del drive"#,
     L10nKey::LabelDevice => r#"Dispositivo"#,
     L10nKey::SectionOperation => r#"Operazione"#,
@@ -1406,6 +1434,8 @@ translations! { fn t_it {
 } }
 
 translations! { fn t_lv {
+    L10nKey::BtnClose => r#"Aizvērt"#,
+    L10nKey::ReasonWebDemo => r#"Tīmekļa demonstrācija: lejupielādējiet darbvirsmas lietotni, lai lasītu vai zibinātu īstu diskdzini"#,
     L10nKey::TitleDriveProperties => r#"Diskdzīņa īpašības"#,
     L10nKey::LabelDevice => r#"Ierīce"#,
     L10nKey::SectionOperation => r#"Darbība"#,
@@ -1508,6 +1538,8 @@ translations! { fn t_lv {
 } }
 
 translations! { fn t_lt {
+    L10nKey::BtnClose => r#"Uždaryti"#,
+    L10nKey::ReasonWebDemo => r#"Žiniatinklio demonstracija: atsisiųskite darbalaukio programą, kad galėtumėte skaityti ar perrašyti tikrą įrenginį"#,
     L10nKey::TitleDriveProperties => r#"Disko savybės"#,
     L10nKey::LabelDevice => r#"Įrenginys"#,
     L10nKey::SectionOperation => r#"Operacija"#,
@@ -1610,6 +1642,8 @@ translations! { fn t_lt {
 } }
 
 translations! { fn t_ms {
+    L10nKey::BtnClose => r#"Tutup"#,
+    L10nKey::ReasonWebDemo => r#"Demo web: muat turun aplikasi desktop untuk membaca atau mem-flash pemacu sebenar"#,
     L10nKey::TitleDriveProperties => r#"Sifat Pemacu"#,
     L10nKey::LabelDevice => r#"Peranti"#,
     L10nKey::SectionOperation => r#"Operasi"#,
@@ -1708,6 +1742,8 @@ translations! { fn t_ms {
 } }
 
 translations! { fn t_nb {
+    L10nKey::BtnClose => r#"Lukk"#,
+    L10nKey::ReasonWebDemo => r#"Nettdemo: last ned skrivebordsappen for å lese eller flashe en ekte stasjon"#,
     L10nKey::TitleDriveProperties => r#"Stasjonsegenskaper"#,
     L10nKey::LabelDevice => r#"Enhet"#,
     L10nKey::SectionOperation => r#"Handling"#,
@@ -1805,6 +1841,8 @@ translations! { fn t_nb {
 } }
 
 translations! { fn t_pl {
+    L10nKey::BtnClose => r#"Zamknij"#,
+    L10nKey::ReasonWebDemo => r#"Demo w przeglądarce: pobierz aplikację desktopową, aby odczytać lub sflashować prawdziwy napęd"#,
     L10nKey::TitleDriveProperties => r#"Właściwości napędu"#,
     L10nKey::LabelDevice => r#"Urządzenie"#,
     L10nKey::SectionOperation => r#"Operacja"#,
@@ -1902,6 +1940,8 @@ translations! { fn t_pl {
 } }
 
 translations! { fn t_pt {
+    L10nKey::BtnClose => r#"Fechar"#,
+    L10nKey::ReasonWebDemo => r#"Demo web: transfira a aplicação de ambiente de trabalho para ler ou gravar uma unidade real"#,
     L10nKey::TitleDriveProperties => r#"Propriedades da Unidade"#,
     L10nKey::LabelDevice => r#"Dispositivo"#,
     L10nKey::SectionOperation => r#"Operação"#,
@@ -2002,6 +2042,8 @@ translations! { fn t_pt {
 } }
 
 translations! { fn t_pt_br {
+    L10nKey::BtnClose => r#"Fechar"#,
+    L10nKey::ReasonWebDemo => r#"Demo web: baixe o aplicativo para desktop para ler ou gravar uma unidade real"#,
     L10nKey::TitleDriveProperties => r#"Propriedades da Unidade"#,
     L10nKey::LabelDevice => r#"Dispositivo"#,
     L10nKey::SectionOperation => r#"Operação"#,
@@ -2101,6 +2143,8 @@ translations! { fn t_pt_br {
 } }
 
 translations! { fn t_ro {
+    L10nKey::BtnClose => r#"Închide"#,
+    L10nKey::ReasonWebDemo => r#"Demo web: descărcați aplicația desktop pentru a citi sau a scrie o unitate reală"#,
     L10nKey::TitleDriveProperties => r#"Proprietăți Unitate"#,
     L10nKey::LabelDevice => r#"Dispozitiv"#,
     L10nKey::SectionOperation => r#"Operațiune"#,
@@ -2201,6 +2245,8 @@ translations! { fn t_ro {
 } }
 
 translations! { fn t_ru {
+    L10nKey::BtnClose => r#"Закрыть"#,
+    L10nKey::ReasonWebDemo => r#"Веб-демо: скачайте настольное приложение, чтобы прочитать или прошить настоящий привод"#,
     L10nKey::TitleDriveProperties => r#"Свойства устройства"#,
     L10nKey::LabelDevice => r#"Устройство"#,
     L10nKey::SectionOperation => r#"Операция"#,
@@ -2302,6 +2348,8 @@ translations! { fn t_ru {
 } }
 
 translations! { fn t_sk {
+    L10nKey::BtnClose => r#"Zavrieť"#,
+    L10nKey::ReasonWebDemo => r#"Webová ukážka: na čítanie alebo zápis skutočnej jednotky si stiahnite desktopovú aplikáciu"#,
     L10nKey::TitleDriveProperties => r#"Vlastnosti jednotky"#,
     L10nKey::LabelDevice => r#"Zariadenie"#,
     L10nKey::SectionOperation => r#"Operácia"#,
@@ -2402,6 +2450,8 @@ translations! { fn t_sk {
 } }
 
 translations! { fn t_sl {
+    L10nKey::BtnClose => r#"Zapri"#,
+    L10nKey::ReasonWebDemo => r#"Spletna predstavitev: za branje ali zapisovanje pravega pogona prenesite namizno aplikacijo"#,
     L10nKey::TitleDriveProperties => r#"Lastnosti pogona"#,
     L10nKey::LabelDevice => r#"Naprava"#,
     L10nKey::SectionOperation => r#"Operacija"#,
@@ -2503,6 +2553,8 @@ translations! { fn t_sl {
 } }
 
 translations! { fn t_es {
+    L10nKey::BtnClose => r#"Cerrar"#,
+    L10nKey::ReasonWebDemo => r#"Demo web: descarga la aplicación de escritorio para leer o flashear una unidad real"#,
     L10nKey::TitleDriveProperties => r#"Propiedades de la unidad"#,
     L10nKey::LabelDevice => r#"Dispositivo"#,
     L10nKey::SectionOperation => r#"Operación"#,
@@ -2602,6 +2654,8 @@ translations! { fn t_es {
 } }
 
 translations! { fn t_sv {
+    L10nKey::BtnClose => r#"Stäng"#,
+    L10nKey::ReasonWebDemo => r#"Webbdemo: ladda ner skrivbordsappen för att läsa eller flasha en riktig enhet"#,
     L10nKey::TitleDriveProperties => r#"Enhetsegenskaper"#,
     L10nKey::LabelDevice => r#"Enhet"#,
     L10nKey::SectionOperation => r#"Åtgärd"#,
@@ -2699,6 +2753,8 @@ translations! { fn t_sv {
 } }
 
 translations! { fn t_tr {
+    L10nKey::BtnClose => r#"Kapat"#,
+    L10nKey::ReasonWebDemo => r#"Web demosu: gerçek bir sürücüyü okumak veya flaşlamak için masaüstü uygulamasını indirin"#,
     L10nKey::TitleDriveProperties => r#"Sürücü Özellikleri"#,
     L10nKey::LabelDevice => r#"Cihaz"#,
     L10nKey::SectionOperation => r#"İşlem"#,
@@ -2799,6 +2855,8 @@ translations! { fn t_tr {
 } }
 
 translations! { fn t_uk {
+    L10nKey::BtnClose => r#"Закрити"#,
+    L10nKey::ReasonWebDemo => r#"Веб-демо: завантажте настільний застосунок, щоб прочитати або прошити справжній привід"#,
     L10nKey::TitleDriveProperties => r#"Властивості приводу"#,
     L10nKey::LabelDevice => r#"Пристрій"#,
     L10nKey::SectionOperation => r#"Операція"#,

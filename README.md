@@ -73,6 +73,17 @@ cargo test
 ./scripts/coverage.sh gate   # project ≥99%, patch 100% on changed domain lines
 ```
 
+### Website and web demo
+
+The project site lives in `site/` and deploys to GitHub Pages from `main`. Its demo is the real GUI compiled to WebAssembly over a simulated backend (see `docs/adr/0011-web-demo-reuses-desktop-gui.md`).
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version <wasm-bindgen version in Cargo.lock> --locked
+./scripts/build-site.sh                       # → target/site
+python3 -m http.server -d target/site 8000
+```
+
 ## Architecture
 
 ```
@@ -102,6 +113,9 @@ src/
     views/             egui paint only
     validation.rs      Tool / sdf.bin path checks
     file_dialog.rs     rfd adapter (coverage-ignored)
+    demo.rs            Web demo host: simulated sdftool behind ProcessRunner
+web/                   wasm32 entry that mounts the GUI on a canvas
+site/                  GitHub Pages site (static HTML/CSS/JS)
 ```
 
 CLI and GUI share probe/list/flash planning through `orchestration` and `command`. GUI Start rules live in `start_gate`; i18n maps them at the edge.

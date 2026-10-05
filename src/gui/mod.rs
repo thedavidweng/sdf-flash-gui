@@ -1,3 +1,4 @@
+pub mod demo;
 pub mod file_dialog;
 mod ops;
 mod start_gate;
@@ -10,7 +11,6 @@ pub use crate::drive::find_sdf_bin;
 
 use eframe::egui;
 
-use crate::process_runner::NativeRunner;
 use file_dialog::NativeDialog;
 use state::{AppState, PersistedSettings, StopDialog, SETTINGS_STORAGE_KEY};
 use views::{
@@ -20,9 +20,13 @@ use views::{
 };
 use workers::{spawn_list_drives, spawn_probe, WorkerMsg};
 
+#[cfg(not(target_arch = "wasm32"))]
 const WINDOW_WIDTH: f32 = 480.0;
+#[cfg(not(target_arch = "wasm32"))]
 const WINDOW_HEIGHT: f32 = 720.0;
+#[cfg(not(target_arch = "wasm32"))]
 const WINDOW_MIN_WIDTH: f32 = 400.0;
+#[cfg(not(target_arch = "wasm32"))]
 const WINDOW_MIN_HEIGHT: f32 = 620.0;
 
 pub(crate) const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -99,6 +103,7 @@ pub enum OperationMode {
 }
 
 /// Window/dock icon embedded at compile time (same asset as packager `icons`).
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn window_icon() -> std::sync::Arc<egui::IconData> {
     use std::sync::{Arc, OnceLock};
 
@@ -142,6 +147,21 @@ fn apply_app_text_styles(ctx: &egui::Context) {
     });
 }
 
+fn configure_context(cc: &eframe::CreationContext<'_>) -> AppState {
+    let mut fonts = egui::FontDefinitions::default();
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+    cc.egui_ctx.set_fonts(fonts);
+    apply_app_text_styles(&cc.egui_ctx);
+
+    let persisted = cc
+        .storage
+        .and_then(|s| eframe::get_value::<PersistedSettings>(s, SETTINGS_STORAGE_KEY));
+    let state = AppState::with_persisted(persisted.as_ref());
+    cc.egui_ctx.set_theme(state.chrome.theme.to_egui());
+    state
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -155,20 +175,21 @@ pub fn run() -> Result<(), eframe::Error> {
         crate::branding::DISPLAY_NAME,
         options,
         Box::new(|cc| {
-            let mut fonts = egui::FontDefinitions::default();
-            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-            cc.egui_ctx.set_fonts(fonts);
-            apply_app_text_styles(&cc.egui_ctx);
-
-            let persisted = cc
-                .storage
-                .and_then(|s| eframe::get_value::<PersistedSettings>(s, SETTINGS_STORAGE_KEY));
-            let state = AppState::with_persisted(persisted.as_ref());
-            cc.egui_ctx.set_theme(state.chrome.theme.to_egui());
-
-            Ok(Box::new(App::new(state)))
+            let state = configure_context(cc);
+            Ok(Box::new(App::new(
+                state,
+                std::sync::Arc::new(crate::process_runner::NativeRunner),
+            )))
         }),
     )
+}
+
+/// Browser demo (ADR 0011): the desktop UI over [`demo::DemoRunner`].
+pub fn create_web_demo(cc: &eframe::CreationContext<'_>) -> Box<dyn eframe::App> {
+    let mut state = configure_context(cc);
+    demo::enter_web_demo(&mut state);
+    let runner = std::sync::Arc::new(demo::DemoRunner::new(cc.egui_ctx.clone()));
+    Box::new(App::new(state, runner))
 }
 
 struct App {
@@ -179,10 +200,8 @@ struct App {
 }
 
 impl App {
-    fn new(mut state: AppState) -> Self {
+    fn new(mut state: AppState, runner: std::sync::Arc<dyn crate::process::ProcessRunner>) -> Self {
         let (worker_tx, worker_rx) = std::sync::mpsc::channel();
-        let runner: std::sync::Arc<dyn crate::process::ProcessRunner> =
-            std::sync::Arc::new(NativeRunner);
 
         if ops::backend_configured(&state) {
             spawn_list_drives(&worker_tx, &mut state, &runner, false);

@@ -172,6 +172,12 @@ fn try_graceful_terminate(child: &Child) -> Result<(), String> {
             Err(format!("taskkill /PID {pid} exited with {status}"))
         }
     }
+    #[cfg(not(any(unix, windows)))]
+    {
+        Err(format!(
+            "graceful stop is unsupported for {pid} on this platform"
+        ))
+    }
 }
 
 fn finish_cancelled_child(

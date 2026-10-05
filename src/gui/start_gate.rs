@@ -31,6 +31,8 @@ pub enum StartBlock {
     CrossFlashNotConfirmed,
     /// Typed confirmation or recover boot token missing/wrong.
     NeedConfirmation,
+    /// Every other rule passed, but the host cannot reach the drive (web demo).
+    WebDemo,
 }
 
 /// Snapshot of fields needed to evaluate the gate (no AppState dependency).
@@ -56,6 +58,8 @@ pub struct StartGateInput<'a> {
     pub confirmation: &'a str,
     pub device: &'a str,
     pub recovery_token: &'a str,
+    /// Host can reach the filesystem and drive hardware (false in the web demo).
+    pub system_access: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +71,10 @@ pub enum StartMode {
 
 /// Evaluate whether an operation may start. `None` = allowed.
 pub fn evaluate(input: &StartGateInput<'_>) -> Option<StartBlock> {
+    evaluate_rules(input).or_else(|| (!input.system_access).then_some(StartBlock::WebDemo))
+}
+
+fn evaluate_rules(input: &StartGateInput<'_>) -> Option<StartBlock> {
     if input.busy {
         return Some(StartBlock::Busy);
     }
@@ -81,11 +89,13 @@ pub fn evaluate(input: &StartGateInput<'_>) -> Option<StartBlock> {
             is_mt1939: input.drive_mt1939,
         });
     }
-    if let Err(e) = validate_tool_path(input.tool_path, input.backend, input.lang) {
-        return Some(StartBlock::InvalidToolPath(e));
-    }
-    if let Err(e) = validate_sdf_path(input.sdf_path, input.lang) {
-        return Some(StartBlock::InvalidSdfPath(e));
+    if input.system_access {
+        if let Err(e) = validate_tool_path(input.tool_path, input.backend, input.lang) {
+            return Some(StartBlock::InvalidToolPath(e));
+        }
+        if let Err(e) = validate_sdf_path(input.sdf_path, input.lang) {
+            return Some(StartBlock::InvalidSdfPath(e));
+        }
     }
     if input.cross_flash_required && !input.cross_flash_confirmed {
         return Some(StartBlock::CrossFlashNotConfirmed);
@@ -187,6 +197,7 @@ mod tests {
             confirmation: "",
             device: "/dev/sr0",
             recovery_token: "",
+            system_access: true,
         }
     }
 
@@ -355,6 +366,36 @@ mod tests {
             ),
             Some(StartBlock::InvalidToolPath(String::new()))
         );
+    }
+
+    #[test]
+    fn web_demo_blocks_after_every_other_rule_passes() {
+        let i = StartGateInput {
+            system_access: false,
+            ..base("sdftool")
+        };
+        assert_eq!(evaluate(&i), Some(StartBlock::WebDemo));
+    }
+
+    #[test]
+    fn web_demo_skips_host_path_validation_but_keeps_plan_rules() {
+        let i = StartGateInput {
+            system_access: false,
+            sdf_path: "/nonexistent/sdf.bin",
+            mode: StartMode::Write,
+            ..base("/nonexistent/sdftool")
+        };
+        assert_eq!(evaluate(&i), Some(StartBlock::NoFirmware));
+    }
+
+    #[test]
+    fn web_demo_reports_earlier_rules_first() {
+        let i = StartGateInput {
+            system_access: false,
+            has_drive: false,
+            ..base("sdftool")
+        };
+        assert_eq!(evaluate(&i), Some(StartBlock::NoDrive));
     }
 
     #[test]

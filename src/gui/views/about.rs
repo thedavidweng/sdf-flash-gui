@@ -15,7 +15,7 @@ pub fn show_about_window(ctx: &egui::Context, state: &mut AppState) {
             .with_inner_size([320.0, 180.0])
             .with_min_inner_size([320.0, 180.0])
             .with_resizable(true),
-        |ctx, _class| {
+        |ctx, class| {
             if super::viewport_close_requested(ctx) {
                 state.chrome.show_about = false;
             }
@@ -60,6 +60,9 @@ pub fn show_about_window(ctx: &egui::Context, state: &mut AppState) {
                         ));
                     });
                 });
+                if super::embedded_close_clicked(ui, class, state.chrome.resolved_lang) {
+                    state.chrome.show_about = false;
+                }
             });
         },
     );
