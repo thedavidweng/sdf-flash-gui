@@ -1,5 +1,4 @@
 const REPO = "thedavidweng/sdf-flash-gui";
-const RELEASES = `https://github.com/${REPO}/releases/latest`;
 
 function detectOs() {
   const platform = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
@@ -9,20 +8,6 @@ function detectOs() {
   if (platform.includes("win") || ua.includes("windows")) return "win";
   if (platform.includes("linux") || ua.includes("linux")) return "linux";
   return null;
-}
-
-const OS_LABEL = { mac: "Download for macOS", win: "Download for Windows", linux: "Download for Linux" };
-const MAC_ASSET = { arm: "_aarch64.dmg", x86: "_x64.dmg" };
-
-async function primaryAssets(os) {
-  if (os === "win") return [".msi"];
-  if (os === "linux") return [".appimage", ".deb"];
-  try {
-    const { architecture } = await navigator.userAgentData.getHighEntropyValues(["architecture"]);
-    return MAC_ASSET[architecture] ? [MAC_ASSET[architecture]] : [];
-  } catch {
-    return [];
-  }
 }
 
 async function latestRelease() {
@@ -48,15 +33,7 @@ function findAsset(release, suffix) {
 
 async function wireDownloads() {
   const os = detectOs();
-  const primary = document.querySelector("[data-primary-download]");
-  const label = document.querySelector("[data-primary-label]");
-  if (os) {
-    label.textContent = OS_LABEL[os];
-    document.querySelector(`.card[data-os="${os}"]`)?.classList.add("current");
-  } else {
-    primary.href = "#install";
-    label.textContent = "Get the desktop app";
-  }
+  if (os) document.querySelector(`.card[data-os="${os}"]`)?.classList.add("current");
 
   let release;
   try {
@@ -72,11 +49,6 @@ async function wireDownloads() {
     const asset = findAsset(release, a.dataset.asset);
     if (asset) a.href = asset.url;
   });
-  if (os) {
-    const suffixes = await primaryAssets(os);
-    const asset = suffixes.map((s) => findAsset(release, s)).find(Boolean);
-    primary.href = asset ? asset.url : suffixes.length ? RELEASES : "#install";
-  }
 }
 
 function wireCopy() {

@@ -51,11 +51,10 @@
         </p>
 
         <div class="cta">
-          <a class="btn primary" href="https://github.com/thedavidweng/sdf-flash-gui/releases/latest" data-primary-download>
+          <a class="btn primary" href="#install">
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M7.25 1h1.5v8.19l2.72-2.72 1.06 1.06L8 12.06 3.47 7.53l1.06-1.06 2.72 2.72V1ZM2 13.5h12V15H2v-1.5Z"/></svg>
-            <span data-primary-label>Download</span>
+            <span>Download</span>
           </a>
-          <a class="btn ghost" href="#demo">Try it in the browser <span aria-hidden="true">↓</span></a>
         </div>
 
         <div class="cmd" data-copy="brew install --cask thedavidweng/tap/sdf-flash-gui">
@@ -70,9 +69,17 @@
           <div><dt>languages</dt><dd>30 UI locales</dd></div>
           <div><dt>license</dt><dd>GPL-2.0-or-later</dd></div>
         </dl>
+
+        <p class="demo-note" id="demo-note">
+          <strong>The app window is live, not a screenshot.</strong> It is the
+          desktop app's own egui UI, compiled to WebAssembly and wired to a
+          simulated <code>sdftool</code> with three drives. Switch drives, modes,
+          theme, and language. Anything that would touch real hardware or files
+          stays disabled.
+        </p>
       </div>
 
-      <figure class="demo" id="demo" aria-labelledby="demo-caption">
+      <figure class="demo" id="demo" aria-label="Interactive SDF Flash GUI demo" aria-describedby="demo-note">
         <div class="window">
           <div class="titlebar">
             <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -88,12 +95,6 @@
             </div>
           </div>
         </div>
-        <figcaption id="demo-caption">
-          <strong>Not a screenshot.</strong> This is the desktop app's own egui UI,
-          compiled to WebAssembly and wired to a simulated <code>sdftool</code> with
-          three drives. Click around: switch drives, modes, theme, and language.
-          Anything that would touch real hardware or files stays disabled.
-        </figcaption>
       </figure>
     </section>
 

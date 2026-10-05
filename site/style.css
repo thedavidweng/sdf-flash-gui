@@ -96,11 +96,9 @@ nav .gh:hover { background: var(--widget-hover); color: #fff; }
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 520px);
   gap: 56px;
-  align-items: start;
-  padding: 64px 0 80px;
+  align-items: center;
+  padding: 56px 0 72px;
 }
-
-.hero-copy { padding-top: 24px; }
 
 h1 {
   margin: 0;
@@ -205,10 +203,8 @@ h1 {
 .boot .btn { align-self: flex-start; }
 .boot.running .btn { display: none; }
 
-figcaption {
-  margin-top: 14px; color: var(--muted); font-size: 13.5px; line-height: 1.6;
-}
-figcaption strong { color: var(--text); font-weight: 500; }
+.demo-note { max-width: 520px; margin: 24px 0 0; color: var(--muted); font-size: 13.5px; line-height: 1.6; }
+.demo-note strong { color: var(--text); font-weight: 500; }
 
 /* ── sections ──────────────────────────────────────────── */
 
@@ -309,7 +305,6 @@ figcaption strong { color: var(--text); font-weight: 500; }
 
 @media (max-width: 1080px) {
   .hero { grid-template-columns: 1fr; gap: 40px; padding-top: 40px; }
-  .hero-copy { padding-top: 0; }
   .demo { max-width: 560px; }
   .gates { grid-template-columns: 1fr; }
   .split { grid-template-columns: 1fr; }
