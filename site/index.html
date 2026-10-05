@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SDF Flash GUI — firmware dump &amp; flash for MT1959 optical drives</title>
   <meta name="description" content="Cross-platform GUI for dumping, flashing, and recovering firmware on MT1959 optical drives. A native front end for MakeMKV's sdftool, with safety gates that stop the mistakes that brick drives.">
-  <meta name="theme-color" content="#0c0e11">
+  <meta name="theme-color" content="#1b1b1b">
   <meta property="og:type" content="website">
   <meta property="og:title" content="SDF Flash GUI">
   <meta property="og:description" content="Dump, flash, and recover MT1959 optical drive firmware on macOS, Windows, and Linux.">
@@ -42,8 +42,7 @@
   <main id="main">
     <section class="hero wrap" id="top">
       <div class="hero-copy">
-        <p class="kicker"><span class="dot"></span>optical drive firmware utility</p>
-        <h1>Flash MT1959 drive firmware.<br><span>On any desktop.</span></h1>
+        <h1>Flash MT1959 drive firmware on any desktop.</h1>
         <p class="lede">
           A native, cross-platform front end for MakeMKV's <code>sdftool</code>.
           Dump, flash, and recover LG and ASUS Blu-ray drives on macOS,
@@ -100,7 +99,6 @@
 
     <section class="section wrap" id="gates" aria-labelledby="gates-title">
       <header class="section-head">
-        <p class="index">01</p>
         <h2 id="gates-title">Five gates between you and a bricked drive.</h2>
         <p>Start stays disabled until every rule passes. Each rule is decided in
           tested core code, not in the UI, and the tooltip tells you which one is
@@ -137,7 +135,6 @@
 
     <section class="section wrap" id="spec" aria-labelledby="spec-title">
       <header class="section-head">
-        <p class="index">02</p>
         <h2 id="spec-title">Spec sheet.</h2>
         <p>Everything the Windows-only SDFtool Flasher did, rebuilt in Rust for
           every desktop, plus the checks it never had.</p>
@@ -157,7 +154,6 @@
 
     <section class="section wrap split" id="cli" aria-labelledby="cli-title">
       <header class="section-head">
-        <p class="index">03</p>
         <h2 id="cli-title">Same engine, no window.</h2>
         <p>The binary doubles as a CLI. It plans commands through the same code
           path as the GUI, and flashing stays a dry run until you pass
@@ -183,7 +179,6 @@ LibreDrive: PossibleNotEnabled</span>
 
     <section class="section wrap" id="install" aria-labelledby="install-title">
       <header class="section-head">
-        <p class="index">04</p>
         <h2 id="install-title">Install.</h2>
         <p>Requires <a href="https://www.makemkv.com/">MakeMKV</a>, which ships
           <code>sdftool</code> and <code>makemkvcon</code>. An <code>sdf.bin</code>
