@@ -33,15 +33,25 @@ Cross-platform GUI for optical drive firmware dump/flash. Inspired by the Window
 
 ## Install
 
-**macOS (Homebrew)**
+**macOS / Linux**
 
 ```bash
-brew install --cask thedavidweng/tap/sdf-flash-gui
+curl -fsSL https://thedavidweng.github.io/sdf-flash-gui/install.sh | sh
 ```
 
-**Linux / Windows**
+Uses the Homebrew cask when `brew` is installed. Otherwise it downloads the `.dmg` (macOS), the `.deb` (apt/dpkg), or the AppImage (into `~/.local/bin`) from the latest release and checks it against the release's SHA-256 sums. Set `SDF_FLASH_GUI_APP_DIR` to install the macOS app somewhere other than `/Applications`.
 
-Download the latest installer from [Releases](https://github.com/thedavidweng/sdf-flash-gui/releases) — `.deb` / `.AppImage` for Linux, `.msi` for Windows.
+**Windows (PowerShell)**
+
+```powershell
+irm https://thedavidweng.github.io/sdf-flash-gui/install.ps1 | iex
+```
+
+Downloads the `.msi`, checks its SHA-256, and runs the installer.
+
+**Manual**
+
+Homebrew: `brew install --cask thedavidweng/tap/sdf-flash-gui`. Installers are also on [Releases](https://github.com/thedavidweng/sdf-flash-gui/releases): `.dmg` for macOS, `.deb` / `.AppImage` for Linux, `.msi` for Windows.
 
 ## Requirements
 

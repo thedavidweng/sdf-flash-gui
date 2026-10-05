@@ -109,7 +109,20 @@ h1 {
 .lede { max-width: 34em; margin: 20px 0 0; color: var(--muted); font-size: 16px; line-height: 1.65; }
 .lede code { color: var(--text); }
 
-.cta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 28px; }
+.cta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+
+[hidden] { display: none !important; }
+
+.installer { margin-top: 28px; max-width: 540px; }
+.tabs { display: flex; gap: 2px; margin-bottom: 6px; }
+.tabs button {
+  height: 26px; padding: 0 10px; border: 0; border-radius: var(--radius); cursor: pointer;
+  font: 13px var(--sans); color: var(--muted); background: transparent;
+}
+.tabs button:hover { color: var(--text); background: var(--widget); }
+.tabs button[aria-selected="true"] { color: var(--select-ink); background: var(--select); }
+.cmd-note { margin: 8px 0 0; color: var(--dim); font-size: 13px; line-height: 1.55; }
+.cmd-note code { color: var(--muted); }
 
 .btn {
   display: inline-flex; align-items: center; gap: 8px;
@@ -125,15 +138,12 @@ h1 {
 
 .cmd {
   display: flex; align-items: center; gap: 10px;
-  margin-top: 16px; max-width: 520px;
-  padding: 0 4px 0 12px; height: 38px;
+  min-height: 40px; padding: 6px 6px 6px 12px;
   background: var(--bg-sunk); border-radius: var(--radius);
   font: 13px var(--mono);
 }
-.cmd code { all: unset; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 13px var(--mono); color: var(--text); }
-.cmd .prompt { color: var(--dim); }
-.cmd.small { height: 34px; max-width: none; margin: 14px 0 0; }
-.cmd.small code { font-size: 12px; }
+.cmd code { all: unset; flex: 1; min-width: 0; overflow-wrap: anywhere; font: 13px/1.5 var(--mono); color: var(--text); }
+.cmd .prompt { flex: none; color: var(--dim); }
 
 .copy {
   flex: none; height: 26px; padding: 0 10px; border-radius: 2px; cursor: pointer;
@@ -270,6 +280,7 @@ h1 {
 .card h3 { margin: 0; font: 500 16px var(--sans); }
 .card.current h3::after { content: " (your system)"; color: var(--dim); font-weight: 400; font-size: 13px; }
 .card .note { margin: 12px 0 0; color: var(--muted); font-size: 13.5px; }
+.card .note code { white-space: normal; overflow-wrap: anywhere; }
 .dl { list-style: none; margin: auto 0 0; padding: 16px 0 0; display: grid; gap: 6px; }
 .dl a {
   display: flex; justify-content: space-between; align-items: center;

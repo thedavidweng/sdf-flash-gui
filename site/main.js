@@ -51,6 +51,30 @@ async function wireDownloads() {
   });
 }
 
+function wireInstallTabs() {
+  const root = document.querySelector("[data-installer]");
+  if (!root) return;
+  const tabs = [...root.querySelectorAll("[data-tab]")];
+  const select = (name, focus) => {
+    tabs.forEach((tab) => {
+      const on = tab.dataset.tab === name;
+      tab.setAttribute("aria-selected", String(on));
+      tab.tabIndex = on ? 0 : -1;
+      if (on && focus) tab.focus();
+    });
+    root.querySelectorAll("[data-panel]").forEach((panel) => (panel.hidden = panel.dataset.panel !== name));
+  };
+  tabs.forEach((tab, i) => {
+    tab.addEventListener("click", () => select(tab.dataset.tab, false));
+    tab.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      const next = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+      select(next.dataset.tab, true);
+    });
+  });
+  if (detectOs() === "win") select("win", false);
+}
+
 function wireCopy() {
   document.querySelectorAll("[data-copy]").forEach((box) => {
     const button = box.querySelector(".copy");
@@ -175,6 +199,7 @@ function wireDemo() {
   observer.observe(document.getElementById("app"));
 }
 
+wireInstallTabs();
 wireCopy();
 wireDemo();
 wireDownloads();

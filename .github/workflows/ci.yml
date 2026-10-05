@@ -97,6 +97,29 @@ jobs:
           fi
           python3 scripts/comment-gate.py --base "$BASE"
 
+  install-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Lint install.sh (ADR 0012)
+        run: shellcheck -s sh site/install.sh scripts/test-install.sh
+
+      - name: Test install.sh under dash and bash
+        run: |
+          sh scripts/test-install.sh dash
+          sh scripts/test-install.sh bash
+
+      - name: Parse install.ps1
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/site/install.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors | ForEach-Object { Write-Error $_.ToString() }; exit 1 }
+
   test:
     needs: [fmt, clippy, sdf-parser-policy, comment-policy]
     strategy:

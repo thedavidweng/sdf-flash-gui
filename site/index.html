@@ -50,17 +50,33 @@
           that brick drives.
         </p>
 
+        <div class="installer" data-installer>
+          <div class="tabs" role="tablist" aria-label="Install command">
+            <button type="button" role="tab" id="tab-unix" aria-controls="cmd-unix" aria-selected="true" data-tab="unix">macOS / Linux</button>
+            <button type="button" role="tab" id="tab-win" aria-controls="cmd-win" aria-selected="false" tabindex="-1" data-tab="win">Windows</button>
+          </div>
+          <div class="cmd" role="tabpanel" id="cmd-unix" aria-labelledby="tab-unix" data-panel="unix" data-copy="curl -fsSL https://thedavidweng.github.io/sdf-flash-gui/install.sh | sh">
+            <span class="prompt" aria-hidden="true">$</span>
+            <code>curl -fsSL https://thedavidweng.github.io/sdf-flash-gui/install.sh | sh</code>
+            <button type="button" class="copy" aria-label="Copy macOS and Linux install command">copy</button>
+          </div>
+          <div class="cmd" role="tabpanel" id="cmd-win" aria-labelledby="tab-win" data-panel="win" hidden data-copy="irm https://thedavidweng.github.io/sdf-flash-gui/install.ps1 | iex">
+            <span class="prompt" aria-hidden="true">PS&gt;</span>
+            <code>irm https://thedavidweng.github.io/sdf-flash-gui/install.ps1 | iex</code>
+            <button type="button" class="copy" aria-label="Copy Windows install command">copy</button>
+          </div>
+          <p class="cmd-note" data-panel="unix">Uses Homebrew if you have it. Otherwise it downloads the
+            <code>.dmg</code>, <code>.deb</code>, or AppImage for your system and checks its SHA-256.
+            <a href="install.sh">Read the script</a>.</p>
+          <p class="cmd-note" data-panel="win" hidden>Downloads the <code>.msi</code>, checks its SHA-256,
+            and runs the installer. <a href="install.ps1">Read the script</a>.</p>
+        </div>
+
         <div class="cta">
           <a class="btn primary" href="#install">
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M7.25 1h1.5v8.19l2.72-2.72 1.06 1.06L8 12.06 3.47 7.53l1.06-1.06 2.72 2.72V1ZM2 13.5h12V15H2v-1.5Z"/></svg>
             <span>Download</span>
           </a>
-        </div>
-
-        <div class="cmd" data-copy="brew install --cask thedavidweng/tap/sdf-flash-gui">
-          <span class="prompt" aria-hidden="true">$</span>
-          <code>brew install --cask thedavidweng/tap/sdf-flash-gui</code>
-          <button type="button" class="copy" aria-label="Copy Homebrew command">copy</button>
         </div>
 
         <dl class="facts">
@@ -183,16 +199,14 @@ LibreDrive: PossibleNotEnabled</span>
         <h2 id="install-title">Install.</h2>
         <p>Requires <a href="https://www.makemkv.com/">MakeMKV</a>, which ships
           <code>sdftool</code> and <code>makemkvcon</code>. An <code>sdf.bin</code>
-          from the firmware pack is optional but improves probing.</p>
+          from the firmware pack is optional but improves probing. The
+          <a href="#top">install command</a> picks the right package for you;
+          the files below are the same release, for manual installs.</p>
       </header>
       <div class="installs">
         <article class="card" data-os="mac">
           <h3>macOS</h3>
-          <div class="cmd small" data-copy="brew install --cask thedavidweng/tap/sdf-flash-gui">
-            <span class="prompt" aria-hidden="true">$</span>
-            <code>brew install --cask thedavidweng/tap/sdf-flash-gui</code>
-            <button type="button" class="copy" aria-label="Copy Homebrew command">copy</button>
-          </div>
+          <p class="note">Homebrew: <code>brew install --cask thedavidweng/tap/sdf-flash-gui</code></p>
           <ul class="dl">
             <li><a data-asset="_aarch64.dmg" href="https://github.com/thedavidweng/sdf-flash-gui/releases/latest">.dmg <span>Apple silicon</span></a></li>
             <li><a data-asset="_x64.dmg" href="https://github.com/thedavidweng/sdf-flash-gui/releases/latest">.dmg <span>Intel</span></a></li>
@@ -209,7 +223,7 @@ LibreDrive: PossibleNotEnabled</span>
           <h3>Linux</h3>
           <p class="note">Add yourself to the <code>cdrom</code> group to open <code>/dev/sr*</code>.</p>
           <ul class="dl">
-            <li><a data-asset=".appimage" href="https://github.com/thedavidweng/sdf-flash-gui/releases/latest">.AppImage <span>x86_64</span></a></li>
+            <li><a data-asset="_x86_64.appimage" href="https://github.com/thedavidweng/sdf-flash-gui/releases/latest">.AppImage <span>x86_64</span></a></li>
             <li><a data-asset=".deb" href="https://github.com/thedavidweng/sdf-flash-gui/releases/latest">.deb <span>x86_64</span></a></li>
           </ul>
         </article>
