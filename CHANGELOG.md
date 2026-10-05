@@ -4,12 +4,27 @@ All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 ## [Unreleased]
 
+### 🚀 Features
+
+- Add GitHub Pages site with in-browser web demo (#53)
+- **site:** Add one-line install scripts and show the command above Download
+
+### 🐛 Bug Fixes
+
+- **site:** Point Download at the install section and rebalance the hero
+- **release:** Upload the AppImage with the packager's .AppImage case
+
+### 🎨 Styling
+
+- **site:** Match the app's egui look and drop decorative accents
+
 ### ⚙️ Miscellaneous Tasks
 
 - **changelog:** Sync CHANGELOG.md for v1.1.0
 - Land changelog updates through a pull request (#49)
 - Drop checks permission from changelog workflows (#50)
 - Quote the changelog workflow command (#51)
+- **changelog:** Sync CHANGELOG.md (#52)
 ## [1.1.0] - 2026-10-04
 
 ### 🚀 Features
