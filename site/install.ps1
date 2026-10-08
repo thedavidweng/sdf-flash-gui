@@ -1,6 +1,6 @@
 # Install SDF Flash GUI from the latest GitHub release (ADR 0012).
 #
-#   irm https://thedavidweng.github.io/sdf-flash-gui/install.ps1 | iex
+#   irm https://sdf-flash-gui.blahaj.uk/install.ps1 | iex
 #
 # Downloads the MSI, checks it against the release's SHA256SUMS file, and runs msiexec.
 & {

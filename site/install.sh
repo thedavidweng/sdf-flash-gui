@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install SDF Flash GUI from the latest GitHub release (ADR 0012).
 #
-#   curl -fsSL https://thedavidweng.github.io/sdf-flash-gui/install.sh | sh
+#   curl -fsSL https://sdf-flash-gui.blahaj.uk/install.sh | sh
 #
 # macOS: Homebrew cask when brew is available, otherwise the DMG for this Mac.
 # Linux: the .deb through apt-get or dpkg, otherwise the AppImage in ~/.local/bin.
@@ -13,7 +13,7 @@ cask="thedavidweng/tap/sdf-flash-gui"
 app_name="SDF Flash GUI.app"
 api_url="https://api.github.com/repos/$repo/releases/latest"
 releases_url="https://github.com/$repo/releases/latest"
-ps_command="irm https://thedavidweng.github.io/sdf-flash-gui/install.ps1 | iex"
+ps_command="irm https://sdf-flash-gui.blahaj.uk/install.ps1 | iex"
 
 say() { printf '%s\n' "$*"; }
 fail() { printf 'error: %s\n' "$*" >&2; exit 1; }

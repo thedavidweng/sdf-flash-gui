@@ -333,7 +333,7 @@ case_linux_arm() {
 case_windows_shell() {
   STUB_OS=MINGW64_NT-10.0
   run_install
-  expect_fail "$name" "irm https://thedavidweng.github.io/sdf-flash-gui/install.ps1 | iex"
+  expect_fail "$name" "irm https://sdf-flash-gui.blahaj.uk/install.ps1 | iex"
 }
 
 case_unsupported_os() {
