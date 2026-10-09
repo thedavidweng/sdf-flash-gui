@@ -130,9 +130,9 @@ jobs:
         run: |
           cd dist
           if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum * > "SHA256SUMS-${{ matrix.target }}.txt"
+            sha256sum -- * > "SHA256SUMS-${{ matrix.target }}.txt"
           elif command -v shasum >/dev/null 2>&1; then
-            shasum -a 256 * > "SHA256SUMS-${{ matrix.target }}.txt"
+            shasum -a 256 -- * > "SHA256SUMS-${{ matrix.target }}.txt"
           else
             powershell -Command "Get-ChildItem | ForEach-Object { (Get-FileHash $_.FullName -Algorithm SHA256).Hash + '  ' + $_.Name } | Set-Content 'SHA256SUMS-${{ matrix.target }}.txt'"
           fi
@@ -185,7 +185,7 @@ jobs:
       - name: Generate SHA-256 checksums
         run: |
           cd dist
-          shasum -a 256 * > "SHA256SUMS-${{ matrix.target }}.txt"
+          shasum -a 256 -- * > "SHA256SUMS-${{ matrix.target }}.txt"
 
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         if: github.ref_type == 'tag'
@@ -267,7 +267,7 @@ jobs:
           # Only substitute release metadata. URLs keep Ruby #{version} so brew audit
           # does not treat them as unversioned (requires sha256 :no_check).
           export VERSION ARM_SHA256 INTEL_SHA256
-          envsubst '${VERSION} ${ARM_SHA256} ${INTEL_SHA256}' \
+          envsubst "\${VERSION} \${ARM_SHA256} \${INTEL_SHA256}" \
             < packaging/homebrew/sdf-flash-gui.rb.template \
             > homebrew-tap/Casks/sdf-flash-gui.rb
 
