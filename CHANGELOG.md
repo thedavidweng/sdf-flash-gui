@@ -29,6 +29,8 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md (#52)
 - Adopt jactionlint 1.8.2 for workflow linting
 - Validate workflows with jactionlint v1.8.2
+- **changelog:** Sync CHANGELOG.md (#62)
+- Land changelog updates on one long-lived branch (#63)
 ## [1.1.0] - 2026-10-04
 
 ### 🚀 Features
