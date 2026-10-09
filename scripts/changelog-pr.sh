@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
+# Land CHANGELOG.md through one long-lived branch. See docs/adr/0013-*.md.
 set -euo pipefail
 
 branch="$1"
-message="$2"
+message="chore(changelog): sync CHANGELOG.md"
 
 git config user.name "github-actions[bot]"
 git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -12,38 +13,30 @@ if git diff --staged --quiet; then
   exit 0
 fi
 
-git checkout -b "$branch"
+git fetch --no-tags origin main
+git checkout -B "$branch" origin/main
 git commit -m "$message"
-git push --force origin "HEAD:${branch}"
 
-if ! gh pr view "$branch" --json url --jq .url >/dev/null 2>&1; then
-  gh pr create --base main --head "$branch" --title "$message" --body "Update CHANGELOG.md from git-cliff."
+if git rev-parse --verify --quiet "refs/remotes/origin/${branch}^{commit}" >/dev/null; then
+  git push --force-with-lease="$branch" origin "$branch"
+else
+  git push origin "$branch"
 fi
 
-pr="$(gh pr view "$branch" --json number --jq .number)"
-for _ in $(seq 1 40); do
-  result="$(
-    gh pr view "$pr" --json statusCheckRollup --jq '
-      def want: ["fmt", "clippy", "test (ubuntu-latest, x86_64-unknown-linux-gnu)"];
-      [.statusCheckRollup[]? | select(.name as $n | want | index($n))]
-      | if length < 3 then "pending"
-        elif any(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .conclusion == "TIMED_OUT") then "failed"
-        elif all(.conclusion == "SUCCESS" or .conclusion == "SKIPPED") then "ok"
-        else "pending"
-        end
-    '
-  )"
-  echo "changelog checks: ${result}"
-  if [ "$result" = "ok" ]; then
-    gh pr merge "$pr" --squash --delete-branch
-    exit 0
-  fi
-  if [ "$result" = "failed" ]; then
-    echo "::error::Required checks failed on the changelog pull request"
-    exit 1
-  fi
-  sleep 30
-done
+open_prs="$(
+  gh pr list --head "$branch" --state open --json number,url \
+    --jq '.[] | "#\(.number) \(.url)"'
+)"
+if [ -n "$open_prs" ]; then
+  echo "Refreshed ${branch}; updated pull request(s):"
+  echo "$open_prs"
+  echo "::notice::Checks on ${branch} need one maintainer approval, because the branch was pushed with the default GITHUB_TOKEN. See docs/adr/0013-changelog-lands-through-one-long-lived-branch.md."
+  exit 0
+fi
 
-echo "::error::Required checks did not finish on the changelog pull request"
-exit 1
+gh pr create --base main --head "$branch" --title "$message" --body "Update CHANGELOG.md from git-cliff.
+
+CI on \`${branch}\` starts in an approval-required state, because the branch was
+pushed with the default \`GITHUB_TOKEN\`. Approve the pending CI run (or push the
+branch once as a maintainer) and squash-merge. See
+docs/adr/0013-changelog-lands-through-one-long-lived-branch.md."

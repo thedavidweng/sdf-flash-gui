@@ -4,7 +4,9 @@ on:
   push:
     branches:
       - main
-      - "changelog/**"
+      # A maintainer push here (not the GITHUB_TOKEN push the changelog workflow
+      # makes) is what starts CI, so the required checks reach the changelog PR.
+      - changelog
   pull_request:
 
 permissions:
