@@ -8,22 +8,33 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
 jobs:
   update:
     if: >-
       !startsWith(github.event.head_commit.message, 'chore(changelog):') &&
       !startsWith(github.event.head_commit.message, 'chore(release):')
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Install git-cliff
-        run: cargo install git-cliff --locked
+        run: cargo install git-cliff --version 2.14.2 --locked
 
       - name: Generate CHANGELOG.md
         run: git cliff -o CHANGELOG.md
+
+      - name: Authenticate Git for changelog updates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh auth setup-git
 
       - name: Refresh the changelog pull request
         env:

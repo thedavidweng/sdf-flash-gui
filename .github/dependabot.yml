@@ -24,7 +24,7 @@ updates:
       dev-deps:
         dependency-type: development
     cooldown:
-      default-days: 5
+      default-days: 7
       semver-major-days: 7
       semver-minor-days: 5
       semver-patch-days: 3
@@ -46,4 +46,4 @@ updates:
           - "minor"
           - "patch"
     cooldown:
-      default-days: 5
+      default-days: 7
