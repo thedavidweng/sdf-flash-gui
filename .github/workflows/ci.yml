@@ -15,29 +15,37 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   fmt:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
+          toolchain: stable
           components: rustfmt
 
       - run: cargo fmt -- --check
 
   clippy:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
+          toolchain: stable
           components: clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -49,13 +57,15 @@ jobs:
 
   clippy-wasm:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
+          toolchain: stable
           components: clippy
           targets: wasm32-unknown-unknown
 
@@ -138,6 +148,7 @@ jobs:
             target: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -148,8 +159,9 @@ jobs:
           fetch-depth: ${{ matrix.os == 'ubuntu-latest' && '0' || '1' }}
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
           components: llvm-tools
 
@@ -159,7 +171,7 @@ jobs:
 
       - name: Install cargo-llvm-cov
         if: matrix.os == 'ubuntu-latest'
-        run: cargo install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --version 0.9.1 --locked
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
@@ -180,6 +192,8 @@ jobs:
             --ignore-filename-regex "${IGNORE_REGEX}"
 
       - name: Coverage gate (project ≥99%, patch 100% on changed domain lines)
+        env:
+          COVERAGE_BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
         if: matrix.os == 'ubuntu-latest'
         run: |
           # Fail the Ubuntu job here so we do not wait on Codecov UI for the same rules.
@@ -191,8 +205,8 @@ jobs:
           if ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
             # fetch-depth: 0 should already have history; re-fetch base as a fallback.
             git fetch --no-tags origin \
-              "${{ github.event.pull_request.base.ref || 'main' }}:refs/remotes/origin/${{ github.event.pull_request.base.ref || 'main' }}"
-            BASE="origin/${{ github.event.pull_request.base.ref || 'main' }}"
+              "${COVERAGE_BASE_REF}:refs/remotes/origin/${COVERAGE_BASE_REF}"
+            BASE="origin/${COVERAGE_BASE_REF}"
           fi
           if ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
             echo "error: coverage base '${BASE}' is not available; cannot enforce patch gate" >&2
