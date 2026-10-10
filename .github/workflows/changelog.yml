@@ -4,9 +4,7 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -14,6 +12,9 @@ concurrency:
 
 jobs:
   update:
+    permissions:
+      contents: write
+      pull-requests: write
     if: >-
       !startsWith(github.event.head_commit.message, 'chore(changelog):') &&
       !startsWith(github.event.head_commit.message, 'chore(release):')
