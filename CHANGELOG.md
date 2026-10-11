@@ -16,6 +16,10 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **release:** Upload the AppImage with the packager's .AppImage case
 - **packaging:** Use postflight_steps in homebrew cask template
 
+### 📚 Documentation
+
+- Refactor agent guide with progressive disclosure (#70)
+
 ### 🎨 Styling
 
 - **site:** Match the app's egui look and drop decorative accents
@@ -31,6 +35,9 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - Validate workflows with jactionlint v1.8.2
 - **changelog:** Sync CHANGELOG.md (#62)
 - Land changelog updates on one long-lived branch (#63)
+- **changelog:** Sync CHANGELOG.md (#64)
+- Migrate official workflow audit v2 and harden release policies (#67)
+- Align official lint with the latest stable release (#69)
 ## [1.1.0] - 2026-10-04
 
 ### 🚀 Features
