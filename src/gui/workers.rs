@@ -1481,9 +1481,9 @@ mod tests {
     #[cfg(unix)]
     fn poll_probe_backend_stop_finishes_when_child_exited() {
         use std::process::Command;
-        use std::time::Duration;
 
-        let child = Command::new("true").spawn().unwrap();
+        let mut child = Command::new("true").spawn().unwrap();
+        assert!(child.wait().unwrap().success());
         let control = Arc::new(OperationControl::new());
         control.register_child(child);
         let mut state = AppState::new_no_backend();
@@ -1492,7 +1492,6 @@ mod tests {
         state.runtime.probing_drive = Some(0);
         state.runtime.probe_control = Some(control);
         state.runtime.probing = true;
-        std::thread::sleep(Duration::from_millis(50));
 
         assert!(super::poll_probe_backend_stop(&mut state));
         assert!(!state.runtime.probing);
@@ -1504,15 +1503,14 @@ mod tests {
     #[cfg(unix)]
     fn poll_worker_finishes_probe_when_child_exited() {
         use std::process::Command;
-        use std::time::Duration;
 
-        let child = Command::new("true").spawn().unwrap();
+        let mut child = Command::new("true").spawn().unwrap();
+        assert!(child.wait().unwrap().success());
         let control = Arc::new(OperationControl::new());
         control.register_child(child);
         let mut state = AppState::new_no_backend();
         state.runtime.probe_control = Some(control);
         state.runtime.probing = true;
-        std::thread::sleep(Duration::from_millis(50));
 
         poll_worker(&mut state, &std::sync::mpsc::channel().1, None);
         assert!(!state.runtime.probing);
