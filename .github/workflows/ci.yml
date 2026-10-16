@@ -8,6 +8,7 @@ on:
       # makes) is what starts CI, so the required checks reach the changelog PR.
       - changelog
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
 
 permissions:
   contents: read
@@ -17,10 +18,11 @@ env:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   fmt:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -36,6 +38,7 @@ jobs:
       - run: cargo fmt -- --check
 
   clippy:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -56,6 +59,7 @@ jobs:
       - run: cargo clippy -- -D warnings
 
   clippy-wasm:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -75,6 +79,7 @@ jobs:
         run: cargo clippy -p sdf-flash-gui -p sdf-flash-gui-web --lib --target wasm32-unknown-unknown -- -D warnings
 
   sdf-parser-policy:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-slim
     timeout-minutes: 10
     steps:
@@ -89,6 +94,7 @@ jobs:
           test "$count" -eq 0
 
   comment-policy:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-slim
     timeout-minutes: 10
     steps:
@@ -110,6 +116,7 @@ jobs:
           python3 scripts/comment-gate.py --base "$BASE"
 
   install-scripts:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -133,6 +140,7 @@ jobs:
           if ($errors) { $errors | ForEach-Object { Write-Error $_.ToString() }; exit 1 }
 
   test:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     needs: [fmt, clippy, sdf-parser-policy, comment-policy]
     strategy:
       fail-fast: false
