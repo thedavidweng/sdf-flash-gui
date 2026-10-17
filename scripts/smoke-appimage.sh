@@ -29,6 +29,7 @@ for _ in $(seq 1 30); do
   if xdotool search --onlyvisible --pid "$(pgrep -n -u "$(id -u)" -x sdf-flash-gui || echo 0)" >windows.txt 2>/dev/null; then
     sleep 3
     kill -0 "$app_pid"
+    import -window "$(cat windows.txt)" "${RUNNER_TEMP:-$work}/appimage-smoke.png"
     cat app.log
     echo 'AppImage displayed a window offline as a non-root user'
     exit 0
