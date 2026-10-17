@@ -40,3 +40,8 @@ The next macOS release requires these repository secrets:
 The workflow always deletes the temporary keychain, P12, and API key. Release
 packaging uses a plain DMG layout with an Applications link. Local development
 builds and Linux/Windows packaging continue using their existing commands.
+
+Both macOS targets are built on Apple Silicon runners. Rust and Clang cross-compile
+the Intel target; signing and stapling stay on the working Apple Silicon network
+path. GitHub tracks the Intel-runner CloudKit connection failures in
+[runner-images#14924](https://github.com/actions/runner-images/issues/14924).

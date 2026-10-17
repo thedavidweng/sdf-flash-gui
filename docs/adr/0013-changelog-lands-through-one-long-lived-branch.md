@@ -39,7 +39,7 @@ start workflow runs either, so that resolver never fired.
 **Land changelog changes by refreshing a single long-lived branch. Never create
 a branch whose name is derived from the triggering commit.**
 
-- `scripts/changelog-pr.sh` takes the branch name as an argument and always
+- `scripts/changelog-pr.sh` owns the fixed `changelog` branch name and always
   resets it onto the current `main` tip (`git checkout -B`), so there is at most
   one changelog branch and at most one changelog pull request, ever. A new
   commit on `main` updates the existing pull request instead of spawning
