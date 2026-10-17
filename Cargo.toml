@@ -48,3 +48,6 @@ category = "Utility"
 description = "A cross-platform GUI for flashing optical drives."
 icons = ["assets/icon.icns", "assets/icon.png"]
 resources = ["assets/Credits.html"]
+
+[package.metadata.packager.appimage]
+libs = ["libxkbcommon-x11.so*", "libxcb-xkb.so*"]
