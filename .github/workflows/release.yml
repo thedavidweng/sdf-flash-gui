@@ -94,7 +94,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             binary_name: sdf-flash-gui
             upx: true
@@ -122,10 +122,10 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev upx-ucl
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-x11-dev upx-ucl xvfb xdotool libfuse2 libgl1-mesa-dri imagemagick squashfs-tools
 
       - name: Install Windows dependencies
         if: matrix.os == 'windows-latest'
@@ -139,7 +139,15 @@ jobs:
         if: matrix.upx
         run: upx --best --lzma target/${{ matrix.target }}/release/${{ matrix.binary_name }}
 
+      - name: Prepare executable AppImage entry
+        if: runner.os == 'Linux'
+        run: bash scripts/prepare-appimage.sh
+
       - run: cargo packager --release --target ${{ matrix.target }}
+
+      - name: Verify AppImage permissions and offline GUI startup
+        if: runner.os == 'Linux'
+        run: xvfb-run -a bash scripts/smoke-appimage.sh dist/*.AppImage
 
       - name: Generate SHA-256 checksums
         shell: bash

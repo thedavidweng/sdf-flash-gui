@@ -132,12 +132,49 @@ jobs:
           sh scripts/test-install.sh dash
           sh scripts/test-install.sh bash
 
+      - name: Test AppImage permissions
+        run: python3 scripts/test-appimage.py
+
+      - name: Lint AppImage scripts
+        run: shellcheck -s bash scripts/prepare-appimage.sh scripts/smoke-appimage.sh
+
       - name: Parse install.ps1
         shell: pwsh
         run: |
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile("$PWD/site/install.ps1", [ref]$null, [ref]$errors) | Out-Null
           if ($errors) { $errors | ForEach-Object { Write-Error $_.ToString() }; exit 1 }
+
+  appimage:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Install AppImage dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-x11-dev upx-ucl xvfb xdotool libfuse2 libgl1-mesa-dri imagemagick squashfs-tools
+
+      - run: cargo install cargo-packager --version 0.11.8 --locked
+      - run: cargo build --release
+      - run: upx --best --lzma target/release/sdf-flash-gui
+      - run: bash scripts/prepare-appimage.sh
+      - run: cargo packager --release --formats appimage
+      - run: xvfb-run -a bash scripts/smoke-appimage.sh dist/*.AppImage
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: appimage-smoke-window
+          path: ${{ runner.temp }}/appimage-smoke.png
 
   test:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft

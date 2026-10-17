@@ -1,6 +1,6 @@
 [package]
 name = "sdf-flash-gui"
-version = "1.1.2"
+version = "1.1.3"
 edition = "2021"
 license = "GPL-2.0-or-later"
 description = "Cross-platform SDFtool GUI — drive firmware dump/flash for MT1959 optical drives"
@@ -48,3 +48,6 @@ category = "Utility"
 description = "A cross-platform GUI for flashing optical drives."
 icons = ["assets/icon.icns", "assets/icon.png"]
 resources = ["assets/Credits.html"]
+
+[package.metadata.packager.appimage]
+libs = ["libxkbcommon-x11.so*", "libxcb-xkb.so*"]
