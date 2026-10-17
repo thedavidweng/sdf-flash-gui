@@ -2,11 +2,25 @@
 
 All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
-## [Unreleased]
+## [1.1.4] - 2026-10-17
+
+### 🐛 Bug Fixes
+
+- **packaging:** Enable AppImageUpdate delta updates (#84)
+## [1.1.3] - 2026-10-17
 
 ### 🐛 Bug Fixes
 
 - **packaging:** Keep generated Homebrew cask audit clean (#81)
+- **packaging:** Validate executable AppImage and offline startup (#82)
+
+### 💼 Other
+
+- **deps:** Bump dtolnay/rust-toolchain (#74)
+
+### ⚙️ Miscellaneous Tasks
+
+- **changelog:** Sync CHANGELOG.md (#76)
 ## [1.1.2] - 2026-10-17
 
 ### 🐛 Bug Fixes
