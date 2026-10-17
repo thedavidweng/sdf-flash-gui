@@ -31,6 +31,10 @@ class AppImageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             appdir = Path(directory)
             appdir.chmod(0o755)
+            libraries = appdir / 'usr/lib/x86_64-linux-gnu'
+            libraries.mkdir(parents=True)
+            for name in ('libxkbcommon-x11.so.0', 'libxcb-xkb.so.1'):
+                (libraries / name).write_bytes(b'library')
             binary = appdir / 'usr/bin/sdf-flash-gui'
             binary.parent.mkdir(parents=True)
             binary.write_text('binary')
@@ -42,6 +46,11 @@ class AppImageTests(unittest.TestCase):
                 module.check_appdir(appdir)
             entry.chmod(0o755)
             module.check_appdir(appdir)
+            keyboard_library = libraries / 'libxkbcommon-x11.so.0'
+            keyboard_library.unlink()
+            with self.assertRaises(FileNotFoundError):
+                module.check_appdir(appdir)
+            keyboard_library.write_bytes(b'library')
             binary.chmod(0o744)
             with self.assertRaises(PermissionError):
                 module.check_appdir(appdir)

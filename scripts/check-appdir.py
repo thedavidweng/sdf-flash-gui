@@ -5,6 +5,9 @@ from pathlib import Path
 
 def check_appdir(appdir):
     appdir = Path(appdir).resolve()
+    for name in ('libxkbcommon-x11.so.0', 'libxcb-xkb.so.1'):
+        if not any(path.is_file() for path in (appdir / 'usr/lib').rglob(name)):
+            raise FileNotFoundError(f'AppImage must bundle {name}')
     for relative in ('AppRun', 'usr/bin/sdf-flash-gui'):
         executable = appdir / relative
         if not executable.is_file():
