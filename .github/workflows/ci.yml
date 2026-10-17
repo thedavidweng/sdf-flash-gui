@@ -185,6 +185,12 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
 
+      - name: Test macOS release signing and packaging
+        if: runner.os == 'macOS'
+        run: |
+          python3 scripts/test-notarization.py
+          python3 scripts/test-package-macos.py
+
       - name: Run tests with coverage
         if: matrix.os != 'ubuntu-latest'
         run: cargo test --target ${{ matrix.target }}
