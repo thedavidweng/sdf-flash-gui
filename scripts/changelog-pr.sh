@@ -2,7 +2,7 @@
 # Land CHANGELOG.md through one long-lived branch. See docs/adr/0013-*.md.
 set -euo pipefail
 
-branch="$1"
+branch=changelog
 message="chore(changelog): sync CHANGELOG.md"
 
 git config user.name "github-actions[bot]"

@@ -40,4 +40,4 @@ jobs:
       - name: Refresh the changelog pull request
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash scripts/changelog-pr.sh changelog
+        run: bash scripts/changelog-pr.sh
