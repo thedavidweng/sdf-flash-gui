@@ -13,7 +13,7 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 chmod +x "$image"
 cd "$work"
-"$image" --appimage-extract >/dev/null
+unsquashfs -offset "$("$image" --appimage-offset)" -d squashfs-root "$image" >/dev/null
 python3 "$scripts/check-appdir.py" "$work/squashfs-root"
 
 setsid sudo unshare --net -- runuser -u "$(id -un)" -- \
