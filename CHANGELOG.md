@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 ## [Unreleased]
 
+### 🐛 Bug Fixes
+
+- **packaging:** Keep generated Homebrew cask audit clean (#81)
+## [1.1.2] - 2026-10-17
+
+### 🐛 Bug Fixes
+
+- **release:** Build notarized Intel packages on Apple Silicon (#80)
+## [1.1.1] - 2026-10-17
+
 ### 🚀 Features
 
 - Add GitHub Pages site with in-browser web demo (#53)
@@ -15,6 +25,12 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **site:** Point Download at the install section and rebalance the hero
 - **release:** Upload the AppImage with the packager's .AppImage case
 - **packaging:** Use postflight_steps in homebrew cask template
+- **release:** Require Developer ID notarized macOS artifacts (#71)
+
+### 💼 Other
+
+- **deps:** Bump serde_json from 1.0.151 to 1.0.154 (#73)
+- **deps:** Bump sha2 from 0.11.0 to 0.11.1 (#72)
 
 ### 📚 Documentation
 
@@ -23,6 +39,10 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 ### 🎨 Styling
 
 - **site:** Match the app's egui look and drop decorative accents
+
+### 🧪 Testing
+
+- Synchronize exited probe child fixtures (#75)
 
 ### ⚙️ Miscellaneous Tasks
 
@@ -38,6 +58,9 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md (#64)
 - Migrate official workflow audit v2 and harden release policies (#67)
 - Align official lint with the latest stable release (#69)
+- **changelog:** Sync CHANGELOG.md (#68)
+- Skip draft checks and cancel stale runs (#77)
+- **release:** Prepare signed 1.1.1 release (#78)
 ## [1.1.0] - 2026-10-04
 
 ### 🚀 Features
