@@ -288,7 +288,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp release-changelog/CHANGELOG.md CHANGELOG.md
-          bash scripts/changelog-pr.sh "changelog/${GITHUB_REF_NAME}" "chore(changelog): sync CHANGELOG.md for ${GITHUB_REF_NAME}"
+          bash scripts/changelog-pr.sh changelog
 
   update-homebrew-tap:
     needs: build-macos
