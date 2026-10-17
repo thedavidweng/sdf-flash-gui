@@ -133,7 +133,9 @@ jobs:
           sh scripts/test-install.sh bash
 
       - name: Test AppImage permissions
-        run: python3 scripts/test-appimage.py
+        run: |
+          python3 scripts/test-appimage.py
+          python3 scripts/test-appimage-update.py
 
       - name: Lint AppImage scripts
         run: shellcheck -s bash scripts/prepare-appimage.sh scripts/smoke-appimage.sh
@@ -169,7 +171,12 @@ jobs:
       - run: cargo build --release
       - run: upx --best --lzma target/release/sdf-flash-gui
       - run: bash scripts/prepare-appimage.sh
-      - run: cargo packager --release --formats appimage
+      - name: Package updateable AppImage
+        env:
+          LDAI_UPDATE_INFORMATION: gh-releases-zsync|thedavidweng|sdf-flash-gui|latest|sdf-flash-gui_*_x86_64.AppImage.zsync
+        run: |
+          cargo packager --release --formats appimage
+          mv dist/.cargo-packager/appimage/*.AppImage.zsync dist/
       - run: xvfb-run -a bash scripts/smoke-appimage.sh dist/*.AppImage
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
