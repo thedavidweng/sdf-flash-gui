@@ -12,6 +12,7 @@ if [ "$(id -u)" -eq 0 ]; then
   exit 1
 fi
 chmod +x "$image"
+python3 "$scripts/check-appimage-update.py" "$image"
 cd "$work"
 unsquashfs -offset "$("$image" --appimage-offset)" -d squashfs-root "$image" >/dev/null
 python3 "$scripts/check-appdir.py" "$work/squashfs-root"

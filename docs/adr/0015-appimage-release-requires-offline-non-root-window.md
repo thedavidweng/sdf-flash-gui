@@ -27,6 +27,12 @@ the bundle. The AppImage runtime's extraction command is not used for permission
 inspection because its extracted root directory does not preserve the image's
 root directory mode.
 
+The AppImage embeds `gh-releases-zsync` update information selecting the stable
+GitHub release and architecture-specific `.AppImage.zsync` asset. Packaging
+publishes the generated delta control file next to the AppImage before computing
+release checksums. Smoke acceptance verifies the embedded transport and confirms
+the zsync filename and SHA-1 refer to the final AppImage bytes.
+
 Before checksums or publication, launch the extracted AppRun as the non-root
 runner in a network namespace without networking, under Xvfb software rendering.
 Require a visible process-owned window within 30 seconds and a further three
