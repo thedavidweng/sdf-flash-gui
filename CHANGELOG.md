@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
+## [Unreleased]
+
+### ⚙️ Miscellaneous Tasks
+
+- **changelog:** Sync CHANGELOG.md (#83)
+- **deps:** Auto-merge eligible non-major updates and approve when review is required (#85)
 ## [1.1.4] - 2026-10-17
 
 ### 🐛 Bug Fixes
