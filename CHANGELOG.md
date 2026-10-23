@@ -8,6 +8,8 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 
 - **changelog:** Sync CHANGELOG.md (#83)
 - **deps:** Auto-merge eligible non-major updates and approve when review is required (#85)
+- **changelog:** Sync CHANGELOG.md (#86)
+- **deps:** Auto-merge Actions pin refreshes (#87)
 ## [1.1.4] - 2026-10-17
 
 ### 🐛 Bug Fixes
