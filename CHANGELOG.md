@@ -4,12 +4,18 @@ All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 ## [Unreleased]
 
+### 💼 Other
+
+- **deps:** Bump the github-actions group with 2 updates (#89)
+
 ### ⚙️ Miscellaneous Tasks
 
 - **changelog:** Sync CHANGELOG.md (#83)
 - **deps:** Auto-merge eligible non-major updates and approve when review is required (#85)
 - **changelog:** Sync CHANGELOG.md (#86)
 - **deps:** Auto-merge Actions pin refreshes (#87)
+- **changelog:** Sync CHANGELOG.md (#88)
+- **ci:** Align appimage rust-toolchain pin with current v1 commit (#92)
 ## [1.1.4] - 2026-10-17
 
 ### 🐛 Bug Fixes
