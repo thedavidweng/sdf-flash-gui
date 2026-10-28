@@ -23,7 +23,7 @@ locked=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/version = |"/, ""); print
 installed=$(wasm-bindgen --version 2>/dev/null | awk '{print $2}' || true)
 if [ "$locked" != "$installed" ]; then
   echo "wasm-bindgen-cli ${installed:-not installed} does not match Cargo.lock $locked" >&2
-  echo "install with: cargo install wasm-bindgen-cli --version $locked --locked" >&2
+  echo "install the prebuilt wasm-bindgen ${locked} from https://github.com/wasm-bindgen/wasm-bindgen/releases (CI: taiki-e/install-action tool wasm-bindgen@${locked})" >&2
   exit 1
 fi
 

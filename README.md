@@ -91,7 +91,8 @@ The project site lives in `site/` and deploys to GitHub Pages from `main`. Its d
 
 ```bash
 rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version <wasm-bindgen version in Cargo.lock> --locked
+# Prebuilt wasm-bindgen CLI matching the wasm-bindgen version in Cargo.lock
+# (https://github.com/wasm-bindgen/wasm-bindgen/releases). CI uses taiki-e/install-action.
 ./scripts/build-site.sh                       # → target/site
 python3 -m http.server -d target/site 8000
 ```

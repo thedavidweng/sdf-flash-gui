@@ -26,7 +26,7 @@ cargo test
 The project coverage gate is an absolute >=99% project line floor and 100% patch line coverage for changed executable lines in non-ignored `src/` (not merely no coverage drop). Do not push and wait for Codecov or CI to discover missing coverage.
 
 ```sh
-cargo install cargo-llvm-cov  # once, if needed
+# Prebuilt cargo-llvm-cov 0.9.1 (GitHub release; CI uses taiki-e/install-action).
 ./scripts/coverage.sh html
 ./scripts/coverage.sh lcov
 ./scripts/coverage.sh report
