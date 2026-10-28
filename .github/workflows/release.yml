@@ -31,7 +31,9 @@ jobs:
           toolchain: stable
 
       - name: Install git-cliff
-        run: cargo install git-cliff --version 2.14.2 --locked
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: git-cliff@2.14.2
 
       - name: Generate CHANGELOG and release notes
         run: |
