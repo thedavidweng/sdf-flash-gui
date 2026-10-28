@@ -4,6 +4,7 @@ Cross-platform Rust GUI and CLI for dumping and flashing optical-drive firmware.
 
 - Every production code change must include matching test updates in the same commit.
 - Before committing/pushing, run `cargo fmt -- --check`, `cargo clippy -- -D warnings`, and `cargo test`.
+- Hooks are managed by hk via mise; run `mise install` to install them. The pre-push gate is mandatory: never push with `--no-verify` or set `HK=0`.
 - When changing `src/`, also run `./scripts/coverage.sh gate` (99% project and 100% patch line coverage on non-ignored code).
 - Before non-trivial changes, read all existing [ADRs](docs/adr/).
 

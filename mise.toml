@@ -1,0 +1,6 @@
+[tools]
+hk = "2.9.0"
+rust = "stable"
+
+[hooks]
+postinstall = "hk install --mise"
