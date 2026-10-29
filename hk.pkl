@@ -1,0 +1,12 @@
+amends "package://github.com/jdx/hk/releases/download/v2.9.0/hk@2.9.0#/Config.pkl"
+
+hooks {
+  ["pre-commit"] {
+    stash = "none"
+    fix = false
+    stage = false
+    steps {
+      ["cargo-fmt"] { check = "cargo fmt -- --check" }
+    }
+  }
+}

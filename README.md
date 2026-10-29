@@ -76,7 +76,9 @@ Output: `target/release/sdf-flash-gui`.
 
 macOS release CI requires Developer ID signing and Apple notarization for both the App and DMG. Maintainer credentials and the release checks are documented in [ADR 0014](docs/adr/0014-macos-release-requires-notarized-app-and-dmg.md). Existing published releases are not retroactively notarized.
 
-Local quality gate (matches Ubuntu CI):
+Run `mise install` to install hk hooks: a `cargo fmt` check runs before each commit; CI runs clippy and tests. Never bypass hooks with `--no-verify` or `HK=0`.
+
+Local quality checks:
 
 ```bash
 cargo fmt -- --check

@@ -1,7 +1,0 @@
-#!/bin/sh
-set -e
-
-echo "Running cargo fmt --check..."
-cargo fmt -- --check
-
-echo "Pre-commit checks passed."
