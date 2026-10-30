@@ -22,6 +22,12 @@ fn secondary_text_remains_readable_on_dark_surfaces() {
     let css = include_str!("../site/style.css");
     let dim = color(css, "--dim:");
     let download = color(css, ".dl a span {");
-    assert!(contrast(dim, [0.014; 3]) >= 4.5);
-    assert!(contrast(download, [0.045; 3]) >= 4.5);
+    for background in [
+        color(css, "--bg:"),
+        color(css, "--bg-raise:"),
+        color(css, ".titlebar {"),
+    ] {
+        assert!(contrast(dim, background) >= 4.5);
+    }
+    assert!(contrast(download, color(css, "--widget:")) >= 4.5);
 }
