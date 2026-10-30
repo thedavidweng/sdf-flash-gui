@@ -8,7 +8,7 @@
   --line-strong: #3c3c3c;
   --text: #dcdcdc;
   --muted: #8c8c8c;
-  --dim: #7f7f7f;
+  --dim: #949494;
   --select: #005c80;
   --select-hover: #0a6a92;
   --select-ink: #c0deff;
@@ -287,7 +287,7 @@ h1 {
   height: 32px; padding: 0 12px; border-radius: var(--radius); background: var(--widget);
   font: 13px var(--mono); text-decoration: none;
 }
-.dl a span { font: 13px var(--sans); color: var(--muted); }
+.dl a span { font: 13px var(--sans); color: #b0b0b0; }
 .dl a:hover { background: var(--widget-hover); color: #fff; }
 .dl a:hover span { color: var(--text); }
 .source-note { margin: 20px 0 0; color: var(--muted); font-size: 14px; }
