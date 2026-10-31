@@ -4,6 +4,10 @@ All notable changes to this project are documented here.
 Entries are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 ## [Unreleased]
 
+### 🐛 Bug Fixes
+
+- Improve website accessibility and performance (#98)
+
 ### 💼 Other
 
 - **deps:** Bump the github-actions group with 2 updates (#89)
@@ -23,6 +27,8 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md (#91)
 - Bump action pins and install prebuilt dev tools (#94)
 - Migrate git hooks to hk (#96)
+- **changelog:** Sync CHANGELOG.md (#95)
+- Let the tap update the Homebrew cask (#100)
 ## [1.1.4] - 2026-10-17
 
 ### 🐛 Bug Fixes
