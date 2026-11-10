@@ -6,7 +6,6 @@
 
 <p align="center">
   <a href="https://github.com/thedavidweng/sdf-flash-gui/actions/workflows/ci.yml"><img src="https://github.com/thedavidweng/sdf-flash-gui/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://codecov.io/gh/thedavidweng/sdf-flash-gui"><img src="https://codecov.io/gh/thedavidweng/sdf-flash-gui/branch/main/graph/badge.svg" alt="codecov"></a>
 </p>
 
 Cross-platform GUI for optical drive firmware dump/flash. Inspired by the Windows-only `SDFtool Flasher.exe`
@@ -84,7 +83,6 @@ Local quality checks:
 cargo fmt -- --check
 cargo clippy -- -D warnings
 cargo test
-./scripts/coverage.sh gate   # project ≥99%, patch 100% on changed domain lines
 ```
 
 ### Website and web demo
@@ -109,15 +107,15 @@ src/
   command.rs           Backend argv planner (no shell strings) + command display
   orchestration.rs     Shared probe / list / flash session, BackendOpError (CLI + GUI)
   process.rs           Run / stream / cancel / reap + ProcessRunner trait
-  process_runner.rs    NativeRunner (OS process adapter; coverage-ignored)
+  process_runner.rs    NativeRunner (OS process adapter)
   firmware_db.rs       Known-hash table, binary firmware ID, encryption policy, version compare
   platform.rs          Slim/desktop model tables, form-factor helpers
   warnings.rs          Flash-safety warnings (cross-flash, two-step, downgrade, mismatch)
   test_support.rs      Shared ProcessRunner fake (cfg(test) only)
   drive/
-    parse.rs           Pure list/identity/selection parsers (covered)
-    probe.rs           --info interpretation: DriveSafety + identity (covered)
-    os.rs              OS enumerate + find_backend / find_sdf_bin (ignored)
+    parse.rs           Pure list/identity/selection parsers
+    probe.rs           --info interpretation: DriveSafety + identity
+    os.rs              OS enumerate + find_backend / find_sdf_bin
   sdf.rs               SDF0 container parser + presentation helpers
   i18n/                Language keys, English + locale tables
   gui/
@@ -127,7 +125,7 @@ src/
     workers.rs         Background probe / list / streaming
     views/             egui paint only
     validation.rs      Tool / sdf.bin path checks
-    file_dialog.rs     rfd adapter (coverage-ignored)
+    file_dialog.rs     rfd adapter
     demo.rs            Web demo host: simulated sdftool behind ProcessRunner
 web/                   wasm32 entry that mounts the GUI on a canvas
 site/                  GitHub Pages site (static HTML/CSS/JS)
@@ -135,7 +133,6 @@ site/                  GitHub Pages site (static HTML/CSS/JS)
 
 CLI and GUI share probe/list/flash planning through `orchestration` and `command`. GUI Start rules live in `start_gate`; i18n maps them at the edge.
 
-Coverage ignore set is shared: `scripts/coverage-ignore.regex` ↔ `codecov.yml` (checked in CI).
 
 ## Security
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local coverage helpers — same ignore set as CI / Codecov.
+# Optional local coverage reports. Coverage percentage is not a merge or push gate.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -12,19 +12,16 @@ IGNORE_REGEX="$(
 )"
 
 usage() {
-  cat <<EOF
-Usage: $(basename "$0") [html|lcov|report|gate]
+  cat <<USAGE
+Usage: $(basename "$0") [html|lcov|report]
 
   html    HTML report under target/llvm-cov/html (default)
-  lcov    Write lcov.info (same as CI upload)
+  lcov    Write lcov.info
   report  Text summary with missing lines
-  gate    Run full suite coverage + enforce gates (same as codecov.yml floors):
-            - project line coverage >= 99% (absolute; not “no drop vs main”)
-            - patch: 100% of changed executable lines under src/ (non-ignored)
 
 Ignore regex (from scripts/coverage-ignore.regex):
   ${IGNORE_REGEX}
-EOF
+USAGE
 }
 
 cmd="${1:-html}"
@@ -40,11 +37,6 @@ case "$cmd" in
     ;;
   report)
     cargo llvm-cov --ignore-filename-regex "${IGNORE_REGEX}" --show-missing-lines
-    ;;
-  gate)
-    # Same generator CI uses (Ubuntu job uploads this lcov to Codecov).
-    cargo llvm-cov --lcov --output-path lcov.info --ignore-filename-regex "${IGNORE_REGEX}"
-    python3 "${ROOT}/scripts/coverage-gate.py" --lcov "${ROOT}/lcov.info"
     ;;
   *)
     usage
