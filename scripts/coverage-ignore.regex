@@ -1,5 +1,5 @@
 # Single source of truth for cargo-llvm-cov --ignore-filename-regex.
-# Keep in sync with codecov.yml `ignore:` (paths only; this file is the regex form).
+# Filename regex for optional local scripts/coverage.sh reports.
 #
 # Format: one pattern per non-comment line. scripts/coverage.sh and CI join
 # lines with `|` (do NOT put a full already-joined regex on one line, and do

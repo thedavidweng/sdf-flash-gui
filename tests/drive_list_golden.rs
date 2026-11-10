@@ -16,8 +16,6 @@
 //!    with OS-specific device ids (`/IOBDServices/…`, `E:`, `\\.\D:`, `/dev/sr0`).
 //! 4. **No hardware in CI** — runners have no optical drives, so OS enumeration
 //!    always returns empty; a broken multi-line parser still "passes".
-//! 5. **`src/drive.rs` is coverage-ignored** — Codecov's 100% patch gate does
-//!    not require new enumerate/parse branches to be covered.
 //!
 //! Keep these fixtures updated when adding a supported device path shape.
 

@@ -1,9 +1,6 @@
 //! Production process runner adapter.
 //!
-//! This module is **excluded from coverage metrics** (see `codecov.yml`, CI
-//! `cargo llvm-cov --ignore-filename-regex`, and `AGENTS.md`).
-//!
-//! Rationale (same class as `gui/file_dialog.rs`):
+//! Thin OS process adapter (same class as `gui/file_dialog.rs`):
 //! - Thin delegation to real OS process I/O (`run_command_*`).
 //! - Behaviour is already covered via the [`ProcessRunner`] trait with mocks
 //!   in orchestration / GUI tests, and via direct `process::` unit tests.
