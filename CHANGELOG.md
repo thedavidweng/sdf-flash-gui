@@ -12,6 +12,8 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 
 - **deps:** Bump the github-actions group with 2 updates (#89)
 - **deps:** Bump the github-actions group with 2 updates (#101)
+- **deps:** Bump rfd from 0.17.2 to 0.18.0 (#104)
+- **deps:** Bump the github-actions group with 5 updates (#105)
 
 ### 📚 Documentation
 
@@ -31,6 +33,8 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **changelog:** Sync CHANGELOG.md (#95)
 - Let the tap update the Homebrew cask (#100)
 - **deps:** Use the shared Dependabot auto-merge workflow (#102)
+- **changelog:** Sync CHANGELOG.md
+- Correct the action-gh-release pin comment to v3.0.4 (#106)
 ## [1.1.4] - 2026-10-17
 
 ### 🐛 Bug Fixes
