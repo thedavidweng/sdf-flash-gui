@@ -83,7 +83,7 @@ jobs:
           name: release-changelog
 
       # Preserve coordinated release creation and later asset replacement.
-      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.3 # zizmor: ignore[superfluous-actions]
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4 # zizmor: ignore[superfluous-actions]
         with:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: false
@@ -171,7 +171,7 @@ jobs:
           fi
 
       # Preserve coordinated release creation and later asset replacement.
-      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.3 # zizmor: ignore[superfluous-actions]
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4 # zizmor: ignore[superfluous-actions]
         if: github.ref_type == 'tag'
         with:
           tag_name: ${{ github.ref_name }}
@@ -256,7 +256,7 @@ jobs:
         run: bash scripts/package-macos.sh "${{ matrix.target }}"
 
       # Preserve coordinated release creation and later asset replacement.
-      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.3 # zizmor: ignore[superfluous-actions]
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4 # zizmor: ignore[superfluous-actions]
         if: github.ref_type == 'tag'
         with:
           tag_name: ${{ github.ref_name }}
