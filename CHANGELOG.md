@@ -7,6 +7,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 ### 🐛 Bug Fixes
 
 - Improve website accessibility and performance (#98)
+- **deps:** Bump url to 2.5.9 for RUSTSEC-2026-0592 (#109)
 
 ### 💼 Other
 
@@ -14,6 +15,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **deps:** Bump the github-actions group with 2 updates (#101)
 - **deps:** Bump rfd from 0.17.2 to 0.18.0 (#104)
 - **deps:** Bump the github-actions group with 5 updates (#105)
+- **deps:** Bump the github-actions group with 2 updates (#108)
 
 ### 📚 Documentation
 
@@ -35,6 +37,7 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 - **deps:** Use the shared Dependabot auto-merge workflow (#102)
 - **changelog:** Sync CHANGELOG.md
 - Correct the action-gh-release pin comment to v3.0.4 (#106)
+- **changelog:** Sync CHANGELOG.md (#107)
 ## [1.1.4] - 2026-10-17
 
 ### 🐛 Bug Fixes
